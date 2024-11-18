@@ -19,14 +19,16 @@ class User(db.Model):
         primaryjoin="and_(PhysicalAddress.parent_id==User.id, "
                     "PhysicalAddress.parent_type=='user')",
         uselist=False,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        back_populates="user"
     )
     contact_info = relationship(
         'ContactInfo',
         primaryjoin="and_(ContactInfo.parent_id==User.id, "
                     "ContactInfo.parent_type=='user')",
         uselist=False,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        back_populates="user"
     )
 
     def to_dict(self):
