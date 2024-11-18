@@ -13,23 +13,29 @@ class User(db.Model):
     dob = Column(Date, nullable=True)
     game_username = Column(String(255), unique=True, nullable=False)
 
-    # Relationships
+    # Adding the parent_type column explicitly
+    parent_type = Column(String(50), nullable=False, default='user')
+
+   # Relationship to PhysicalAddress
     physical_address = relationship(
         'PhysicalAddress',
-        primaryjoin="and_(PhysicalAddress.parent_id==User.id, "
-                    "PhysicalAddress.parent_type=='user')",
-        uselist=False,
-        cascade="all, delete-orphan",
-        back_populates="user"
+        back_populates='user',
+        uselist=False,  # One-to-one relationship
+        cascade="all, delete-orphan"
     )
+
+    # Relationship to ContactInfo
     contact_info = relationship(
         'ContactInfo',
-        primaryjoin="and_(ContactInfo.parent_id==User.id, "
-                    "ContactInfo.parent_type=='user')",
-        uselist=False,
-        cascade="all, delete-orphan",
-        back_populates="user"
+        back_populates='user',
+        uselist=False,  # One-to-one relationship
+        cascade="all, delete-orphan"
     )
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'user',
+        'polymorphic_on': parent_type,  # Ensure polymorphic_on points to parent_type
+    }
 
     def to_dict(self):
         return {

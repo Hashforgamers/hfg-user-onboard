@@ -14,18 +14,18 @@ class PhysicalAddress(db.Model):
     country = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True)
 
-    # Polymorphic fields
-    parent_id = Column(Integer, nullable=False)
-    parent_type = Column(String(50), nullable=False)
+    # Foreign Key to user
+    parent_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    parent_type = Column(String(50), nullable=False, default='user')  # 'user' to be used here
 
-    # Polymorphic relationships
-    user = relationship("User", primaryjoin="and_(PhysicalAddress.parent_id==User.id, "
-                                            "PhysicalAddress.parent_type=='user')", back_populates="physical_address")
-
-    __mapper_args__ = {
-        'polymorphic_identity': 'physical_address',
-        'polymorphic_on': parent_type
-    }
+    # Relationship to user
+    user = relationship(
+        'User',
+        back_populates='physical_address',
+        uselist=False,
+        cascade="all, delete-orphan",
+        single_parent=True  # Ensure only one PhysicalAddress can be linked to a user at a time
+    )
 
     def to_dict(self):
         return {
