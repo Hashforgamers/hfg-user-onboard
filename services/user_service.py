@@ -68,3 +68,7 @@ class UserService:
         if not user:
             return None
         return user
+
+    @staticmethod
+    def get_user_by_fid(user_fid):
+        return db.session.query(User).filter_by(fid=user_fid).first()

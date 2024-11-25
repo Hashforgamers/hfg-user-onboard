@@ -22,3 +22,12 @@ def get_user(user_id):
         return jsonify({"message": "User not found"}), 404
 
     return jsonify({"user": user.to_dict()})
+
+@user_blueprint.route('/users/<int:user_fid>', methods=['GET'])
+def get_user_by_fid(user_fid):
+    user = UserService.get_user_by_fid(user_fid)
+
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    return jsonify({"user": user.to_dict()})
