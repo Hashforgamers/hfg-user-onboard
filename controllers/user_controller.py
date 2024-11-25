@@ -23,7 +23,7 @@ def get_user(user_id):
 
     return jsonify({"user": user.to_dict()})
 
-@user_blueprint.route('/users/fid/<int:user_fid>', methods=['GET'])
+@user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid(user_fid):
     user = UserService.get_user_by_fid(user_fid)
 
