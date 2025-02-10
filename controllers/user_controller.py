@@ -1,12 +1,12 @@
-from flask import request, jsonify, Blueprint
+from flask import request, jsonify, Blueprint, current_app
 from services.user_service import UserService
 
 user_blueprint = Blueprint('user', __name__)
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
+    current_app.logger.debug(f"Started Processing User Onboard Request {request.json} ")
     data = request.json
-
     try:
         user = UserService.create_user(data)
         return jsonify({"message": "User created successfully", "user": user.to_dict()}), 201

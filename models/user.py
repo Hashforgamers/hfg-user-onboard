@@ -1,11 +1,11 @@
-from sqlalchemy import Column, Integer, String, Date
+from sqlalchemy import Column, Integer, String, Date, Sequence
 from sqlalchemy.orm import relationship
 from db.extensions import db
 
 class User(db.Model):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, Sequence('users_id_seq', start=1001, increment=1),primary_key=True)
     fid = Column(String(255), unique=True, nullable=False)
     avatar_path = Column(String(255), nullable=True)
     name = Column(String(255), nullable=False)
@@ -31,6 +31,17 @@ class User(db.Model):
         uselist=False,  # One-to-one relationship
         cascade="all, delete-orphan"
     )
+
+    # One-to-One relationship with PasswordManager
+    # PasswordManager relationship
+    password = relationship(
+        'PasswordManager',
+        primaryjoin="and_(foreign(PasswordManager.parent_id) == User.id, PasswordManager.parent_type == 'user')",
+        back_populates='user',
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
 
     __mapper_args__ = {
         'polymorphic_identity': 'user',
