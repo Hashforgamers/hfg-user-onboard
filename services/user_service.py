@@ -125,7 +125,7 @@ class UserService:
         """Generates credentials for the user and sends a notification email."""
         try:
             username, password = generate_credentials()
-            hashed_password = generate_password_hash(password)
+            hashed_password = password
 
             password_manager = PasswordManager(
                 userid=user.id,
