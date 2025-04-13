@@ -156,3 +156,15 @@ class UserService:
             db.session.rollback()
             current_app.logger.error(f"Failed to generate credentials and notify user: {str(e)}")
             raise Exception("Failed to generate credentials and notify user.")
+
+    @staticmethod
+    def get_user_by_fid(fid):
+        """Fetch a user by FID."""
+        try:
+            user = User.query.filter_by(fid=fid).first()
+            if not user:
+                raise ValueError(f"No user found with FID: {fid}")
+            return user
+        except Exception as e:
+            current_app.logger.error(f"Error fetching user by FID {fid}: {str(e)}")
+            raise Exception("Failed to fetch user.")
