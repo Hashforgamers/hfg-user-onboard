@@ -8,7 +8,10 @@ from flask import current_app
 from datetime import datetime
 import re
 from flask import current_app
+import random, string
 
+def generate_referral_code(length=6):
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 def generate_credentials(length=8):
     letters = string.ascii_letters

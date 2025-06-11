@@ -4,7 +4,7 @@ from models.user import User
 from models.contactInfo import ContactInfo
 from models.physicalAddress import PhysicalAddress
 from flask import current_app
-from .utils import generate_credentials, send_email
+from .utils import generate_credentials, send_email, generate_referral_code
 from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
 from models.referralTracking import ReferralTracking
