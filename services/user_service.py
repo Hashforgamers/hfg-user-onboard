@@ -7,42 +7,10 @@ from flask import current_app
 from .utils import generate_credentials, send_email
 from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
+from models.referralTracking import ReferralTracking
 
 class UserService:
-
-    # @staticmethod
-    # def create_user(data):
-    #     """Creates a new user and related entities in the database."""
-    #     try:
-    #         dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
-
-    #         user = User(
-    #             fid=data['fid'],
-    #             avatar_path=data.get('avatar_path'),
-    #             name=data['name'],
-    #             gender=data.get('gender'),
-    #             dob=dob,
-    #             game_username=data['gameUserName'],
-    #             parent_type="user"
-    #         )
-
-    #         # Add related objects
-    #         UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
-    #         UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
-
-    #         db.session.add(user)
-    #         db.session.commit()
-
-    #         # Generate credentials and notify the user
-    #         UserService.generate_credentials_and_notify(user)
-
-    #         return user
-
-    #     except Exception as e:
-    #         db.session.rollback()
-    #         current_app.logger.error(f"Failed to create user: {str(e)}")
-    #         raise Exception(f"Failed to create user: {str(e)}")
-
+    
     @staticmethod
     def create_user(data):
         """Creates a new user and related entities in the database, with validations."""
@@ -60,6 +28,14 @@ class UserService:
             # Parse date of birth if provided
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
 
+            referral_input = data.get('referral_code')
+
+            # Generate a unique referral code
+            while True:
+                code = generate_referral_code()
+                if not User.query.filter_by(referral_code=code).first():
+                    break
+
             # Create the User object
             user = User(
                 fid=data['fid'],
@@ -68,12 +44,21 @@ class UserService:
                 gender=data.get('gender'),
                 dob=dob,
                 game_username=data['gameUserName'],
-                parent_type="user"
+                parent_type="user",
+                referral_code=code
             )
 
             # Add related objects
             UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
             UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
+
+            if referral_input:
+                referrer = User.query.filter_by(referral_code=referral_input).first()
+                if referrer and referrer.referral_code != code:  # Prevent self-referral
+                    user.referred_by = referral_input
+                    # Optionally reward both
+                    referrer.referral_rewards += 1
+                    db.session.add(ReferralTracking(referrer_code=referrer.referral_code, referred_user_id=user.id))
 
             db.session.add(user)
             db.session.commit()
