@@ -46,3 +46,13 @@ def create_voucher_for_referral_points(user_id):
         }), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@user_blueprint.route('/users/<int:user_id>/voucher', methods=['GET'])
+def get_voucher_by_user(user_id):
+    try:
+        vouchers = UserService.get_user_vouchers(user_id)
+        return jsonify({
+            "vouchers": [v.to_dict() for v in vouchers],
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400

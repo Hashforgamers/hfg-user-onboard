@@ -17,3 +17,13 @@ class Voucher(db.Model):
 
     def __repr__(self):
         return f"<Voucher code={self.code} user_id={self.user_id} active={self.is_active}>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "code": self.code,
+            "user_id": self.user_id,
+            "discount_percentage": self.discount_percentage,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat()
+        }

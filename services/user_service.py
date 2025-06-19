@@ -169,3 +169,7 @@ class UserService:
         except Exception as e:
             current_app.logger.error(f"Error fetching user by FID {fid}: {str(e)}")
             raise Exception("Failed to fetch user.")
+
+    @staticmethod
+    def get_user_vouchers(user_id):
+        return Voucher.query.filter(Voucher.user_id == user_id).all()
