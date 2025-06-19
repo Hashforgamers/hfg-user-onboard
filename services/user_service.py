@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from db.extensions import db
 from models.user import User
 from models.contactInfo import ContactInfo
@@ -8,6 +8,7 @@ from .utils import generate_credentials, send_email, generate_referral_code
 from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
 from models.referralTracking import ReferralTracking
+from models.voucher import Voucher  # Import your Voucher model
 
 class UserService:
     
@@ -77,7 +78,6 @@ class UserService:
             current_app.logger.error(f"Failed to create user: {str(e)}")
             raise Exception("An unexpected error occurred while creating the user.")
 
-
     @staticmethod
     def _add_physical_address(user, physical_address_data):
         if physical_address_data:
@@ -144,12 +144,28 @@ class UserService:
 
     @staticmethod
     def get_user_by_fid(fid):
-        """Fetch a user by FID."""
+        """Fetch a user by FID and expire old vouchers (older than 1 month)."""
         try:
             user = User.query.filter_by(fid=fid).first()
             if not user:
                 raise ValueError(f"No user found with FID: {fid}")
+
+            # Expire user's vouchers older than 1 month
+            one_month_ago = datetime.utcnow() - timedelta(days=30)
+            expired_vouchers = Voucher.query.filter(
+                Voucher.user_id == user.id,
+                Voucher.is_active == True,
+                Voucher.created_at < one_month_ago
+            ).all()
+
+            for voucher in expired_vouchers:
+                voucher.is_active = False
+
+            if expired_vouchers:
+                db.session.commit()
+
             return user
+
         except Exception as e:
             current_app.logger.error(f"Error fetching user by FID {fid}: {str(e)}")
             raise Exception("Failed to fetch user.")

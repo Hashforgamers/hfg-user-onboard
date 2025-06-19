@@ -1,5 +1,6 @@
 from flask import request, jsonify, Blueprint, current_app
 from services.user_service import UserService
+from services.referral_service import create_voucher_if_eligible
 
 user_blueprint = Blueprint('user', __name__)
 
@@ -31,3 +32,17 @@ def get_user_by_fid(user_fid):
         return jsonify({"message": "User not found"}), 404
 
     return jsonify({"user": user.to_dict()})
+
+@user_blueprint.route('/users/<int:user_id>/create-voucher', methods=['POST'])
+def create_voucher_for_referral_points(user_id):
+    try:
+        voucher = create_voucher_if_eligible(user_id)
+        return jsonify({
+            "message": "Voucher created successfully",
+            "voucher": {
+                "code": voucher.code,
+                "discount": voucher.discount_percentage
+            }
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
