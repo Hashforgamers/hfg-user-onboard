@@ -65,5 +65,13 @@ class User(db.Model):
                 "electronicAddress": self.contact_info.to_dict() if self.contact_info else None,
             },
             "referralCode": self.referral_code,
-            "referralRewards" : self.referral_rewards
+            "referralRewards": self.referral_rewards,
+            "vouchers": [
+                {
+                    "code": v.code,
+                    "discountPercentage": v.discount_percentage,
+                    "isActive": v.is_active,
+                    "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M')
+                } for v in self.vouchers
+            ]
         }
