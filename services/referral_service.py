@@ -2,7 +2,7 @@
 
 from models.user import User
 from models.voucher import Voucher
-from extension import db
+from db.extensions import db
 import random
 import string
 
