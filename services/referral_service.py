@@ -6,7 +6,7 @@ from db.extensions import db
 import random
 import string
 
-def create_voucher_if_eligible(user_id, required_points=100):
+def create_voucher_if_eligible(user_id, required_points=1):
     user = User.query.get(user_id)
     if not user:
         raise Exception("User not found")
