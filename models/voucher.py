@@ -1,7 +1,7 @@
 # models/voucher.py
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
 from datetime import datetime
-from app.extension import db
+from db.extensions import db
 
 class Voucher(db.Model):
     __tablename__ = 'vouchers'
