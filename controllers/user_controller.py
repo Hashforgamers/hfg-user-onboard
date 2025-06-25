@@ -2,6 +2,7 @@ from flask import request, jsonify, Blueprint, current_app
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
+from db.extensions import db
 
 user_blueprint = Blueprint('user', __name__)
 
