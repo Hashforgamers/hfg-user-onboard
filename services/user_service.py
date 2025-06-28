@@ -1,48 +1,17 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from db.extensions import db
 from models.user import User
 from models.contactInfo import ContactInfo
 from models.physicalAddress import PhysicalAddress
 from flask import current_app
-from .utils import generate_credentials, send_email
+from .utils import generate_credentials, send_email, generate_referral_code
 from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
+from models.referralTracking import ReferralTracking
+from models.voucher import Voucher  # Import your Voucher model
 
 class UserService:
-
-    # @staticmethod
-    # def create_user(data):
-    #     """Creates a new user and related entities in the database."""
-    #     try:
-    #         dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
-
-    #         user = User(
-    #             fid=data['fid'],
-    #             avatar_path=data.get('avatar_path'),
-    #             name=data['name'],
-    #             gender=data.get('gender'),
-    #             dob=dob,
-    #             game_username=data['gameUserName'],
-    #             parent_type="user"
-    #         )
-
-    #         # Add related objects
-    #         UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
-    #         UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
-
-    #         db.session.add(user)
-    #         db.session.commit()
-
-    #         # Generate credentials and notify the user
-    #         UserService.generate_credentials_and_notify(user)
-
-    #         return user
-
-    #     except Exception as e:
-    #         db.session.rollback()
-    #         current_app.logger.error(f"Failed to create user: {str(e)}")
-    #         raise Exception(f"Failed to create user: {str(e)}")
-
+    
     @staticmethod
     def create_user(data):
         """Creates a new user and related entities in the database, with validations."""
@@ -60,6 +29,14 @@ class UserService:
             # Parse date of birth if provided
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
 
+            referral_input = data.get('referral_code')
+
+            # Generate a unique referral code
+            while True:
+                code = generate_referral_code()
+                if not User.query.filter_by(referral_code=code).first():
+                    break
+
             # Create the User object
             user = User(
                 fid=data['fid'],
@@ -68,12 +45,21 @@ class UserService:
                 gender=data.get('gender'),
                 dob=dob,
                 game_username=data['gameUserName'],
-                parent_type="user"
+                parent_type="user",
+                referral_code=code
             )
 
             # Add related objects
             UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
             UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
+
+            if referral_input:
+                referrer = User.query.filter_by(referral_code=referral_input).first()
+                if referrer and referrer.referral_code != code:  # Prevent self-referral
+                    user.referred_by = referral_input
+                    # Optionally reward both
+                    referrer.referral_rewards += 1
+                    db.session.add(ReferralTracking(referrer_code=referrer.referral_code, referred_user_id=user.id))
 
             db.session.add(user)
             db.session.commit()
@@ -91,7 +77,6 @@ class UserService:
             db.session.rollback()
             current_app.logger.error(f"Failed to create user: {str(e)}")
             raise Exception("An unexpected error occurred while creating the user.")
-
 
     @staticmethod
     def _add_physical_address(user, physical_address_data):
@@ -159,12 +144,32 @@ class UserService:
 
     @staticmethod
     def get_user_by_fid(fid):
-        """Fetch a user by FID."""
+        """Fetch a user by FID and expire old vouchers (older than 1 month)."""
         try:
             user = User.query.filter_by(fid=fid).first()
             if not user:
                 raise ValueError(f"No user found with FID: {fid}")
+
+            # Expire user's vouchers older than 1 month
+            one_month_ago = datetime.utcnow() - timedelta(days=30)
+            expired_vouchers = Voucher.query.filter(
+                Voucher.user_id == user.id,
+                Voucher.is_active == True,
+                Voucher.created_at < one_month_ago
+            ).all()
+
+            for voucher in expired_vouchers:
+                voucher.is_active = False
+
+            if expired_vouchers:
+                db.session.commit()
+
             return user
+
         except Exception as e:
             current_app.logger.error(f"Error fetching user by FID {fid}: {str(e)}")
             raise Exception("Failed to fetch user.")
+
+    @staticmethod
+    def get_user_vouchers(user_id):
+        return Voucher.query.filter(Voucher.user_id == user_id).all()

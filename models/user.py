@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Date, Sequence
+from sqlalchemy import Column, Integer, String, Date, Sequence, ForeignKey
 from sqlalchemy.orm import relationship
 from db.extensions import db
+from models.voucher import Voucher
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -42,6 +43,9 @@ class User(db.Model):
         cascade="all, delete-orphan"
     )
 
+    referral_code = Column(String(10), unique=True)
+    referred_by = Column(String(10), ForeignKey('users.referral_code'), nullable=True)
+    referral_rewards = Column(Integer, default=0)
 
     __mapper_args__ = {
         'polymorphic_identity': 'user',
@@ -60,5 +64,15 @@ class User(db.Model):
             "contact": {
                 "physicalAddress": self.physical_address.to_dict() if self.physical_address else None,
                 "electronicAddress": self.contact_info.to_dict() if self.contact_info else None,
-            }
+            },
+            "referralCode": self.referral_code,
+            "referralRewards": self.referral_rewards,
+            "vouchers": [
+                {
+                    "code": v.code,
+                    "discountPercentage": v.discount_percentage,
+                    "isActive": v.is_active,
+                    "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M')
+                } for v in self.vouchers
+            ]
         }
