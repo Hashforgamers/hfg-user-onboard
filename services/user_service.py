@@ -127,15 +127,15 @@ class UserService:
 
             # Send email notification
             current_app.logger.info(f"Mail generation started to user: {user.name}")
-            send_email(
-                subject='Your Account Credentials',
-                recipients=[user.contact_info.email],
-                body=(
-                    f"Hello {user.name},\n\n"
-                    f"Your account has been created.\nUsername: {username}\nPassword: {password}\n\n"
-                )
-            )
-            current_app.logger.info(f"Credentials sent to user: {user.name}")
+            # send_email(
+            #     subject='Your Account Credentials',
+            #     recipients=[user.contact_info.email],
+            #     body=(
+            #         f"Hello {user.name},\n\n"
+            #         f"Your account has been created.\nUsername: {username}\nPassword: {password}\n\n"
+            #     )
+            # )
+            # current_app.logger.info(f"Credentials sent to user: {user.name}")
 
         except Exception as e:
             db.session.rollback()
