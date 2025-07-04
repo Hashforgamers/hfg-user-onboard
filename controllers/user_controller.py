@@ -3,6 +3,8 @@ from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
 from db.extensions import db
+from models.hashWallet import HashWallet
+from models.hashWalletTransaction import HashWalletTransaction
 
 user_blueprint = Blueprint('user', __name__)
 
@@ -78,3 +80,42 @@ def get_user_hash_coins(user_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@user_blueprint.route('/users/<int:user_id>/wallet', methods=['GET'])
+def get_wallet_balance(user_id):
+    wallet = HashWallet.query.filter_by(user_id=user_id).first()
+    if not wallet:
+        return jsonify({"message": "Wallet not found"}), 404
+    return jsonify({"user_id": wallet.user_id, "balance": wallet.balance})
+
+@user_blueprint.route('/users/<int:user_id>/wallet', methods=['POST'])
+def add_wallet_balance(user_id):
+    data = request.json
+    amount = data.get('amount')
+    txn_type = data.get('type', 'top-up')  # default to 'top-up'
+    reference_id = data.get('reference_id')
+
+    if amount is None or not isinstance(amount, int) or amount <= 0:
+        return jsonify({"message": "Amount must be a positive integer"}), 400
+
+    wallet = HashWallet.query.filter_by(user_id=user_id).first()
+    if not wallet:
+        return jsonify({"message": "Wallet not found"}), 404
+
+    try:
+        wallet.balance += amount
+
+        txn = HashWalletTransaction(
+            user_id=user_id,
+            amount=amount,
+            type=txn_type,
+            reference_id=reference_id
+        )
+
+        db.session.add(txn)
+        db.session.commit()
+        return jsonify({"message": "Wallet updated", "new_balance": wallet.balance})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": "Failed to update wallet", "error": str(e)}), 500
+
