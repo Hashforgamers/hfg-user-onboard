@@ -63,6 +63,7 @@ class UserService:
                     db.session.add(ReferralTracking(referrer_code=referrer.referral_code, referred_user_id=user.id))
 
             db.session.add(user)
+            db.session.flush()  # Assigns user.id from DB without committing
 
             # CReation of Hash Wallet
             wallet = HashWallet(user_id=user.id, balance=0)
