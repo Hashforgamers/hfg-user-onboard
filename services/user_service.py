@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
 from models.referralTracking import ReferralTracking
 from models.voucher import Voucher  # Import your Voucher model
+from models.hashWallet import HashWallet
 
 class UserService:
     
@@ -62,6 +63,11 @@ class UserService:
                     db.session.add(ReferralTracking(referrer_code=referrer.referral_code, referred_user_id=user.id))
 
             db.session.add(user)
+
+            # CReation of Hash Wallet
+            wallet = HashWallet(user_id=user.id, balance=0)
+            db.session.add(wallet)
+
             db.session.commit()
 
             # Generate credentials and notify the user
