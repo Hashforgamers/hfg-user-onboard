@@ -30,12 +30,16 @@ def get_user(user_id):
 
 @user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid(user_fid):
-    user = UserService.get_user_by_fid(user_fid)
+    try:
+        user = UserService.get_user_by_fid(user_fid)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
 
-    if not user:
-        return jsonify({"message": "User not found"}), 404
+        return jsonify({"user": user.to_dict()}), 200
+    except Exception as e:
+        current_app.logger.error(f"Internal error fetching user: {e}")
+        return jsonify({"message": "Internal server error"}), 500
 
-    return jsonify({"user": user.to_dict()})
 
 @user_blueprint.route('/users/<int:user_id>/create-voucher', methods=['POST'])
 def create_voucher_for_referral_points(user_id):

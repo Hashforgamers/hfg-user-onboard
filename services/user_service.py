@@ -152,30 +152,25 @@ class UserService:
     @staticmethod
     def get_user_by_fid(fid):
         """Fetch a user by FID and expire old vouchers (older than 1 month)."""
-        try:
-            user = User.query.filter_by(fid=fid).first()
-            if not user:
-                raise ValueError(f"No user found with FID: {fid}")
+        user = User.query.filter_by(fid=fid).first()
+        if not user:
+            return None  # Don't raise here
 
-            # Expire user's vouchers older than 1 month
-            one_month_ago = datetime.utcnow() - timedelta(days=30)
-            expired_vouchers = Voucher.query.filter(
-                Voucher.user_id == user.id,
-                Voucher.is_active == True,
-                Voucher.created_at < one_month_ago
-            ).all()
+        # Expire user's vouchers older than 1 month
+        one_month_ago = datetime.utcnow() - timedelta(days=30)
+        expired_vouchers = Voucher.query.filter(
+            Voucher.user_id == user.id,
+            Voucher.is_active == True,
+            Voucher.created_at < one_month_ago
+        ).all()
 
-            for voucher in expired_vouchers:
-                voucher.is_active = False
+        for voucher in expired_vouchers:
+            voucher.is_active = False
 
-            if expired_vouchers:
-                db.session.commit()
+        if expired_vouchers:
+            db.session.commit()
 
-            return user
-
-        except Exception as e:
-            current_app.logger.error(f"Error fetching user by FID {fid}: {str(e)}")
-            raise Exception("Failed to fetch user.")
+        return user
 
     @staticmethod
     def get_user_vouchers(user_id):
