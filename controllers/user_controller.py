@@ -4,6 +4,7 @@ from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
 from db.extensions import db
 from models.hashWallet import HashWallet
+from models.fcmToken import FCMToken
 from models.hashWalletTransaction import HashWalletTransaction
 from services.firebase_service import send_notification
 
@@ -26,6 +27,32 @@ def create_user():
         return jsonify({"message": "User created successfully", "user": user.to_dict()}), 201
     except Exception as e:
         return jsonify({"message": str(e)}), 400
+
+@user_blueprint.route('/users/<int:user_id>/register-fcm-token', methods=['POST'])
+def register_fcm_token(user_id):
+    data = request.json
+    token = data.get('token')
+    platform = data.get('platform')
+
+    if not token:
+        return jsonify({'message': 'FCM token is required'}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    # Remove any previously stored FCM token (optional: per user, per token)
+    existing = FCMToken.query.filter_by(token=token).first()
+    if not existing:
+        new_token = FCMToken(user_id=user.id, token=token, platform=platform)
+        db.session.add(new_token)
+        db.session.commit()
+    else:
+        # Update timestamp or platform if needed
+        existing.platform = platform
+        db.session.commit()
+
+    return jsonify({'message': 'FCM token registered'}), 200
 
 
 @user_blueprint.route('/users/<int:user_id>', methods=['GET'])
