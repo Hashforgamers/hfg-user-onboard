@@ -15,3 +15,5 @@ class Config:
     MAIL_USERNAME = os.getenv("MAIL_USERNAME")  # Your SMTP username
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")  # Your SMTP password
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "no-reply@hashforgamers.co.in")
+
+    FIREBASE_KEY = os.getenv('FIREBASE_KEY') 

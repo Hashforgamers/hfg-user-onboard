@@ -5,8 +5,17 @@ from services.referral_service import create_voucher_if_eligible
 from db.extensions import db
 from models.hashWallet import HashWallet
 from models.hashWalletTransaction import HashWalletTransaction
+from services.firebase_service import send_notification
 
 user_blueprint = Blueprint('user', __name__)
+
+@user_blueprint.route("/notify-user", methods=["POST"])
+def notify_user():
+    token = request.json["token"]  # Lookup token in DB ideally
+    title = request.json.get("title", "Notification")
+    message = request.json.get("message", "You have a new message!")
+    send_notification(token, title, message)
+    return jsonify({"status": "Notification sent"})
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
