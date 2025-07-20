@@ -1,10 +1,15 @@
+# firebase_service.py
 import firebase_admin
 from firebase_admin import credentials, messaging
 from flask import current_app
 
-# Initialize Firebase Admin SDK (only once)
-cred = credentials.Certificate(current_app.config['FIREBASE_KEY'])
-firebase_admin.initialize_app(cred)
+firebase_app = None  # Global variable to store the initialized app
+
+def init_firebase():
+    global firebase_app
+    if not firebase_app:
+        cred = credentials.Certificate(current_app.config['FIREBASE_KEY'])
+        firebase_app = firebase_admin.initialize_app(cred)
 
 def send_notification(token, title, body, data=None):
     message = messaging.Message(
@@ -13,7 +18,7 @@ def send_notification(token, title, body, data=None):
             body=body,
         ),
         token=token,
-        data=data or {},  # Optional custom payload
+        data=data or {},
     )
     response = messaging.send(message)
     print('Successfully sent message:', response)
