@@ -5,6 +5,7 @@ from services.referral_service import create_voucher_if_eligible
 from db.extensions import db
 from models.hashWallet import HashWallet
 from models.fcmToken import FCMToken
+from models.user import User
 from models.hashWalletTransaction import HashWalletTransaction
 from services.firebase_service import send_notification
 
