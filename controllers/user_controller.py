@@ -1,7 +1,8 @@
 from flask import request, jsonify, Blueprint, current_app
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
-from services.referral_service import create_voucher_if_eligible, notify_user_all_tokens
+from services.referral_service import create_voucher_if_eligible
+from services.firebase_service import notify_user_all_tokens
 from db.extensions import db
 from models.hashWallet import HashWallet
 from models.fcmToken import FCMToken
