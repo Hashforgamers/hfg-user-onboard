@@ -22,3 +22,11 @@ def send_notification(token, title, body, data=None):
     )
     response = messaging.send(message)
     print('Successfully sent message:', response)
+
+def notify_user_all_tokens(user, title, message):
+    """
+    Send an FCM notification to all of a user's registered devices.
+    """
+    if user and user.fcm_tokens:
+        for token_obj in user.fcm_tokens:
+            send_notification(token_obj.token, title, message)

@@ -1,7 +1,7 @@
 from flask import request, jsonify, Blueprint, current_app
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
-from services.referral_service import create_voucher_if_eligible
+from services.referral_service import create_voucher_if_eligible, notify_user_all_tokens
 from db.extensions import db
 from models.hashWallet import HashWallet
 from models.fcmToken import FCMToken
@@ -42,24 +42,20 @@ def register_fcm_token(user_id):
     if not user:
         return jsonify({'message': 'User not found'}), 404
 
-    # Remove any previously stored FCM token (optional: per user, per token)
     existing = FCMToken.query.filter_by(token=token).first()
     if not existing:
         new_token = FCMToken(user_id=user.id, token=token, platform=platform)
         db.session.add(new_token)
         db.session.commit()
     else:
-        # Update timestamp or platform if needed
         existing.platform = platform
         db.session.commit()
 
     return jsonify({'message': 'FCM token registered'}), 200
 
-
 @user_blueprint.route('/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
     user = UserService.get_user(user_id)
-
     if not user:
         return jsonify({"message": "User not found"}), 404
 
@@ -77,11 +73,19 @@ def get_user_by_fid(user_fid):
         current_app.logger.error(f"Internal error fetching user: {e}")
         return jsonify({"message": "Internal server error"}), 500
 
-
 @user_blueprint.route('/users/<int:user_id>/create-voucher', methods=['POST'])
 def create_voucher_for_referral_points(user_id):
     try:
         voucher = create_voucher_if_eligible(user_id)
+        # --- FCM Notification on voucher creation ---
+        user = User.query.get(user_id)
+        if user:
+            notify_user_all_tokens(
+                user,
+                "Voucher Created!",
+                f"You have earned a voucher: {voucher.code} for {voucher.discount_percentage}% off! Check your rewards."
+            )
+        # ---
         return jsonify({
             "message": "Voucher created successfully",
             "voucher": {
@@ -122,6 +126,49 @@ def get_user_hash_coins(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+@user_blueprint.route('/users/<int:user_id>/hash-coins', methods=['POST'])
+def add_hash_coins(user_id):
+    """
+    Example: Add hash coins to user and notify.
+    {
+        "amount": 500
+    }
+    """
+    data = request.json
+    amount = data.get('amount')
+    if not amount or not isinstance(amount, int) or amount <= 0:
+        return jsonify({"message": "Amount must be a positive integer"}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    try:
+        user_hash_coin = db.session.query(UserHashCoin).filter_by(user_id=user_id).first()
+        if not user_hash_coin:
+            user_hash_coin = UserHashCoin(user_id=user_id, hash_coins=amount)
+            db.session.add(user_hash_coin)
+        else:
+            user_hash_coin.hash_coins += amount
+
+        db.session.commit()
+
+        # --- FCM Notification on Hash Coins addition ---
+        notify_user_all_tokens(
+            user,
+            "Congrats!",
+            f"You have received {amount} Hash Coins. Total Hash Coins: {user_hash_coin.hash_coins}."
+        )
+        # ---
+        return jsonify({
+            "user_id": user_id,
+            "new_hash_coins": user_hash_coin.hash_coins,
+            "message": f"{amount} Hash Coins credited"
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @user_blueprint.route('/users/<int:user_id>/wallet', methods=['GET'])
 def get_wallet_balance(user_id):
     wallet = HashWallet.query.filter_by(user_id=user_id).first()
@@ -143,6 +190,10 @@ def add_wallet_balance(user_id):
     if not wallet:
         return jsonify({"message": "Wallet not found"}), 404
 
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
     try:
         wallet.balance += amount
 
@@ -155,8 +206,16 @@ def add_wallet_balance(user_id):
 
         db.session.add(txn)
         db.session.commit()
+
+        # --- FCM Notification on wallet top-up/payment ---
+        notify_user_all_tokens(
+            user,
+            "Payment Successful",
+            f"Your wallet has been topped up with {amount} coins. New balance: {wallet.balance}."
+        )
+        # ---
+
         return jsonify({"message": "Wallet updated", "new_balance": wallet.balance})
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Failed to update wallet", "error": str(e)}), 500
-
