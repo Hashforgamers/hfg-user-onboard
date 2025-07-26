@@ -12,6 +12,7 @@ from services.firebase_service import send_notification
 from models.cafePass import CafePass
 from models.passType import PassType
 from models.userPass import UserPass
+from datetime import datetime
 
 user_blueprint = Blueprint('user', __name__)
 
