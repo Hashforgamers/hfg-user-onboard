@@ -14,7 +14,7 @@ services:
       - MAIL_USERNAME=support@hashforgamers.co.in
       - MAIL_PASSWORD=h3b:@yasDm
       - MAIL_DEFAULT_SENDER=support@hashforgamers.co.in
-      - FIREBASE_KEY=/etc/secrets/hash-ee6fc-firebase-adminsdk-qhlfo-ee237ba01b.json
+      - FIREBASE_KEY=<<placeholder>>
     volumes:
       - .:/app
     command: ["python", "app.py"]

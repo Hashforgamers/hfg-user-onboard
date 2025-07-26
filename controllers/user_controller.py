@@ -9,6 +9,9 @@ from models.fcmToken import FCMToken
 from models.user import User
 from models.hashWalletTransaction import HashWalletTransaction
 from services.firebase_service import send_notification
+from models.cafePass import CafePass
+from models.passType import PassType
+from models.userPass import UserPass
 
 user_blueprint = Blueprint('user', __name__)
 
@@ -220,3 +223,45 @@ def add_wallet_balance(user_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Failed to update wallet", "error": str(e)}), 500
+
+@user_blueprint.route("/user/<int:user_id>/purchase_pass", methods=["POST"])
+def user_purchase_pass(user_id):
+    data = request.json
+    cafe_pass_id = data["cafe_pass_id"]
+    start_date = datetime.utcnow().date()
+    cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
+    valid_to = start_date + timedelta(days=cafe_pass.days_valid)
+
+    user_pass = UserPass(
+        user_id=user_id,
+        cafe_pass_id=cafe_pass_id,
+        valid_from=start_date,
+        valid_to=valid_to,
+        is_active=True
+    )
+    db.session.add(user_pass)
+    db.session.commit()
+    return jsonify({"message": "Pass purchased", "valid_to": valid_to.isoformat()}), 200
+
+# For payment, you can integrate wallet/payment logic here as needed!
+
+
+@user_blueprint.route("/user/<int:user_id>/passes", methods=["GET"])
+def list_user_passes(user_id):
+    today = datetime.utcnow().date()
+    passes = UserPass.query.join(CafePass).filter(
+        UserPass.user_id==user_id,
+        UserPass.is_active==True,
+        UserPass.valid_to>=today
+    ).all()
+    return jsonify([
+        {
+            "id": up.id,
+            "cafe_pass_id": up.cafe_pass_id,
+            "cafe_pass_name": up.cafe_pass.name,
+            "vendor_id": up.cafe_pass.vendor_id,
+            "valid_from": up.valid_from.isoformat(),
+            "valid_to": up.valid_to.isoformat(),
+            "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None
+        } for up in passes
+    ])
