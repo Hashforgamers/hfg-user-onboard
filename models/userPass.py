@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, Date, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
+from db.extensions import db
 
 class UserPass(db.Model):
     __tablename__ = 'user_passes'
