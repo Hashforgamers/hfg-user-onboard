@@ -12,7 +12,8 @@ from services.firebase_service import send_notification
 from models.cafePass import CafePass
 from models.passType import PassType
 from models.userPass import UserPass
-from datetime import datetime
+from datetime import datetime, timedelta
+from flask import jsonify
 
 user_blueprint = Blueprint('user', __name__)
 
@@ -228,23 +229,57 @@ def add_wallet_balance(user_id):
 @user_blueprint.route("/user/<int:user_id>/purchase_pass", methods=["POST"])
 def user_purchase_pass(user_id):
     data = request.json
-    cafe_pass_id = data["cafe_pass_id"]
-    start_date = datetime.utcnow().date()
-    cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
-    valid_to = start_date + timedelta(days=cafe_pass.days_valid)
+    cafe_pass_id = data.get("cafe_pass_id")
+    payment_id = data.get("payment_id")  # <-- extract payment_id from frontend/client
 
-    user_pass = UserPass(
-        user_id=user_id,
-        cafe_pass_id=cafe_pass_id,
-        valid_from=start_date,
-        valid_to=valid_to,
-        is_active=True
-    )
-    db.session.add(user_pass)
-    db.session.commit()
-    return jsonify({"message": "Pass purchased", "valid_to": valid_to.isoformat()}), 200
+    if not cafe_pass_id:
+        return jsonify({"message": "cafe_pass_id is required"}), 400
 
-# For payment, you can integrate wallet/payment logic here as needed!
+    try:
+        start_date = datetime.utcnow().date()
+        cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
+        valid_to = start_date + timedelta(days=cafe_pass.days_valid)
+
+        # Create UserPass record
+        user_pass = UserPass(
+            user_id=user_id,
+            cafe_pass_id=cafe_pass_id,
+            valid_from=start_date,
+            valid_to=valid_to,
+            is_active=True
+        )
+        db.session.add(user_pass)
+
+        # Optionally, fetch user for user_name
+        user = User.query.filter_by(id=user_id).first()
+        user_name = user.name if user else ""
+
+        # Create Transaction record for pass purchase
+        transaction = Transaction(
+            booking_id=None,  # No booking linked here
+            vendor_id=cafe_pass.vendor_id,
+            user_id=user_id,
+            booked_date=start_date,
+            booking_date=start_date,
+            booking_time=datetime.utcnow().time(),
+            user_name=user_name,
+            amount=cafe_pass.price,
+            original_amount=cafe_pass.price,
+            discounted_amount=0.0,
+            mode_of_payment=data.get("payment_mode", "online"),
+            booking_type="pass_purchase",
+            settlement_status="pending",
+            reference_id=payment_id  # <-- save payment_id!
+        )
+        db.session.add(transaction)
+
+        db.session.commit()
+        return jsonify({"message": "Pass purchased", "valid_to": valid_to.isoformat()})
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
+        return jsonify({"error": "Failed to complete pass purchase", "details": str(e)}), 500
 
 
 @user_blueprint.route("/user/<int:user_id>/passes", methods=["GET"])
