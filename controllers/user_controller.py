@@ -12,6 +12,7 @@ from services.firebase_service import send_notification
 from models.vendor import Vendor
 from models.cafePass import CafePass
 from models.passType import PassType
+from models.transaction import Transaction
 from models.userPass import UserPass
 from datetime import datetime, timedelta
 from flask import jsonify
