@@ -9,6 +9,7 @@ from models.fcmToken import FCMToken
 from models.user import User
 from models.hashWalletTransaction import HashWalletTransaction
 from services.firebase_service import send_notification
+from models.vendor import Vendor
 from models.cafePass import CafePass
 from models.passType import PassType
 from models.userPass import UserPass
