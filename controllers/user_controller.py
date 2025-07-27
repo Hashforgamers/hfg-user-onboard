@@ -301,3 +301,39 @@ def list_user_passes(user_id):
             "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None
         } for up in passes
     ])
+
+@user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
+def user_available_passes(user_id):
+    today = datetime.utcnow().date()
+
+    # 1. Find all passes the user currently owns that are still valid and active
+    active_user_passes = db.session.query(UserPass.cafe_pass_id)\
+        .filter(
+            UserPass.user_id == user_id,
+            UserPass.is_active == True,
+            UserPass.valid_to >= today
+        ).all()
+    owned_pass_ids = set([row[0] for row in active_user_passes])
+
+    # 2. List all active passes (global and vendor) not already owned by user
+    available_passes = CafePass.query \
+        .filter(CafePass.is_active == True) \
+        .filter(~CafePass.id.in_(owned_pass_ids)) \
+        .all()
+
+    # 3. Format response
+    result = []
+    for p in available_passes:
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "price": p.price,
+            "days_valid": p.days_valid,
+            "description": p.description,
+            "pass_type": p.pass_type.name if p.pass_type else None,
+            "vendor_id": p.vendor_id,
+            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",  # Or leave null for platform pass
+        })
+
+    return jsonify(result), 200
+
