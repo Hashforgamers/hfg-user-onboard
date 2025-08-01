@@ -341,10 +341,7 @@ def user_all_passes(user_id):
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
-            "already_purchased": bool(up),
-            "user_pass_id": up.id if up else None,
-            "valid_from": up.valid_from.isoformat() if up else None,
-            "valid_to": up.valid_to.isoformat() if up else None,
+            "already_purchased": bool(up)
         })
     return jsonify(result), 200
 
