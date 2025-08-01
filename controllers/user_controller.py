@@ -14,6 +14,9 @@ from models.cafePass import CafePass
 from models.passType import PassType
 from models.transaction import Transaction
 from models.userPass import UserPass
+from models.extraServiceCategory import ExtraServiceCategory
+from models.extraServiceMenu import ExtraServiceMenu
+
 from datetime import datetime, timedelta
 from flask import jsonify
 
@@ -403,4 +406,66 @@ def pass_details(pass_id):
         "vendor_id": cafe_pass.vendor_id,
         "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass"
     }
+    return jsonify(result), 200
+
+@user_blueprint.route("/vendor/<int:vendor_id>/extras/categories", methods=["GET"])
+def get_extra_service_categories(vendor_id):
+    categories = ExtraServiceCategory.query.filter_by(
+        vendor_id=vendor_id,
+        is_active=True
+    ).all()
+
+    result = [{
+        "id": cat.id,
+        "name": cat.name,
+        "description": cat.description
+    } for cat in categories]
+
+    return jsonify(result), 200
+
+@user_blueprint.route("/vendor/<int:vendor_id>/extras/category/<int:category_id>/menus", methods=["GET"])
+def get_extra_service_menus(vendor_id, category_id):
+    # Confirm category belongs to this vendor and is active
+    category = ExtraServiceCategory.query.filter_by(
+        id=category_id,
+        vendor_id=vendor_id,
+        is_active=True
+    ).first_or_404()
+
+    menus = ExtraServiceMenu.query.filter_by(
+        category_id=category.id,
+        is_active=True
+    ).all()
+
+    result = [{
+        "id": menu.id,
+        "name": menu.name,
+        "price": menu.price,
+        "description": menu.description
+    } for menu in menus]
+
+    return jsonify(result), 200
+
+@user_blueprint.route("/vendor/<int:vendor_id>/extras/category/<int:category_id>/menu/<int:menu_id>", methods=["GET"])
+def get_extra_service_menu_item(vendor_id, category_id, menu_id):
+    # Validate category belongs to vendor and active
+    category = ExtraServiceCategory.query.filter_by(
+        id=category_id,
+        vendor_id=vendor_id,
+        is_active=True
+    ).first_or_404()
+
+    menu = ExtraServiceMenu.query.filter_by(
+        id=menu_id,
+        category_id=category.id,
+        is_active=True
+    ).first_or_404()
+
+    result = {
+        "id": menu.id,
+        "name": menu.name,
+        "price": menu.price,
+        "description": menu.description
+    }
+
     return jsonify(result), 200
