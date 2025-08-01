@@ -283,47 +283,23 @@ def user_purchase_pass(user_id):
         current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
         return jsonify({"error": "Failed to complete pass purchase", "details": str(e)}), 500
 
-
-@user_blueprint.route("/user/<int:user_id>/passes", methods=["GET"])
-def list_user_passes(user_id):
-    today = datetime.utcnow().date()
-    passes = UserPass.query.join(CafePass).filter(
-        UserPass.user_id==user_id,
-        UserPass.is_active==True,
-        UserPass.valid_to>=today
-    ).all()
-    return jsonify([
-        {
-            "id": up.id,
-            "cafe_pass_id": up.cafe_pass_id,
-            "cafe_pass_name": up.cafe_pass.name,
-            "vendor_id": up.cafe_pass.vendor_id,
-            "valid_from": up.valid_from.isoformat(),
-            "valid_to": up.valid_to.isoformat(),
-            "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None
-        } for up in passes
-    ])
-
 @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 def user_available_passes(user_id):
     today = datetime.utcnow().date()
+    # Pass IDs of active valid passes user owns
+    active_user_passes = db.session.query(UserPass.cafe_pass_id).filter(
+        UserPass.user_id == user_id,
+        UserPass.is_active == True,
+        UserPass.valid_to >= today
+    ).all()
+    owned_pass_ids = set(row[0] for row in active_user_passes)
 
-    # 1. Find all passes the user currently owns that are still valid and active
-    active_user_passes = db.session.query(UserPass.cafe_pass_id)\
-        .filter(
-            UserPass.user_id == user_id,
-            UserPass.is_active == True,
-            UserPass.valid_to >= today
-        ).all()
-    owned_pass_ids = set([row[0] for row in active_user_passes])
+    # Passes available and active, excluding owned
+    available_passes = CafePass.query.filter(
+        CafePass.is_active == True,
+        ~CafePass.id.in_(owned_pass_ids)
+    ).all()
 
-    # 2. List all active passes (global and vendor) not already owned by user
-    available_passes = CafePass.query \
-        .filter(CafePass.is_active == True) \
-        .filter(~CafePass.id.in_(owned_pass_ids)) \
-        .all()
-
-    # 3. Format response
     result = []
     for p in available_passes:
         result.append({
@@ -334,8 +310,100 @@ def user_available_passes(user_id):
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",  # Or leave null for platform pass
+            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass"
         })
+    return jsonify(result), 200
+
+@user_blueprint.route("/user/<int:user_id>/all_passes", methods=["GET"])
+def user_all_passes(user_id):
+    today = datetime.utcnow().date()
+
+    # User's active passes
+    user_passes = db.session.query(UserPass).filter(
+        UserPass.user_id == user_id,
+        UserPass.is_active == True,
+        UserPass.valid_to >= today
+    ).all()
+    user_pass_map = {up.cafe_pass_id: up for up in user_passes}
+
+    # All active passes
+    all_active_passes = CafePass.query.filter(CafePass.is_active == True).all()
+
+    result = []
+    for p in all_active_passes:
+        up = user_pass_map.get(p.id)
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "price": p.price,
+            "days_valid": p.days_valid,
+            "description": p.description,
+            "pass_type": p.pass_type.name if p.pass_type else None,
+            "vendor_id": p.vendor_id,
+            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "already_purchased": bool(up),
+            "user_pass_id": up.id if up else None,
+            "valid_from": up.valid_from.isoformat() if up else None,
+            "valid_to": up.valid_to.isoformat() if up else None,
+        })
+    return jsonify(result), 200
+
+@user_blueprint.route("/user/<int:user_id>/passes", methods=["GET"])
+def user_passes(user_id):
+    today = datetime.utcnow().date()
+    user_passes = UserPass.query.join(CafePass).filter(
+        UserPass.user_id == user_id,
+        UserPass.is_active == True,
+        UserPass.valid_to >= today
+    ).all()
+
+    result = [{
+        "id": up.id,
+        "cafe_pass_id": up.cafe_pass_id,
+        "cafe_pass_name": up.cafe_pass.name,
+        "vendor_id": up.cafe_pass.vendor_id,
+        "valid_from": up.valid_from.isoformat(),
+        "valid_to": up.valid_to.isoformat(),
+        "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None
+    } for up in user_passes]
 
     return jsonify(result), 200
 
+@user_blueprint.route("/user/<int:user_id>/passes/history", methods=["GET"])
+def user_passes_history(user_id):
+    today = datetime.utcnow().date()
+    expired_passes = UserPass.query.join(CafePass).filter(
+        UserPass.user_id == user_id,
+        ((UserPass.valid_to < today) | (UserPass.is_active == False))
+    ).all()
+
+    result = [{
+        "id": up.id,
+        "cafe_pass_id": up.cafe_pass_id,
+        "cafe_pass_name": up.cafe_pass.name,
+        "vendor_id": up.cafe_pass.vendor_id,
+        "valid_from": up.valid_from.isoformat(),
+        "valid_to": up.valid_to.isoformat(),
+        "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None,
+        "is_active": up.is_active
+    } for up in expired_passes]
+
+    return jsonify(result), 200
+
+@user_blueprint.route("/passes/<int:pass_id>", methods=["GET"])
+def pass_details(pass_id):
+    cafe_pass = CafePass.query.filter_by(id=pass_id, is_active=True).first()
+    if not cafe_pass:
+        return jsonify({"message": "Pass not found"}), 404
+
+    result = {
+        "id": cafe_pass.id,
+        "name": cafe_pass.name,
+        "price": cafe_pass.price,
+        "days_valid": cafe_pass.days_valid,
+        "description": cafe_pass.description,
+        "pass_type": cafe_pass.pass_type.name if cafe_pass.pass_type else None,
+        "vendor_id": cafe_pass.vendor_id,
+        "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass"
+    }
+    return jsonify(result), 200
