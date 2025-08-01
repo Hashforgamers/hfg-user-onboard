@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, ForeignKey, String, Boolean
 from sqlalchemy.orm import relationship
-from app.extension.extensions import db
+from db.extensions import db
 
 class ExtraServiceCategory(db.Model):
     __tablename__ = 'extra_service_categories'

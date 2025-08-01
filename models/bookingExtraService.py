@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, ForeignKey, Float
 from sqlalchemy.orm import relationship
-from app.extension.extensions import db
+from db.extensions import db
 
 class BookingExtraService(db.Model):
     __tablename__ = 'booking_extra_services'
