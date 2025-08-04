@@ -14,6 +14,7 @@ services:
       - MAIL_USERNAME=support@hashforgamers.co.in
       - MAIL_PASSWORD=h3b:@yasDm
       - MAIL_DEFAULT_SENDER=support@hashforgamers.co.in
+      - FIREBASE_KEY=<<placeholder>>
     volumes:
       - .:/app
     command: ["python", "app.py"]
