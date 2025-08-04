@@ -12,4 +12,5 @@ class ExtraServiceMenu(db.Model):
     description = Column(String(500))
     is_active = Column(Boolean, default=True)
 
+    images = relationship('ExtraServiceMenuImage', back_populates='menu_item', cascade='all, delete-orphan')
     category = relationship('ExtraServiceCategory', back_populates='menus')

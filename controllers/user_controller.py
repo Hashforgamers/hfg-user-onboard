@@ -16,6 +16,9 @@ from models.transaction import Transaction
 from models.userPass import UserPass
 from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
+# Add this line to your existing imports at the top of the file
+from models.extraServiceMenuImage import ExtraServiceMenuImage
+
 
 from datetime import datetime, timedelta
 from flask import jsonify
@@ -469,3 +472,59 @@ def get_extra_service_menu_item(vendor_id, category_id, menu_id):
     }
 
     return jsonify(result), 200
+
+
+@user_blueprint.route("/vendor/<int:vendor_id>/extraService", methods=["GET"])
+def get_extra_service(vendor_id):
+    """
+    Get all extra service categories with their menu items for a specific vendor
+    Returns categories with nested menus including image URLs
+    """
+    try:
+        categories = ExtraServiceCategory.query.filter_by(
+            vendor_id=vendor_id,
+            is_active=True
+        ).all()
+
+        result = []
+        for category in categories:
+            # Get active menu items for this category
+            menus = ExtraServiceMenu.query.filter_by(
+                category_id=category.id,
+                is_active=True
+            ).all()
+
+            # Build menu items array with image URLs
+            menu_items = []
+            for menu in menus:
+                # Get primary image or first available image
+                image_url = None
+                menu_images = ExtraServiceMenuImage.query.filter_by(
+                    menu_id=menu.id,
+                    is_active=True
+                ).order_by(ExtraServiceMenuImage.is_primary.desc()).all()
+                
+                if menu_images:
+                    image_url = menu_images[0].image_url
+
+                menu_items.append({
+                    "id": menu.id,
+                    "name": menu.name,
+                    "price": menu.price,
+                    "description": menu.description,
+                    "image_url": image_url
+                })
+
+            # Add category with its menus
+            result.append({
+                "id": category.id,
+                "name": category.name,
+                "description": category.description,
+                "menus": menu_items
+            })
+
+        return jsonify({"categories": result}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching extra services for vendor {vendor_id}: {str(e)}")
+        return jsonify({"error": "Failed to fetch extra services", "details": str(e)}), 500
