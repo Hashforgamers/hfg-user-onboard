@@ -289,10 +289,43 @@ def user_purchase_pass(user_id):
         current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
         return jsonify({"error": "Failed to complete pass purchase", "details": str(e)}), 500
 
+# @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
+# def user_available_passes(user_id):
+#     today = datetime.utcnow().date()
+#     # Pass IDs of active valid passes user owns
+#     active_user_passes = db.session.query(UserPass.cafe_pass_id).filter(
+#         UserPass.user_id == user_id,
+#         UserPass.is_active == True,
+#         UserPass.valid_to >= today
+#     ).all()
+#     owned_pass_ids = set(row[0] for row in active_user_passes)
+
+#     # Passes available and active, excluding owned
+#     available_passes = CafePass.query.filter(
+#         CafePass.is_active == True,
+#         ~CafePass.id.in_(owned_pass_ids)
+#     ).all()
+
+#     result = []
+#     for p in available_passes:
+#         result.append({
+#             "id": p.id,
+#             "name": p.name,
+#             "price": p.price,
+#             "days_valid": p.days_valid,
+#             "description": p.description,
+#             "pass_type": p.pass_type.name if p.pass_type else None,
+#             "vendor_id": p.vendor_id,
+#             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass"
+#         })
+#     return jsonify(result), 200
+
 @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 def user_available_passes(user_id):
     today = datetime.utcnow().date()
-    # Pass IDs of active valid passes user owns
+    pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
+
+    # Find IDs of passes user already owns that are valid
     active_user_passes = db.session.query(UserPass.cafe_pass_id).filter(
         UserPass.user_id == user_id,
         UserPass.is_active == True,
@@ -300,11 +333,19 @@ def user_available_passes(user_id):
     ).all()
     owned_pass_ids = set(row[0] for row in active_user_passes)
 
-    # Passes available and active, excluding owned
-    available_passes = CafePass.query.filter(
+    # Start query for active/unowned passes
+    available_passes_query = CafePass.query.filter(
         CafePass.is_active == True,
         ~CafePass.id.in_(owned_pass_ids)
-    ).all()
+    )
+
+    # Apply type filter
+    if pass_type_filter == 'vendor':
+        available_passes_query = available_passes_query.filter(CafePass.vendor_id.isnot(None))
+    elif pass_type_filter == 'hash':
+        available_passes_query = available_passes_query.filter(CafePass.vendor_id.is_(None))
+
+    available_passes = available_passes_query.all()
 
     result = []
     for p in available_passes:
@@ -319,6 +360,7 @@ def user_available_passes(user_id):
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass"
         })
     return jsonify(result), 200
+
 
 @user_blueprint.route("/user/<int:user_id>/all_passes", methods=["GET"])
 def user_all_passes(user_id):
