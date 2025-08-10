@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 services:
   booking_service:
     build: .
@@ -7,13 +7,14 @@ services:
     environment:
       - FLASK_APP=app.py
       - FLASK_RUN_HOST=0.0.0.0
-      - DATABASE_URI=postgresql://neondb_owner:Od9UnVJ2Wvfr@ep-rapid-lake-a8yqbhfk.eastus2.azure.neon.tech/neondb?sslmode=require
+      - DATABASE_URI=postgresql://neondb_owner:Od9UnVJ2Wvfr@ep-square-star-a8fg370g-pooler.eastus2.azure.neon.tech/neondb?sslmode=require&channel_binding=require
       - DEBUG_MODE=true
       - MAIL_SERVER=smtp.hashforgamers.co.in
       - MAIL_PORT=587
       - MAIL_USERNAME=support@hashforgamers.co.in
       - MAIL_PASSWORD=h3b:@yasDm
       - MAIL_DEFAULT_SENDER=support@hashforgamers.co.in
+      - FIREBASE_KEY=<secret key>
     volumes:
       - .:/app
     command: ["python", "app.py"]
