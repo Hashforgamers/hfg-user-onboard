@@ -236,9 +236,10 @@ def add_wallet_balance(user_id):
 
 @user_blueprint.route("/user/<int:user_id>/purchase_pass", methods=["POST"])
 def user_purchase_pass(user_id):
-    data = request.json
+    data = request.get_json()
     cafe_pass_id = data.get("cafe_pass_id")
-    payment_id = data.get("payment_id")  # <-- extract payment_id from frontend/client
+    payment_id = data.get("payment_id")  
+    payment_mode = data.get("payment_mode", "online")  # online, wallet, etc.
 
     if not cafe_pass_id:
         return jsonify({"message": "cafe_pass_id is required"}), 400
@@ -248,7 +249,10 @@ def user_purchase_pass(user_id):
         cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
         valid_to = start_date + timedelta(days=cafe_pass.days_valid)
 
-        # Create UserPass record
+        # ✅ vendor_id can be None for Hash Pass
+        vendor_id = cafe_pass.vendor_id  # will be None for global passes
+
+        # Create user pass
         user_pass = UserPass(
             user_id=user_id,
             cafe_pass_id=cafe_pass_id,
@@ -258,14 +262,14 @@ def user_purchase_pass(user_id):
         )
         db.session.add(user_pass)
 
-        # Optionally, fetch user for user_name
+        # Fetch user for transaction details
         user = User.query.filter_by(id=user_id).first()
         user_name = user.name if user else ""
 
-        # Create Transaction record for pass purchase
+        # Create transaction  
         transaction = Transaction(
-            booking_id=None,  # No booking linked here
-            vendor_id=cafe_pass.vendor_id,
+            booking_id=None,  
+            vendor_id=vendor_id,  # ✅ None if Hash Pass
             user_id=user_id,
             booked_date=start_date,
             booking_date=start_date,
@@ -274,20 +278,30 @@ def user_purchase_pass(user_id):
             amount=cafe_pass.price,
             original_amount=cafe_pass.price,
             discounted_amount=0.0,
-            mode_of_payment=data.get("payment_mode", "online"),
+            mode_of_payment=payment_mode,
             booking_type="pass_purchase",
             settlement_status="pending",
-            reference_id=payment_id  # <-- save payment_id!
+            reference_id=payment_id
         )
         db.session.add(transaction)
 
         db.session.commit()
-        return jsonify({"message": "Pass purchased", "valid_to": valid_to.isoformat()})
+
+        return jsonify({
+            "message": "Pass purchased successfully",
+            "pass_type": "hash" if vendor_id is None else "vendor",
+            "vendor_id": vendor_id,
+            "valid_from": start_date.isoformat(),
+            "valid_to": valid_to.isoformat()
+        }), 201
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
-        return jsonify({"error": "Failed to complete pass purchase", "details": str(e)}), 500
+        return jsonify({
+            "error": "Failed to complete pass purchase",
+            "details": str(e)
+        }), 500
 
 # @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 # def user_available_passes(user_id):
