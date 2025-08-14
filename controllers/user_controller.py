@@ -236,9 +236,10 @@ def add_wallet_balance(user_id):
 
 @user_blueprint.route("/user/<int:user_id>/purchase_pass", methods=["POST"])
 def user_purchase_pass(user_id):
-    data = request.json
+    data = request.get_json()
     cafe_pass_id = data.get("cafe_pass_id")
-    payment_id = data.get("payment_id")  # <-- extract payment_id from frontend/client
+    payment_id = data.get("payment_id")  
+    payment_mode = data.get("payment_mode", "online")  # online, wallet, etc.
 
     if not cafe_pass_id:
         return jsonify({"message": "cafe_pass_id is required"}), 400
@@ -248,7 +249,10 @@ def user_purchase_pass(user_id):
         cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
         valid_to = start_date + timedelta(days=cafe_pass.days_valid)
 
-        # Create UserPass record
+        # ✅ vendor_id can be None for Hash Pass
+        vendor_id = cafe_pass.vendor_id  # will be None for global passes
+
+        # Create user pass
         user_pass = UserPass(
             user_id=user_id,
             cafe_pass_id=cafe_pass_id,
@@ -258,14 +262,14 @@ def user_purchase_pass(user_id):
         )
         db.session.add(user_pass)
 
-        # Optionally, fetch user for user_name
+        # Fetch user for transaction details
         user = User.query.filter_by(id=user_id).first()
         user_name = user.name if user else ""
 
-        # Create Transaction record for pass purchase
+        # Create transaction  
         transaction = Transaction(
-            booking_id=None,  # No booking linked here
-            vendor_id=cafe_pass.vendor_id,
+            booking_id=None,  
+            vendor_id=vendor_id,  # ✅ None if Hash Pass
             user_id=user_id,
             booked_date=start_date,
             booking_date=start_date,
@@ -274,20 +278,70 @@ def user_purchase_pass(user_id):
             amount=cafe_pass.price,
             original_amount=cafe_pass.price,
             discounted_amount=0.0,
-            mode_of_payment=data.get("payment_mode", "online"),
+            mode_of_payment=payment_mode,
             booking_type="pass_purchase",
             settlement_status="pending",
-            reference_id=payment_id  # <-- save payment_id!
+            reference_id=payment_id
         )
         db.session.add(transaction)
 
         db.session.commit()
-        return jsonify({"message": "Pass purchased", "valid_to": valid_to.isoformat()})
+
+        return jsonify({
+            "message": "Pass purchased successfully",
+            "pass_type": "hash" if vendor_id is None else "vendor",
+            "vendor_id": vendor_id,
+            "valid_from": start_date.isoformat(),
+            "valid_to": valid_to.isoformat()
+        }), 201
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
-        return jsonify({"error": "Failed to complete pass purchase", "details": str(e)}), 500
+        return jsonify({
+            "error": "Failed to complete pass purchase",
+            "details": str(e)
+        }), 500
+
+@user_blueprint.route('/users/<int:user_id>/transactions', methods=['GET'])
+def user_transaction_history(user_id):
+    try:
+        all_txns = []
+
+        # 1. Normal Transactions from Transaction table
+        transactions = Transaction.query.filter_by(user_id=user_id).all()
+        for t in transactions:
+            all_txns.append({
+                "id": f"txn_{t.id}",
+                "date": t.booking_date.isoformat(),
+                "time": t.booking_time.strftime("%H:%M:%S"),
+                "amount": t.amount,
+                "type": t.booking_type,  # 'booking', 'pass_purchase', etc.
+                "mode": t.mode_of_payment,
+                "status": t.settlement_status,
+                "reference_id": t.reference_id
+            })
+
+        # 2. Wallet Transactions from HashWalletTransaction table
+        wallet_txns = HashWalletTransaction.query.filter_by(user_id=user_id).all()
+        for w in wallet_txns:
+            all_txns.append({
+                "id": f"wallet_{w.id}",
+                "date": w.timestamp.date().isoformat(),
+                "time": w.timestamp.time().strftime("%H:%M:%S"),
+                "amount": w.amount,
+                "type": f"wallet_{'credit' if w.amount > 0 else 'debit'}",
+                "reference_id": w.reference_id
+            })
+
+        # Sort all by date and time (newest first)
+        all_txns.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+
+        return jsonify({"transactions": all_txns}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching transactions for user {user_id}: {e}")
+        return jsonify({"error": "Failed to fetch transaction history", "details": str(e)}), 500
 
 # @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 # def user_available_passes(user_id):
