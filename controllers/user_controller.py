@@ -204,7 +204,8 @@ def add_wallet_balance(user_id):
     if not wallet:
         return jsonify({"message": "Wallet not found"}), 404
 
-    user = User.query.get(user_id)
+    user = db.session.query(User).filter_by(id=user_id).with_for_update().first()
+
     if not user:
         return jsonify({"message": "User not found"}), 404
 
