@@ -91,16 +91,11 @@ def get_user_by_fid(user_fid):
         current_app.logger.error(f"Internal error fetching user: {e}")
         return jsonify({"message": "Internal server error"}), 500
 
-@user_blueprint.route('/user', methods=['GET'])
-def get_user_by_fid_auth():
+@user_blueprint.route('/usersNew/fid/<string:user_fid>', methods=['GET'])
+def get_user_by_fid_auth(user_fid):
     try:
-        # Extract Firebase ID token from Authorization header
-        id_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        if not id_token:
-            return jsonify({'message': 'Missing ID token'}), 401
-
         # Your user retrieval logic
-        user = UserService.get_user_by_fid(id_token)
+        user = UserService.get_user_by_fid(user_fid)
         if not user:
             return jsonify({'message': 'User not found'}), 404
 
