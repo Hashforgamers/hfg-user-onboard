@@ -92,7 +92,7 @@ def get_user_by_fid(user_fid):
         return jsonify({"message": "Internal server error"}), 500
 
 @user_blueprint.route('/user', methods=['GET'])
-def get_user_by_fid_auth(user_fid):
+def get_user_by_fid_auth():
     try:
         # Extract Firebase ID token from Authorization header
         id_token = request.headers.get('Authorization', '').replace('Bearer ', '')
