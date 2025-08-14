@@ -303,6 +303,46 @@ def user_purchase_pass(user_id):
             "details": str(e)
         }), 500
 
+@user_blueprint.route('/users/<int:user_id>/transactions', methods=['GET'])
+def user_transaction_history(user_id):
+    try:
+        all_txns = []
+
+        # 1. Normal Transactions from Transaction table
+        transactions = Transaction.query.filter_by(user_id=user_id).all()
+        for t in transactions:
+            all_txns.append({
+                "id": f"txn_{t.id}",
+                "date": t.booking_date.isoformat(),
+                "time": t.booking_time.strftime("%H:%M:%S"),
+                "amount": t.amount,
+                "type": t.booking_type,  # 'booking', 'pass_purchase', etc.
+                "mode": t.mode_of_payment,
+                "status": t.settlement_status,
+                "reference_id": t.reference_id
+            })
+
+        # 2. Wallet Transactions from HashWalletTransaction table
+        wallet_txns = HashWalletTransaction.query.filter_by(user_id=user_id).all()
+        for w in wallet_txns:
+            all_txns.append({
+                "id": f"wallet_{w.id}",
+                "date": w.timestamp.date().isoformat(),
+                "time": w.timestamp.time().strftime("%H:%M:%S"),
+                "amount": w.amount,
+                "type": f"wallet_{'credit' if w.amount > 0 else 'debit'}",
+                "reference_id": w.reference_id
+            })
+
+        # Sort all by date and time (newest first)
+        all_txns.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+
+        return jsonify({"transactions": all_txns}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching transactions for user {user_id}: {e}")
+        return jsonify({"error": "Failed to fetch transaction history", "details": str(e)}), 500
+
 # @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 # def user_available_passes(user_id):
 #     today = datetime.utcnow().date()
