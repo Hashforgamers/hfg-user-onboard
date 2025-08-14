@@ -23,7 +23,7 @@ from services.security import encode_user
 
 from firebase_admin import auth
 import jwt
-import datetime
+
 from datetime import datetime, timedelta
 from flask import jsonify
 
@@ -104,8 +104,9 @@ def get_user_by_fid_auth():
         if not user:
             return jsonify({'message': 'User not found'}), 404
 
-        # Create JWT token with IST timestamp and 2-hour expiry
-        ist_now = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)  # Convert UTC → IST
+        # Then use:
+        ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+
         payload = {
             'uid': encode_user(
                 user.id,
