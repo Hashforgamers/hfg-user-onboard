@@ -344,54 +344,21 @@ def user_transaction_history(user_id):
         current_app.logger.error(f"Error fetching transactions for user {user_id}: {e}")
         return jsonify({"error": "Failed to fetch transaction history", "details": str(e)}), 500
 
-# @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
-# def user_available_passes(user_id):
-#     today = datetime.utcnow().date()
-#     # Pass IDs of active valid passes user owns
-#     active_user_passes = db.session.query(UserPass.cafe_pass_id).filter(
-#         UserPass.user_id == user_id,
-#         UserPass.is_active == True,
-#         UserPass.valid_to >= today
-#     ).all()
-#     owned_pass_ids = set(row[0] for row in active_user_passes)
-
-#     # Passes available and active, excluding owned
-#     available_passes = CafePass.query.filter(
-#         CafePass.is_active == True,
-#         ~CafePass.id.in_(owned_pass_ids)
-#     ).all()
-
-#     result = []
-#     for p in available_passes:
-#         result.append({
-#             "id": p.id,
-#             "name": p.name,
-#             "price": p.price,
-#             "days_valid": p.days_valid,
-#             "description": p.description,
-#             "pass_type": p.pass_type.name if p.pass_type else None,
-#             "vendor_id": p.vendor_id,
-#             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass"
-#         })
-#     return jsonify(result), 200
 
 @user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
 def user_available_passes(user_id):
     today = datetime.utcnow().date()
     pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
 
-    # Find IDs of passes user already owns that are valid
-    active_user_passes = db.session.query(UserPass.cafe_pass_id).filter(
-        UserPass.user_id == user_id,
-        UserPass.is_active == True,
-        UserPass.valid_to >= today
+    # --- Get all passes the user has ever purchased (active or expired) ---
+    user_passes_all = db.session.query(UserPass.cafe_pass_id).filter(
+        UserPass.user_id == user_id
     ).all()
-    owned_pass_ids = set(row[0] for row in active_user_passes)
+    bought_pass_ids = set(row[0] for row in user_passes_all)
 
-    # Start query for active/unowned passes
+    # Standard available passes query
     available_passes_query = CafePass.query.filter(
-        CafePass.is_active == True,
-        ~CafePass.id.in_(owned_pass_ids)
+        CafePass.is_active == True
     )
 
     # Apply type filter
@@ -402,6 +369,7 @@ def user_available_passes(user_id):
 
     available_passes = available_passes_query.all()
 
+    # Build result with is_bought info
     result = []
     for p in available_passes:
         result.append({
@@ -412,8 +380,10 @@ def user_available_passes(user_id):
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass"
+            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "is_bought": p.id in bought_pass_ids  # ✅ True if user ever bought this pass
         })
+
     return jsonify(result), 200
 
 
