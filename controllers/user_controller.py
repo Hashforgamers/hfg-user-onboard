@@ -99,9 +99,8 @@ def get_user_by_fid_auth(user_fid):
         if not user:
             return jsonify({'message': 'User not found'}), 404
 
-        # Then use:
-        ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
-
+       # Create JWT token with IST timestamp and 2-hour expiry
+        ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)  # Convert UTC → IST
         payload = {
             'uid': encode_user(
                 user.id,
@@ -109,7 +108,7 @@ def get_user_by_fid_auth(user_fid):
                 current_app.config['ENCRYPT_PUBLIC_KEY']
             ),
             'created_at': ist_now.isoformat(),
-            'exp': ist_now + datetime.timedelta(hours=2)
+            'exp': ist_now + timedelta(hours=2)
         }
         custom_jwt = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm="HS256")
 
