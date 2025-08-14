@@ -99,9 +99,6 @@ def get_user_by_fid_auth():
         if not id_token:
             return jsonify({'message': 'Missing ID token'}), 401
 
-        # Verify the Firebase ID token
-        decoded_token = auth.verify_id_token(id_token)
-
         # Your user retrieval logic
         user = UserService.get_user_by_fid(id_token)
         if not user:
