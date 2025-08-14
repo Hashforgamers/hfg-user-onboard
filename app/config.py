@@ -1,6 +1,7 @@
 # app/config.py
 
 import os
+from services.config_load import load_key_from_file
 
 class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev')
@@ -17,3 +18,7 @@ class Config:
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "no-reply@hashforgamers.co.in")
 
     FIREBASE_KEY = os.getenv('FIREBASE_KEY') 
+
+    # Read paths from environment variables
+    ENCRYPT_PRIVATE_KEY = load_key_from_file(os.getenv("ENCRYPT_PRIVATE_KEY_PATH"))
+    ENCRYPT_PUBLIC_KEY = load_key_from_file(os.getenv("ENCRYPT_PUBLIC_KEY_PATH"))

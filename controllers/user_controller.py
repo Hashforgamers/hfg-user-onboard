@@ -19,6 +19,10 @@ from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
 
+from services.security import encode_user
+
+from firebase_admin import auth
+import jwt
 
 from datetime import datetime, timedelta
 from flask import jsonify
@@ -86,6 +90,44 @@ def get_user_by_fid(user_fid):
     except Exception as e:
         current_app.logger.error(f"Internal error fetching user: {e}")
         return jsonify({"message": "Internal server error"}), 500
+
+@user_blueprint.route('/user', methods=['GET'])
+def get_user_by_fid_auth(user_fid):
+    try:
+        # Extract Firebase ID token from Authorization header
+        id_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not id_token:
+            return jsonify({'message': 'Missing ID token'}), 401
+
+        # Verify the Firebase ID token
+        decoded_token = auth.verify_id_token(id_token)
+
+        # Your user retrieval logic
+        user = UserService.get_user_by_fid(id_token)
+        if not user:
+            return jsonify({'message': 'User not found'}), 404
+
+        # Create JWT token with IST timestamp and 2-hour expiry
+        ist_now = datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)  # Convert UTC → IST
+        payload = {
+            'uid': encode_user(
+                user.id,
+                current_app.config['ENCRYPT_PRIVATE_KEY'],
+                current_app.config['ENCRYPT_PUBLIC_KEY']
+            ),
+            'created_at': ist_now.isoformat(),
+            'exp': ist_now + datetime.timedelta(hours=2)
+        }
+        custom_jwt = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm="HS256")
+
+        # Respond with user data and JWT token in Authorization header
+        response = jsonify({'user': user.to_dict()})
+        response.headers['Authorization'] = f'Bearer {custom_jwt}'
+        return response, 200
+
+    except Exception as e:
+        current_app.logger.error(f'Internal error fetching user: {e}')
+        return jsonify({'message': 'Internal server error'}), 500
 
 @user_blueprint.route('/users/<int:user_id>/create-voucher', methods=['POST'])
 def create_voucher_for_referral_points(user_id):

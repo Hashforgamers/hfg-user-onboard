@@ -57,8 +57,6 @@ class User(db.Model):
 
     def to_dict(self):
         return {
-            "id": self.id,
-            "fid": self.fid,
             "avatar_path": self.avatar_path,
             "name": self.name,
             "gender": self.gender,
