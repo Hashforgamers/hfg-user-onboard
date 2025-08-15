@@ -6,7 +6,7 @@ from flask import request, jsonify, g, current_app
 import jwt
 
 
-def encode_user(user_id: str, private_key_pem: str, public_key_pem: str) -> str:
+def encode_user(user_id: str, public_key_pem: str) -> str:
     """
     Encode a user ID using RSA public key PEM string.
     Returns a base64-encoded string.
