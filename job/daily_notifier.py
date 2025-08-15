@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # Environment Variables
 # ----------------------------
-API_BASE = os.getenv("API_BASE", "https://hfg-user-onboard.onrender.com")
+API_BASE = os.getenv("API_BASE", "https://hfg-user-onboard.onrender.com/api")
 API_KEY = os.getenv("API_KEY", "AIzaSyCMVuu_Ng2THRn4_YaM4-_HjWUlTeBCRv0") 
 NOTIFY_INTERVAL = int(os.getenv("NOTIFY_INTERVAL", "60"))  # seconds
 
