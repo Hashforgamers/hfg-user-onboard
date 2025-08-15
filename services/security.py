@@ -2,20 +2,12 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 import base64
 
-def encode_user(user_id: str, private_key_pem: str, public_key_pem: str) -> str:
-    """
-    Encode a user ID using RSA public key PEM string.
-    Returns a base64-encoded string.
-    """
-    public_key = serialization.load_pem_public_key(public_key_pem.encode())
+def encode_user(user_id: str, flutter_public_key_pem: str) -> str:
+    public_key = serialization.load_pem_public_key(flutter_public_key_pem.encode())
 
     encrypted = public_key.encrypt(
         str(user_id).encode(),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
+        padding.PKCS1v15()
     )
 
     return base64.urlsafe_b64encode(encrypted).decode()
