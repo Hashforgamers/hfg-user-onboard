@@ -149,10 +149,10 @@ def main():
         data = resp.json().get("data", [])
         logger.info(f"Found {len(data)} tokens to notify.")
 
+        notif = generate_notification()
+
         for entry in data:
             token = entry["token"]
-            notif = generate_notification()
-
             payload = {
                 "token": token,
                 "title": notif["title"],
