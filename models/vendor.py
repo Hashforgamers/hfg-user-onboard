@@ -18,6 +18,12 @@ class Vendor(db.Model):
 
     extra_service_categories = relationship('ExtraServiceCategory', back_populates='vendor', cascade='all, delete-orphan')
 
+    # Relationship to Image (new addition)
+    images = relationship(
+        'Image',
+        back_populates='vendor',
+        cascade="all, delete-orphan"
+    )
 
     def __str__(self):
         return f"Vendor(id={self.id}, cafe_name='{self.cafe_name}', owner_name='{self.owner_name}', description='{self.description}')"
