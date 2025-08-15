@@ -7,3 +7,5 @@ Flask-Mail==0.9.1
 firebase-admin
 pyjwt
 cryptography
+google-generativeai
+requests

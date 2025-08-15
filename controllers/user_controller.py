@@ -642,3 +642,31 @@ def get_extra_service(vendor_id):
     except Exception as e:
         current_app.logger.error(f"Error fetching extra services for vendor {vendor_id}: {str(e)}")
         return jsonify({"error": "Failed to fetch extra services", "details": str(e)}), 500
+
+@user_blueprint.route("/getAllFCMToken", methods=["GET"])
+def get_all_fcm():
+    try:
+        # Fetch all tokens with related user data
+        tokens = (
+            db.session.query(FCMToken, User)
+            .join(User, FCMToken.user_id == User.id)
+            .all()
+        )
+
+        result = [
+            {
+                "token": fcm.token,
+                "platform": fcm.platform,
+                "created_at": fcm.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "user": {
+                    "name": user.name,
+                    "gender": user.gender
+                }
+            }
+            for fcm, user in tokens
+        ]
+
+        return jsonify({"success": True, "data": result}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
