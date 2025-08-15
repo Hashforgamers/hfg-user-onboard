@@ -47,8 +47,10 @@ def create_user():
     except Exception as e:
         return jsonify({"message": str(e)}), 400
 
-@user_blueprint.route('/users/<int:user_id>/register-fcm-token', methods=['POST'])
-def register_fcm_token(user_id):
+@user_blueprint.route('/users/register-fcm-token', methods=['POST'])
+@auth_required_self(decrypt_user=True) 
+def register_fcm_token():
+    user_id = g.auth_user_id 
     data = request.json
     token = data.get('token')
     platform = data.get('platform')
@@ -71,8 +73,10 @@ def register_fcm_token(user_id):
 
     return jsonify({'message': 'FCM token registered'}), 200
 
-@user_blueprint.route('/users/<int:user_id>', methods=['GET'])
-def get_user(user_id):
+@user_blueprint.route('/users', methods=['GET'])
+@auth_required_self(decrypt_user=True) 
+def get_user():
+    user_id = g.auth_user_id 
     user = UserService.get_user(user_id)
     if not user:
         return jsonify({"message": "User not found"}), 404
@@ -80,18 +84,6 @@ def get_user(user_id):
     return jsonify({"user": user.to_dict()})
 
 @user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
-def get_user_by_fid(user_fid):
-    try:
-        user = UserService.get_user_by_fid(user_fid)
-        if not user:
-            return jsonify({"message": "User not found"}), 404
-
-        return jsonify({"user": user.to_dict()}), 200
-    except Exception as e:
-        current_app.logger.error(f"Internal error fetching user: {e}")
-        return jsonify({"message": "Internal server error"}), 500
-
-@user_blueprint.route('/usersNew/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid_auth(user_fid):
     try:
         # Your user retrieval logic
@@ -120,8 +112,10 @@ def get_user_by_fid_auth(user_fid):
         current_app.logger.error(f'Internal error fetching user: {e}')
         return jsonify({'message': 'Internal server error'}), 500
 
-@user_blueprint.route('/users/<int:user_id>/create-voucher', methods=['POST'])
-def create_voucher_for_referral_points(user_id):
+@user_blueprint.route('/users/create-voucher', methods=['POST'])
+@auth_required_self(decrypt_user=True) 
+def create_voucher_for_referral_points():
+    user_id = g.auth_user_id 
     try:
         voucher = create_voucher_if_eligible(user_id)
         # --- FCM Notification on voucher creation ---
@@ -143,8 +137,10 @@ def create_voucher_for_referral_points(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@user_blueprint.route('/users/<int:user_id>/voucher', methods=['GET'])
-def get_voucher_by_user(user_id):
+@user_blueprint.route('/users/voucher', methods=['GET'])
+@auth_required_self(decrypt_user=True) 
+def get_voucher_by_user():
+    user_id = g.auth_user_id 
     try:
         vouchers = UserService.get_user_vouchers(user_id)
         return jsonify({
@@ -153,8 +149,10 @@ def get_voucher_by_user(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@user_blueprint.route('/users/<int:user_id>/hash-coins', methods=['GET'])
-def get_user_hash_coins(user_id):
+@user_blueprint.route('/users/hash-coins', methods=['GET'])
+@auth_required_self(decrypt_user=True) 
+def get_user_hash_coins():
+    user_id = g.auth_user_id 
     try:
         user_hash_coin = db.session.query(UserHashCoin).filter_by(user_id=user_id).first()
 
@@ -173,14 +171,16 @@ def get_user_hash_coins(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@user_blueprint.route('/users/<int:user_id>/hash-coins', methods=['POST'])
-def add_hash_coins(user_id):
+@user_blueprint.route('/users/hash-coins', methods=['POST'])
+@auth_required_self(decrypt_user=True) 
+def add_hash_coins():
     """
     Example: Add hash coins to user and notify.
     {
         "amount": 500
     }
     """
+    user_id = g.auth_user_id 
     data = request.json
     amount = data.get('amount')
     if not amount or not isinstance(amount, int) or amount <= 0:
@@ -216,13 +216,6 @@ def add_hash_coins(user_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@user_blueprint.route('/users/<int:user_id>/wallet', methods=['GET'])
-def get_wallet_balance(user_id):
-    wallet = HashWallet.query.filter_by(user_id=user_id).first()
-    if not wallet:
-        return jsonify({"message": "Wallet not found"}), 404
-    return jsonify({"user_id": wallet.user_id, "balance": wallet.balance})
-
 @user_blueprint.route("/users/wallet", methods=["GET"])
 @auth_required_self(decrypt_user=True)  # set to False if sub is not encrypted
 def get_wallet_balance_auth():
@@ -232,8 +225,10 @@ def get_wallet_balance_auth():
         return jsonify({"message": "Wallet not found"}), 404
     return jsonify({"user_id": wallet.user_id, "balance": wallet.balance}), 200
 
-@user_blueprint.route('/users/<int:user_id>/wallet', methods=['POST'])
-def add_wallet_balance(user_id):
+@user_blueprint.route('/users/wallet', methods=['POST'])
+@auth_required_self(decrypt_user=True) 
+def add_wallet_balance():
+    user_id = g.auth_user_id 
     data = request.json
     amount = data.get('amount')
     txn_type = data.get('type', 'top-up')  # default to 'top-up'
@@ -277,8 +272,10 @@ def add_wallet_balance(user_id):
         db.session.rollback()
         return jsonify({"message": "Failed to update wallet", "error": str(e)}), 500
 
-@user_blueprint.route("/user/<int:user_id>/purchase_pass", methods=["POST"])
-def user_purchase_pass(user_id):
+@user_blueprint.route("/user/purchase_pass", methods=["POST"])
+@auth_required_self(decrypt_user=True) 
+def user_purchase_pass():
+    user_id = g.auth_user_id 
     data = request.get_json()
     cafe_pass_id = data.get("cafe_pass_id")
     payment_id = data.get("payment_id")  
@@ -346,8 +343,10 @@ def user_purchase_pass(user_id):
             "details": str(e)
         }), 500
 
-@user_blueprint.route('/users/<int:user_id>/transactions', methods=['GET'])
-def user_transaction_history(user_id):
+@user_blueprint.route('/users/transactions', methods=['GET'])
+@auth_required_self(decrypt_user=True) 
+def user_transaction_history():
+    user_id = g.auth_user_id 
     try:
         all_txns = []
 
@@ -386,9 +385,10 @@ def user_transaction_history(user_id):
         current_app.logger.error(f"Error fetching transactions for user {user_id}: {e}")
         return jsonify({"error": "Failed to fetch transaction history", "details": str(e)}), 500
 
-
-@user_blueprint.route("/user/<int:user_id>/available_passes", methods=["GET"])
-def user_available_passes(user_id):
+@user_blueprint.route("/user/available_passes", methods=["GET"])
+@auth_required_self(decrypt_user=True) 
+def user_available_passes():
+    user_id = g.auth_user_id 
     today = datetime.utcnow().date()
     pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
 
@@ -428,9 +428,10 @@ def user_available_passes(user_id):
 
     return jsonify(result), 200
 
-
-@user_blueprint.route("/user/<int:user_id>/all_passes", methods=["GET"])
-def user_all_passes(user_id):
+@user_blueprint.route("/user/all_passes", methods=["GET"])
+@auth_required_self(decrypt_user=True) 
+def user_all_passes():
+    user_id = g.auth_user_id 
     today = datetime.utcnow().date()
 
     # User's active passes
@@ -460,8 +461,10 @@ def user_all_passes(user_id):
         })
     return jsonify(result), 200
 
-@user_blueprint.route("/user/<int:user_id>/passes", methods=["GET"])
-def user_passes(user_id):
+@user_blueprint.route("/user/passes", methods=["GET"])
+@auth_required_self(decrypt_user=True)
+def user_passes():
+    user_id = g.auth_user_id 
     today = datetime.utcnow().date()
     user_passes = UserPass.query.join(CafePass).filter(
         UserPass.user_id == user_id,
@@ -481,8 +484,10 @@ def user_passes(user_id):
 
     return jsonify(result), 200
 
-@user_blueprint.route("/user/<int:user_id>/passes/history", methods=["GET"])
-def user_passes_history(user_id):
+@user_blueprint.route("/user/passes/history", methods=["GET"])
+@auth_required_self(decrypt_user=True)
+def user_passes_history():
+    user_id = g.auth_user_id 
     today = datetime.utcnow().date()
     expired_passes = UserPass.query.join(CafePass).filter(
         UserPass.user_id == user_id,
