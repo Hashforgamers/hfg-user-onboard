@@ -18,7 +18,6 @@ from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
-from sqlalchemy.orm import joinedload, selectinload
 
 from services.security import encode_user, auth_required_self
 
@@ -389,61 +388,35 @@ def user_transaction_history():
 @user_blueprint.route("/user/available_passes", methods=["GET"])
 @auth_required_self(decrypt_user=True) 
 def user_available_passes():
-    user_id = g.auth_user_id
-    pass_type_filter = request.args.get('type')
+    user_id = g.auth_user_id 
+    today = datetime.utcnow().date()
+    pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
 
-    # Previously purchased pass IDs
-    bought_pass_ids = {
-        row[0] for row in db.session.query(UserPass.cafe_pass_id)
-        .filter(UserPass.user_id == user_id)
-        .all()
-    }
+    # --- Get all passes the user has ever purchased (active or expired) ---
+    user_passes_all = db.session.query(UserPass.cafe_pass_id).filter(
+        UserPass.user_id == user_id
+    ).all()
+    bought_pass_ids = set(row[0] for row in user_passes_all)
 
-    # Eager-load vendor and its images
-    q = (
-        db.session.query(CafePass)
-        .options(
-            joinedload(CafePass.vendor).selectinload(Vendor.images)
-        )
-        .filter(CafePass.is_active.is_(True))
+    # Standard available passes query
+    available_passes_query = CafePass.query.filter(
+        CafePass.is_active == True
     )
 
+    # Apply type filter
     if pass_type_filter == 'vendor':
-        q = q.filter(CafePass.vendor_id.isnot(None))
+        available_passes_query = available_passes_query.filter(CafePass.vendor_id.isnot(None))
     elif pass_type_filter == 'hash':
-        q = q.filter(CafePass.vendor_id.is_(None))
+        available_passes_query = available_passes_query.filter(CafePass.vendor_id.is_(None))
 
-    passes = q.all()
+    available_passes = available_passes_query.all()
 
-    def to_share_url_list(images):
-        """Build list of shareable image URLs with a stable priority."""
-        urls = []
-        for img in images or []:
-            # 1) Cloudinary secure URL
-            if img.url and img.url.startswith(('http://', 'https://')):
-                urls.append(img.url)
-                continue
-            # 2) Google Drive
-            if img.image_id:
-                # Assumes the file is shared publicly or accessible through your app proxy
-                urls.append(f"https://drive.google.com/uc?id={img.image_id}")
-                continue
-            # 3) Fallback: direct path if it's an absolute URL
-            if img.path and img.path.startswith(('http://', 'https://')):
-                urls.append(img.path)
-        # Deduplicate while preserving order
-        seen = set()
-        deduped = []
-        for u in urls:
-            if u not in seen:
-                seen.add(u)
-                deduped.append(u)
-        return deduped
-
+    # Build result with is_bought info + vendor images
     result = []
-    for p in passes:
-        vendor_images = p.vendor.images if p.vendor else []
-        share_urls = to_share_url_list(vendor_images) if vendor_images else []
+    for p in available_passes:
+        vendor_images = []
+        if p.vendor:  # only vendor passes have vendor images
+            vendor_images = [{"id": img.id, "url": img.url} for img in p.vendor.images]
 
         result.append({
             "id": p.id,
@@ -454,20 +427,8 @@ def user_available_passes():
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
-            "is_bought": p.id in bought_pass_ids,
-            # Detailed image objects if the client needs metadata
-            "vendor_images": [
-                {
-                    "id": img.id,
-                    "public_id": img.public_id,
-                    "url": img.url,
-                    "image_id": img.image_id,
-                    "path": img.path,
-                    "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None,
-                } for img in (vendor_images or [])
-            ],
-            # Shareable URLs for simple gallery use
-            "vendor_share_urls": share_urls,
+            "vendor_images": vendor_images,   # ✅ added vendor images
+            "is_bought": p.id in bought_pass_ids
         })
 
     return jsonify(result), 200
