@@ -104,7 +104,6 @@ def get_user_by_fid_auth(user_fid):
         payload = {
             'uid': encode_user(
                 user.id,
-                current_app.config['ENCRYPT_PRIVATE_KEY'],
                 current_app.config['ENCRYPT_PUBLIC_KEY']
             ),
             'created_at': ist_now.isoformat(),
