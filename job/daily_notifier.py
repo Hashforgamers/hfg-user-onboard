@@ -98,6 +98,12 @@ FALLBACK_MESSAGES = [
     {"title": "Let’s LAN!", "message": "Book your café slot and play together."}
 ]
 
+# ----------------------------
+# Gemini Agent Helper
+# ----------------------------
+def gemini_agent():
+    return genai.GenerativeModel("gemini-2.5-flash")
+
 def generate_notification():
     logger = logging.getLogger(__name__)
     model = gemini_agent()
