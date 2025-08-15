@@ -1,8 +1,10 @@
+# models/vendor.py
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship, foreign
 from db.extensions import db
 from datetime import datetime
 from sqlalchemy.sql import and_
+from models.uploadedImage import Image   # ensure Image is imported before Vendor
 
 class Vendor(db.Model):
     __tablename__ = 'vendors'
