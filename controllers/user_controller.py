@@ -411,9 +411,13 @@ def user_available_passes():
 
     available_passes = available_passes_query.all()
 
-    # Build result with is_bought info
+    # Build result with is_bought info + vendor images
     result = []
     for p in available_passes:
+        vendor_images = []
+        if p.vendor:  # only vendor passes have vendor images
+            vendor_images = [{"id": img.id, "url": img.url} for img in p.vendor.images]
+
         result.append({
             "id": p.id,
             "name": p.name,
@@ -423,7 +427,8 @@ def user_available_passes():
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
-            "is_bought": p.id in bought_pass_ids  # ✅ True if user ever bought this pass
+            "vendor_images": vendor_images,   # ✅ added vendor images
+            "is_bought": p.id in bought_pass_ids
         })
 
     return jsonify(result), 200
