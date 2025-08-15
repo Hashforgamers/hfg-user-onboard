@@ -471,21 +471,32 @@ def user_all_passes():
 def user_passes():
     user_id = g.auth_user_id 
     today = datetime.utcnow().date()
+
     user_passes = UserPass.query.join(CafePass).filter(
         UserPass.user_id == user_id,
         UserPass.is_active == True,
         UserPass.valid_to >= today
     ).all()
 
-    result = [{
-        "id": up.id,
-        "cafe_pass_id": up.cafe_pass_id,
-        "cafe_pass_name": up.cafe_pass.name,
-        "vendor_id": up.cafe_pass.vendor_id,
-        "valid_from": up.valid_from.isoformat(),
-        "valid_to": up.valid_to.isoformat(),
-        "pass_type": up.cafe_pass.pass_type.name if up.cafe_pass.pass_type else None
-    } for up in user_passes]
+    result = []
+    for up in user_passes:
+        cafe_pass = up.cafe_pass
+
+        vendor_images = []
+        if cafe_pass.vendor:  # only for vendor passes
+            vendor_images = [{"id": img.id, "url": img.url} for img in cafe_pass.vendor.images]
+
+        result.append({
+            "id": up.id,
+            "cafe_pass_id": cafe_pass.id,
+            "cafe_pass_name": cafe_pass.name,
+            "vendor_id": cafe_pass.vendor_id,
+            "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass",
+            "vendor_images": vendor_images,  # ✅ added vendor images
+            "valid_from": up.valid_from.isoformat(),
+            "valid_to": up.valid_to.isoformat(),
+            "pass_type": cafe_pass.pass_type.name if cafe_pass.pass_type else None
+        })
 
     return jsonify(result), 200
 
