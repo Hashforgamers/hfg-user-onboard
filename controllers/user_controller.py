@@ -223,7 +223,7 @@ def get_wallet_balance_auth():
     wallet = HashWallet.query.filter_by(user_id=user_id).first()
     if not wallet:
         return jsonify({"message": "Wallet not found"}), 404
-    return jsonify({"user_id": wallet.user_id, "balance": wallet.balance}), 200
+    return jsonify({"balance": wallet.balance}), 200
 
 @user_blueprint.route('/users/wallet', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
