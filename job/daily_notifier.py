@@ -43,7 +43,7 @@ Return JSON in format:
 
 def generate_notification():
     logger.info("Generating notification content using Gemini...")
-    model = genai.GenerativeModel("gemini-pro")
+    model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(PROMPT_TEMPLATE)
     try:
         content = response.text.strip()
