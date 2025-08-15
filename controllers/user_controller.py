@@ -19,9 +19,7 @@ from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
 
-from security import auth_required_self 
-
-from services.security import encode_user
+from services.security import encode_user, auth_required_self
 
 from firebase_admin import auth
 import jwt
