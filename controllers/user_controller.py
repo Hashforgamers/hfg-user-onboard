@@ -1,4 +1,4 @@
-from flask import request, jsonify, Blueprint, current_app
+from flask import request, jsonify, Blueprint, current_app, g
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
@@ -18,6 +18,8 @@ from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
+
+from security import auth_required_self 
 
 from services.security import encode_user
 
@@ -222,6 +224,15 @@ def get_wallet_balance(user_id):
     if not wallet:
         return jsonify({"message": "Wallet not found"}), 404
     return jsonify({"user_id": wallet.user_id, "balance": wallet.balance})
+
+@user_blueprint.route("/users/wallet", methods=["GET"])
+@auth_required_self(decrypt_user=True)  # set to False if sub is not encrypted
+def get_wallet_balance_auth():
+    user_id = g.auth_user_id  # injected by the decorator
+    wallet = HashWallet.query.filter_by(user_id=user_id).first()
+    if not wallet:
+        return jsonify({"message": "Wallet not found"}), 404
+    return jsonify({"user_id": wallet.user_id, "balance": wallet.balance}), 200
 
 @user_blueprint.route('/users/<int:user_id>/wallet', methods=['POST'])
 def add_wallet_balance(user_id):
