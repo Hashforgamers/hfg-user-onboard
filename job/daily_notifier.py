@@ -134,32 +134,44 @@ def generate_notification():
         logger.info(f"Using fallback notification: {notif}")
         return notif
 
+def is_within_time_window():
+    """Check if current time is between 6:00 AM and 10:00 PM IST"""
+    ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)  # Convert to IST
+    ist_hour = ist_now.hour
+    return 6 <= ist_hour < 22  # 6AM to 10PM
+
 def main():
     start_time = datetime.now()
     logger.info("Starting daily notification job...")
 
     while True:
-        logger.info("Fetching FCM tokens...")
-        resp = requests.get(f"{API_BASE}/getAllFCMToken")
-        if resp.status_code != 200:
-            logger.error(f"Error fetching tokens: {resp.text}")
+        if is_within_time_window():
+            logger.info("Fetching FCM tokens (within notification window 6AM-10PM IST)...")
+            resp = requests.get(f"{API_BASE}/getAllFCMToken")
+            if resp.status_code != 200:
+                logger.error(f"Error fetching tokens: {resp.text}")
+                time.sleep(NOTIFY_INTERVAL)
+                continue
+        else:
+            current_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+            logger.info(f"Skipping notifications (outside window 6AM-10PM IST, current IST time: {current_ist.strftime('%H:%M')})")
             time.sleep(NOTIFY_INTERVAL)
             continue
 
         data = resp.json().get("data", [])
-        logger.info(f"Found {len(data)} tokens to notify.")
+        if data:  # Only generate notification if we have recipients
+            logger.info(f"Found {len(data)} tokens to notify.")
+            notif = generate_notification()
 
-        notif = generate_notification()
-
-        for entry in data:
-            token = entry["token"]
-            payload = {
-                "token": token,
-                "title": notif["title"],
-                "message": notif["message"]
-            }
-            r = requests.post(f"{API_BASE}/notify-user", json=payload)
-            logger.info(f"Sent to {token[:10]}... Status {r.status_code}")
+            for entry in data:
+                token = entry["token"]
+                payload = {
+                    "token": token,
+                    "title": notif["title"],
+                    "message": notif["message"]
+                }
+                r = requests.post(f"{API_BASE}/notify-user", json=payload)
+                logger.info(f"Sent to {token[:10]}... Status {r.status_code}")
 
         logger.info(f"Sleeping {NOTIFY_INTERVAL} seconds...")
         time.sleep(NOTIFY_INTERVAL)
