@@ -74,8 +74,10 @@ def register_fcm_token():
 
     return jsonify({'message': 'FCM token registered'}), 200
 
-@user_blueprint.route('/users/<int:user_id>', methods=['DELETE'])
-def delete_user_id(user_id):
+@user_blueprint.route('/users', methods=['DELETE'])
+@auth_required_self(decrypt_user=True) 
+def delete_user_id():
+    user_id = g.auth_user_id 
     try:
         # First delete all dependent objects in proper order
         
@@ -126,62 +128,6 @@ def delete_user_id(user_id):
                 db.session.commit()
                 return jsonify({"message": "User deleted (fallback method)"}), 200
             raise
-
-        return jsonify({"message": "User deleted successfully"}), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error deleting user {user_id}: {e}")
-        error_msg = str(e)
-        # Handle polymorphic identity error specifically
-        if "No such polymorphic_identity" in error_msg:
-            # Fallback - try to delete directly from database
-            try:
-                db.session.execute(text("DELETE FROM users WHERE id = :user_id"),
-                                {"user_id": user_id})
-                db.session.commit()
-                return jsonify({"message": "User deleted (fallback method)"}), 200
-            except Exception as fallback_error:
-                db.session.rollback()
-                current_app.logger.error(f"Fallback delete failed for user {user_id}: {fallback_error}")
-                return jsonify({
-                    "message": "Failed to delete user",
-                    "error": f"{error_msg}. Fallback error: {str(fallback_error)}"
-                }), 500
-        else:
-            return jsonify({
-                "message": "Failed to delete user",
-                "error": error_msg
-            }), 500
-
-@user_blueprint.route('/users', methods=['DELETE'])
-@auth_required_self(decrypt_user=True) 
-def delete_user():
-    user_id = g.auth_user_id 
-    try:
-        # First delete all dependent objects
-        FCMToken.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        HashWallet.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # Handle UserPass and linked transactions
-        user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
-        if user_pass_ids:
-            Transaction.query.filter(
-                Transaction.reference_id.in_(user_pass_ids),
-                Transaction.booking_type == 'pass_purchase'
-            ).delete(synchronize_session=False)
-            UserPass.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # Delete regular transactions
-        Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # Finally delete the user
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({"message": "User not found"}), 404
-
-        db.session.delete(user)
-        db.session.commit()
 
         return jsonify({"message": "User deleted successfully"}), 200
         
