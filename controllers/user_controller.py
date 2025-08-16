@@ -19,6 +19,7 @@ from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
+from models.paymentTransactionMapping import PaymentTransactionMapping
 
 from services.security import encode_user, auth_required_self
 
@@ -93,17 +94,24 @@ def delete_user_id():
         # 4. Get user pass IDs before deletion
         user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
         
-        # 5. Delete pass purchase transactions
+        # 5. Delete payment transaction mappings first
+        PaymentTransactionMapping.query.filter(
+            PaymentTransactionMapping.transaction_id.in_(
+                db.session.query(Transaction.id).filter_by(user_id=user_id)
+            )
+        ).delete(synchronize_session=False)
+
+        # 6. Delete pass purchase transactions
         if user_pass_ids:
             Transaction.query.filter(
                 Transaction.reference_id.in_([str(p_id) for p_id in user_pass_ids]),
                 Transaction.booking_type == 'pass_purchase'
             ).delete(synchronize_session=False)
             
-        # 6. Delete user passes
+        # 7. Delete user passes
         UserPass.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         
-        # 7. Delete regular transactions
+        # 8. Delete regular transactions
         Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
         # Finally delete the user
@@ -118,6 +126,9 @@ def delete_user_id():
             if "No such polymorphic_identity" in str(e):
                 # Fallback - delete all remaining user-related records
                 db.session.execute(text("""
+                    DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
+                        SELECT id FROM transactions WHERE user_id = :user_id
+                    );
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
                     DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id OR
