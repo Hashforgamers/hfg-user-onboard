@@ -96,7 +96,7 @@ def delete_user_id():
         # 5. Delete pass purchase transactions
         if user_pass_ids:
             Transaction.query.filter(
-                Transaction.reference_id.in_(user_pass_ids),
+                Transaction.reference_id.in_([str(p_id) for p_id in user_pass_ids]),
                 Transaction.booking_type == 'pass_purchase'
             ).delete(synchronize_session=False)
             
@@ -120,7 +120,8 @@ def delete_user_id():
                 db.session.execute(text("""
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
                     DELETE FROM user_passes WHERE user_id = :user_id;
-                    DELETE FROM transactions WHERE user_id = :user_id;
+                    DELETE FROM transactions WHERE user_id = :user_id OR
+                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
                     DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
                     DELETE FROM hash_wallets WHERE user_id = :user_id;
                     DELETE FROM users WHERE id = :user_id;
