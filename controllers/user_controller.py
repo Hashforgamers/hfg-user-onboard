@@ -73,10 +73,37 @@ def register_fcm_token():
 
     return jsonify({'message': 'FCM token registered'}), 200
 
+@user_blueprint.route('/users', methods=['DELETE'])
+@auth_required_self(decrypt_user=True)
+def delete_user():
+    user_id = g.auth_user_id
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        # Cleanup related entities
+        FCMToken.query.filter_by(user_id=user_id).delete()
+        HashWallet.query.filter_by(user_id=user_id).delete()
+        UserPass.query.filter_by(user_id=user_id).delete()
+        Transaction.query.filter_by(user_id=user_id).delete()
+
+        db.session.delete(user)
+        db.session.commit()
+
+        # Optionally delete Firebase auth user if needed
+        # auth.delete_user(user.firebase_uid)
+
+        return jsonify({"message": "User deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error deleting user {user_id}: {e}")
+        return jsonify({"message": "Failed to delete user", "error": str(e)}), 500
+
 @user_blueprint.route('/users', methods=['GET'])
-@auth_required_self(decrypt_user=True) 
+@auth_required_self(decrypt_user=True)
 def get_user():
-    user_id = g.auth_user_id 
+    user_id = g.auth_user_id
     user = UserService.get_user(user_id)
     if not user:
         return jsonify({"message": "User not found"}), 404
