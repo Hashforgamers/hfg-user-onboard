@@ -115,14 +115,14 @@ def delete_user_id(user_id):
         except Exception as e:
             if "No such polymorphic_identity" in str(e):
                 # Fallback - delete all remaining user-related records
-                db.session.execute("""
+                db.session.execute(text("""
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
                     DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id;
                     DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
                     DELETE FROM hash_wallets WHERE user_id = :user_id;
                     DELETE FROM users WHERE id = :user_id;
-                """, {'user_id': user_id})
+                """), {'user_id': user_id})
                 db.session.commit()
                 return jsonify({"message": "User deleted (fallback method)"}), 200
             raise
