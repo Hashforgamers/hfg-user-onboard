@@ -49,19 +49,19 @@ class UserService:
                     "details": {"gameUserName": data['gameUserName']}
                 }
 
-            if is_in_cooldown(
-                data['contact']['electronicAddress'].get('emailId'),
-                data['contact']['electronicAddress'].get('mobileNo')
-            ):
-                return {
-                    "status": "error",
-                    "state": "USER_IN_COOLDOWN",
-                    "message": "Account recently deleted. Please wait 30 days before signing up again.",
-                    "details": {
-                        "email": data['contact']['electronicAddress'].get('emailId'),
-                        "phone": data['contact']['electronicAddress'].get('mobileNo')
-                    }
-                }
+            # if is_in_cooldown(
+            #     data['contact']['electronicAddress'].get('emailId'),
+            #     data['contact']['electronicAddress'].get('mobileNo')
+            # ):
+            #     return {
+            #         "status": "error",
+            #         "state": "USER_IN_COOLDOWN",
+            #         "message": "Account recently deleted. Please wait 30 days before signing up again.",
+            #         "details": {
+            #             "email": data['contact']['electronicAddress'].get('emailId'),
+            #             "phone": data['contact']['electronicAddress'].get('mobileNo')
+            #         }
+            #     }
 
             # Parse date of birth if provided
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
