@@ -22,20 +22,46 @@ class UserService:
         """Creates a new user and related entities in the database, with validations."""
         try:
             # Check if fid, email, or game_username already exists
-            if User.query.filter_by(fid=data['fid']).first():
-                raise ValueError("A user with this FID already exists.")
+            existing_user_by_fid = User.query.filter_by(fid=data['fid']).first()
+            if existing_user_by_fid:
+                return {
+                    "status": "error",
+                    "state": "USER_EXISTS",
+                    "message": "A user with this FID already exists.",
+                    "details": {"fid": data['fid']}
+                }
 
-            if ContactInfo.query.filter_by(email=data['contact']['electronicAddress'].get('emailId')).first():
-                raise ValueError("This email is already in use.")
+            existing_email = ContactInfo.query.filter_by(email=data['contact']['electronicAddress'].get('emailId')).first()
+            if existing_email:
+                return {
+                    "status": "error",
+                    "state": "EMAIL_EXISTS",
+                    "message": "This email is already in use.",
+                    "details": {"email": data['contact']['electronicAddress'].get('emailId')}
+                }
 
-            if User.query.filter_by(game_username=data['gameUserName']).first():
-                raise ValueError("This game username is already taken.")
+            existing_username = User.query.filter_by(game_username=data['gameUserName']).first()
+            if existing_username:
+                return {
+                    "status": "error",
+                    "state": "USERNAME_TAKEN",
+                    "message": "This game username is already taken.",
+                    "details": {"gameUserName": data['gameUserName']}
+                }
 
             if is_in_cooldown(
                 data['contact']['electronicAddress'].get('emailId'),
                 data['contact']['electronicAddress'].get('mobileNo')
             ):
-                raise ValueError("Account recently deleted. Please wait 30 days before signing up again.")
+                return {
+                    "status": "error",
+                    "state": "USER_IN_COOLDOWN",
+                    "message": "Account recently deleted. Please wait 30 days before signing up again.",
+                    "details": {
+                        "email": data['contact']['electronicAddress'].get('emailId'),
+                        "phone": data['contact']['electronicAddress'].get('mobileNo')
+                    }
+                }
 
             # Parse date of birth if provided
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
