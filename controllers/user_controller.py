@@ -21,6 +21,8 @@ from models.extraServiceMenu import ExtraServiceMenu
 from models.extraServiceMenuImage import ExtraServiceMenuImage
 from models.paymentTransactionMapping import PaymentTransactionMapping
 
+from models.voucher import Voucher
+
 from services.security import encode_user, auth_required_self
 
 from firebase_admin import auth
@@ -80,41 +82,42 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id 
     try:
-        # First delete all dependent objects in proper order
-        
         # 1. Delete wallet transactions first
         HashWalletTransaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         
-        # 2. Then delete the wallet itself
+        # 2. Delete the wallet itself
         HashWallet.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         
         # 3. Delete FCM tokens
         FCMToken.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # 4. Get user pass IDs before deletion
+
+        # 4. Delete vouchers
+        Voucher.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+
+        # 5. Get user pass IDs before deletion
         user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
         
-        # 5. Delete payment transaction mappings first
+        # 6. Delete payment transaction mappings
         PaymentTransactionMapping.query.filter(
             PaymentTransactionMapping.transaction_id.in_(
                 db.session.query(Transaction.id).filter_by(user_id=user_id)
             )
         ).delete(synchronize_session=False)
 
-        # 6. Delete pass purchase transactions
+        # 7. Delete pass purchase transactions
         if user_pass_ids:
             Transaction.query.filter(
                 Transaction.reference_id.in_([str(p_id) for p_id in user_pass_ids]),
                 Transaction.booking_type == 'pass_purchase'
             ).delete(synchronize_session=False)
             
-        # 7. Delete user passes
+        # 8. Delete user passes
         UserPass.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         
-        # 8. Delete regular transactions
+        # 9. Delete regular transactions
         Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
-        # 9. Delete user hash coins
+        # 10. Delete user hash coins
         UserHashCoin.query.filter_by(user_id=user_id).delete(synchronize_session=False)
         
         # Finally delete the user
@@ -134,6 +137,7 @@ def delete_user_id():
                     );
                     DELETE FROM user_hash_coins WHERE user_id = :user_id;
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
+                    DELETE FROM vouchers WHERE user_id = :user_id;
                     DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id OR
                         (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
@@ -153,10 +157,10 @@ def delete_user_id():
         error_msg = str(e)
         # Handle polymorphic identity error specifically
         if "No such polymorphic_identity" in error_msg:
-            # Fallback - try to delete directly from database
             try:
-                db.session.execute(text("DELETE FROM users WHERE id = :user_id"),
-                                {"user_id": user_id})
+                db.session.execute(text("""
+                    DELETE FROM users WHERE id = :user_id
+                """), {"user_id": user_id})
                 db.session.commit()
                 return jsonify({"message": "User deleted (fallback method)"}), 200
             except Exception as fallback_error:
