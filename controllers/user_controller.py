@@ -20,6 +20,8 @@ from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
 from models.paymentTransactionMapping import PaymentTransactionMapping
+from models.physicalAddress import PhysicalAddress
+from models.contactInfo import ContactInfo
 
 from models.voucher import Voucher
 
