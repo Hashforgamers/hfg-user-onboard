@@ -20,6 +20,8 @@ from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
 from models.extraServiceMenuImage import ExtraServiceMenuImage
 from models.paymentTransactionMapping import PaymentTransactionMapping
+from models.physicalAddress import PhysicalAddress
+from models.contactInfo import ContactInfo
 
 from models.voucher import Voucher
 
@@ -78,49 +80,53 @@ def register_fcm_token():
     return jsonify({'message': 'FCM token registered'}), 200
 
 @user_blueprint.route('/users', methods=['DELETE'])
-@auth_required_self(decrypt_user=True) 
+@auth_required_self(decrypt_user=True)
 def delete_user_id():
-    user_id = g.auth_user_id 
+    user_id = g.auth_user_id
     try:
-        # 1. Delete wallet transactions first
+        # 1. Delete wallet transactions
         HashWalletTransaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # 2. Delete the wallet itself
+
+        # 2. Delete wallet
         HashWallet.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
+
         # 3. Delete FCM tokens
         FCMToken.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
         # 4. Delete vouchers
         Voucher.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
-        # 5. Get user pass IDs before deletion
+        # 5. Delete Physical Address & Contact Info (explicit cleanup)
+        PhysicalAddress.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
+        ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
+
+        # 6. Get user pass IDs
         user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
-        
-        # 6. Delete payment transaction mappings
+
+        # 7. Delete payment transaction mappings
         PaymentTransactionMapping.query.filter(
             PaymentTransactionMapping.transaction_id.in_(
                 db.session.query(Transaction.id).filter_by(user_id=user_id)
             )
         ).delete(synchronize_session=False)
 
-        # 7. Delete pass purchase transactions
+        # 8. Delete pass purchase transactions
         if user_pass_ids:
             Transaction.query.filter(
                 Transaction.reference_id.in_([str(p_id) for p_id in user_pass_ids]),
                 Transaction.booking_type == 'pass_purchase'
             ).delete(synchronize_session=False)
-            
-        # 8. Delete user passes
+
+        # 9. Delete user passes
         UserPass.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # 9. Delete regular transactions
+
+        # 10. Delete regular transactions
         Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
-        # 10. Delete user hash coins
+        # 11. Delete user hash coins
         UserHashCoin.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        
-        # Finally delete the user
+
+        # 12. Finally delete the user
         user = User.query.get(user_id)
         if not user:
             return jsonify({"message": "User not found"}), 404
@@ -130,7 +136,7 @@ def delete_user_id():
             db.session.commit()
         except Exception as e:
             if "No such polymorphic_identity" in str(e):
-                # Fallback - delete all remaining user-related records
+                # Fallback delete all related records directly
                 db.session.execute(text("""
                     DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
                         SELECT id FROM transactions WHERE user_id = :user_id
@@ -141,6 +147,8 @@ def delete_user_id():
                     DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id OR
                         (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
+                    DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
+                    DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
                     DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
                     DELETE FROM hash_wallets WHERE user_id = :user_id;
                     DELETE FROM users WHERE id = :user_id;
@@ -150,12 +158,12 @@ def delete_user_id():
             raise
 
         return jsonify({"message": "User deleted successfully"}), 200
-        
+
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error deleting user {user_id}: {e}")
         error_msg = str(e)
-        # Handle polymorphic identity error specifically
+
         if "No such polymorphic_identity" in error_msg:
             try:
                 db.session.execute(text("""
