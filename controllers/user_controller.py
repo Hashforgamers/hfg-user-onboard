@@ -22,6 +22,7 @@ from models.extraServiceMenuImage import ExtraServiceMenuImage
 from models.paymentTransactionMapping import PaymentTransactionMapping
 from models.physicalAddress import PhysicalAddress
 from models.contactInfo import ContactInfo
+from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 
 from models.voucher import Voucher
 
@@ -97,6 +98,15 @@ def delete_user_id():
         Voucher.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
         # 5. Delete Physical Address & Contact Info (explicit cleanup)
+
+        # --- fetch email & phone BEFORE delete ---
+        contact = ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').first()
+        email, phone = None, None
+        if contact:
+            email = contact.email
+            phone = contact.phone
+
+        # cleanup after storing values
         PhysicalAddress.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
         ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
 
@@ -132,7 +142,19 @@ def delete_user_id():
             return jsonify({"message": "User not found"}), 404
 
         try:
+            # Capture user’s details
+            cooldown_entry = DeletedUserCooldown(
+                email=email,
+                phone=phone,
+                referred_by=getattr(user, "referred_by", None)  # if field exists
+            )
+
+            db.session.add(cooldown_entry)
+            db.session.flush()  # ensures insert before commit
+
             db.session.delete(user)
+            # inside delete_user_id(), before db.session.delete(user)
+
             db.session.commit()
         except Exception as e:
             if "No such polymorphic_identity" in str(e):
