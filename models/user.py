@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Sequence, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, Sequence, ForeignKey, func, text
 from sqlalchemy.orm import relationship
 from db.extensions import db
 from models.voucher import Voucher
@@ -6,35 +6,41 @@ from models.voucher import Voucher
 class User(db.Model):
     __tablename__ = 'users'
 
-    id = Column(Integer, Sequence('users_id_seq', start=1001, increment=1),primary_key=True)
+    id = Column(Integer, Sequence('users_id_seq', start=1001, increment=1), primary_key=True)
     fid = Column(String(255), unique=True, nullable=False)
     avatar_path = Column(String(255), nullable=True)
     name = Column(String(255), nullable=False)
     gender = Column(String(50), nullable=True)
     dob = Column(Date, nullable=True)
     game_username = Column(String(255), unique=True, nullable=False)
-
-    # Adding the parent_type column explicitly
     parent_type = Column(String(50), nullable=False, default='user')
 
-   # Relationship to PhysicalAddress
+    # Timestamp columns in IST
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=text("TIMEZONE('Asia/Kolkata', now())"),
+        nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=text("TIMEZONE('Asia/Kolkata', now())"),
+        onupdate=text("TIMEZONE('Asia/Kolkata', now())"),
+        nullable=False
+    )
+
+    # Relationships
     physical_address = relationship(
         'PhysicalAddress',
         back_populates='user',
-        uselist=False,  # One-to-one relationship
+        uselist=False,
         cascade="all, delete-orphan"
     )
-
-    # Relationship to ContactInfo
     contact_info = relationship(
         'ContactInfo',
         back_populates='user',
-        uselist=False,  # One-to-one relationship
+        uselist=False,
         cascade="all, delete-orphan"
     )
-
-    # One-to-One relationship with PasswordManager
-    # PasswordManager relationship
     password = relationship(
         'PasswordManager',
         primaryjoin="and_(foreign(PasswordManager.parent_id) == User.id, PasswordManager.parent_type == 'user')",
@@ -42,17 +48,14 @@ class User(db.Model):
         uselist=False,
         cascade="all, delete-orphan"
     )
-
     referral_code = Column(String(10), unique=True)
     referred_by = Column(String(10), ForeignKey('users.referral_code'), nullable=True)
     referral_rewards = Column(Integer, default=0)
-
-    # Newly Added relation
     fcm_tokens = relationship('FCMToken', back_populates='user', cascade="all, delete-orphan")
 
     __mapper_args__ = {
         'polymorphic_identity': 'user',
-        'polymorphic_on': parent_type,  # Ensure polymorphic_on points to parent_type
+        'polymorphic_on': parent_type,
     }
 
     def to_dict(self):
@@ -75,5 +78,7 @@ class User(db.Model):
                     "isActive": v.is_active,
                     "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M')
                 } for v in self.vouchers
-            ]
+            ],
+            "createdAt": self.created_at.strftime('%d-%b-%Y %H:%M') if self.created_at else None,
+            "updatedAt": self.updated_at.strftime('%d-%b-%Y %H:%M') if self.updated_at else None
         }
