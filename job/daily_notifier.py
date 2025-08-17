@@ -5,7 +5,7 @@ import logging
 import random
 import json
 import google.generativeai as genai
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ----------------------------
 # Logging Configuration
