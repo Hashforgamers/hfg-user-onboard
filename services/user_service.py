@@ -12,7 +12,7 @@ from models.voucher import Voucher  # Import your Voucher model
 from models.hashWallet import HashWallet
 
 from datetime import datetime
-from models.deleted_user_cooldown import DeletedUserCooldown
+from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from sqlalchemy import or_
 
 class UserService:
