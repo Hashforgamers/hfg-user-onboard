@@ -11,6 +11,10 @@ from models.referralTracking import ReferralTracking
 from models.voucher import Voucher  # Import your Voucher model
 from models.hashWallet import HashWallet
 
+from datetime import datetime
+from models.deleted_user_cooldown import DeletedUserCooldown
+from sqlalchemy import or_
+
 class UserService:
     
     @staticmethod
@@ -26,6 +30,12 @@ class UserService:
 
             if User.query.filter_by(game_username=data['gameUserName']).first():
                 raise ValueError("This game username is already taken.")
+
+            if is_in_cooldown(
+                data['contact']['electronicAddress'].get('emailId'),
+                data['contact']['electronicAddress'].get('mobileNo')
+            ):
+                raise ValueError("Account recently deleted. Please wait 30 days before signing up again.")
 
             # Parse date of birth if provided
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
@@ -175,3 +185,12 @@ class UserService:
     @staticmethod
     def get_user_vouchers(user_id):
         return Voucher.query.filter(Voucher.user_id == user_id).all()
+
+    def is_in_cooldown(email, phone):
+        now = datetime.utcnow()
+        cooldown = DeletedUserCooldown.query.filter(
+            or_(DeletedUserCooldown.email == email, DeletedUserCooldown.phone == phone),
+            DeletedUserCooldown.expires_at > now
+        ).first()
+        return cooldown is not None
+
