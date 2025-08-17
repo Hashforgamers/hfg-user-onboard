@@ -10,9 +10,9 @@ class PaymentTransactionMapping(db.Model):
     transaction_id = Column(Integer, ForeignKey('transactions.id'), nullable=False)
     payment_id = Column(String(100), nullable=False)
 
-    # Relationships (optional but helpful)
-    booking = db.relationship('Booking', backref='payment_mapping', uselist=False)
-    transaction = db.relationship('Transaction', backref='payment_mapping', uselist=False)
+    # Relationships with string references to avoid circular imports
+    booking = db.relationship('Booking', backref='payment_mapping', uselist=False, lazy='joined')
+    transaction = db.relationship('Transaction', backref='payment_mapping', uselist=False, lazy='joined')
 
     # Prevent duplicate mapping for same booking or transaction
     __table_args__ = (
