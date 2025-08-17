@@ -114,6 +114,9 @@ def delete_user_id():
         # 8. Delete regular transactions
         Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
+        # 9. Delete user hash coins
+        UserHashCoin.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+        
         # Finally delete the user
         user = User.query.get(user_id)
         if not user:
@@ -129,6 +132,7 @@ def delete_user_id():
                     DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
                         SELECT id FROM transactions WHERE user_id = :user_id
                     );
+                    DELETE FROM user_hash_coins WHERE user_id = :user_id;
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
                     DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id OR
