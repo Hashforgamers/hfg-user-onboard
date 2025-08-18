@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Sequence, ForeignKey, func, text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Date, DateTime, Sequence, ForeignKey, text, and_
+from sqlalchemy.orm import relationship, foreign
 from db.extensions import db
 from models.voucher import Voucher
 
@@ -15,7 +15,6 @@ class User(db.Model):
     game_username = Column(String(255), unique=True, nullable=False)
     parent_type = Column(String(50), nullable=False, default='user')
 
-    # Timestamp columns in IST
     created_at = Column(
         DateTime(timezone=True),
         server_default=text("TIMEZONE('Asia/Kolkata', now())"),
@@ -35,12 +34,15 @@ class User(db.Model):
         uselist=False,
         cascade="all, delete-orphan"
     )
+
     contact_info = relationship(
         'ContactInfo',
+        primaryjoin="and_(foreign(ContactInfo.parent_id) == User.id, ContactInfo.parent_type == 'user')",
         back_populates='user',
         uselist=False,
         cascade="all, delete-orphan"
     )
+
     password = relationship(
         'PasswordManager',
         primaryjoin="and_(foreign(PasswordManager.parent_id) == User.id, PasswordManager.parent_type == 'user')",
@@ -48,6 +50,7 @@ class User(db.Model):
         uselist=False,
         cascade="all, delete-orphan"
     )
+
     referral_code = Column(String(10), unique=True)
     referred_by = Column(String(10), ForeignKey('users.referral_code'), nullable=True)
     referral_rewards = Column(Integer, default=0)
