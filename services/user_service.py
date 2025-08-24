@@ -123,19 +123,22 @@ class UserService:
 
     @staticmethod
     def _add_physical_address(user, physical_address_data):
-        if physical_address_data:
-            physical_address = PhysicalAddress(
-                address_type=physical_address_data['address_type'],
-                addressLine1=physical_address_data['addressLine1'],
-                addressLine2=physical_address_data.get('addressLine2'),
-                pincode=physical_address_data['pincode'],
-                state=physical_address_data['State'],
-                country=physical_address_data['Country'],
-                is_active=physical_address_data['is_active'],
-                parent_id=user.id,
-                parent_type="user"
-            )
-            user.physical_address = physical_address
+        # If no address or incomplete address, fill with dummy
+        if not physical_address_data or not any(physical_address_data.values()):
+            physical_address_data = {}
+
+        physical_address = PhysicalAddress(
+            address_type=physical_address_data.get('address_type') or "home",
+            addressLine1=physical_address_data.get('addressLine1') or "N/A",
+            addressLine2=physical_address_data.get('addressLine2') or None,
+            pincode=physical_address_data.get('pincode') or "000000",
+            state=physical_address_data.get('State') or "N/A",
+            country=physical_address_data.get('Country') or "N/A",
+            is_active=physical_address_data.get('is_active', True),
+            parent_id=user.id,
+            parent_type="user"
+        )
+        user.physical_address = physical_address
 
     @staticmethod
     def _add_contact_info(user, electronic_address_data):
