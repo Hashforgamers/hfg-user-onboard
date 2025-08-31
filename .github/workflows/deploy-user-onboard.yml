@@ -3,7 +3,6 @@ name: Build, push to ECR, deploy App Runner (hfg-user-onboard)
 on:
   push:
     branches: [ "main" ]
-    # Remove paths filter if this repo contains only this service
     paths:
       - ".github/workflows/deploy-user-onboard.yml"
       - "**/*"
@@ -14,7 +13,7 @@ permissions:
 
 env:
   AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: ${{ vars.ACCOUNT_ID }}              # or: ${{ secrets.ACCOUNT_ID }}
+  AWS_ACCOUNT_ID: ${{ vars.ACCOUNT_ID }}                  # or: ${{ secrets.ACCOUNT_ID }}
   ECR_REPOSITORY: hfg-user-onboard
   APP_RUNNER_SERVICE: hfg-user-onboard
   CPU: "0.5 vCPU"
@@ -30,16 +29,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # OIDC → temporary AWS credentials (no long-lived keys)
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActions-AppRunner
           aws-region: ${{ env.AWS_REGION }}
 
+      # Login to ECR (needs ecr:GetAuthorizationToken etc.)
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # Create the ECR repo if it doesn't exist (requires ecr:CreateRepository)
       - name: Ensure ECR repository exists
         run: |
           set -e
@@ -50,8 +52,8 @@ jobs:
             --repository-name "${{ env.ECR_REPOSITORY }}" \
             --image-scanning-configuration scanOnPush=true \
             --region "${{ env.AWS_REGION }}"
-        # Requires the role to have ecr:CreateRepository permission
 
+      # Build and push image (tag with SHA and latest)
       - name: Build and push image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -63,6 +65,31 @@ jobs:
           docker tag  $REGISTRY/$REPOSITORY:$TAG $REGISTRY/$REPOSITORY:latest
           docker push $REGISTRY/$REPOSITORY:latest
 
+      # Optional: sync GitHub secrets → AWS Secrets Manager for runtime use by App Runner
+      # Requires: secrets set in GitHub (environment or repo level) and IAM perms for secretsmanager:CreateSecret/PutSecretValue
+      - name: Sync runtime secrets to AWS Secrets Manager
+        env:
+          MAIL_PASSWORD:            ${{ secrets.MAIL_PASSWORD }}
+          AWS_DB_PASSWORD:          ${{ secrets.AWS_DB_PASSWORD }}
+          ENCRYPT_PRIVATE_KEY_PEM:  ${{ secrets.ENCRYPT_PRIVATE_KEY_PEM }}
+          ENCRYPT_PUBLIC_KEY_PEM:   ${{ secrets.ENCRYPT_PUBLIC_KEY_PEM }}
+          FIREBASE_ADMIN_JSON:      ${{ secrets.FIREBASE_ADMIN_JSON }}
+          GOOGLE_CREDENTIALS_JSON:  ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          set -e
+          put() { aws secretsmanager create-secret --name "$1" --secret-string "$2" --region "${{ env.AWS_REGION }}" >/dev/null 2>&1 || \
+                  aws secretsmanager put-secret-value --secret-id "$1" --secret-string "$2" --region "${{ env.AWS_REGION }}" >/dev/null; }
+          # Mail/RDS
+          [ -n "$MAIL_PASSWORD" ] && put mail_password "$MAIL_PASSWORD"
+          [ -n "$AWS_DB_PASSWORD" ] && put rds_password "$AWS_DB_PASSWORD"
+          # Key/JSON files
+          [ -n "$ENCRYPT_PRIVATE_KEY_PEM" ] && put encrypt_private_key "$ENCRYPT_PRIVATE_KEY_PEM"
+          [ -n "$ENCRYPT_PUBLIC_KEY_PEM" ]  && put encrypt_public_key  "$ENCRYPT_PUBLIC_KEY_PEM"
+          [ -n "$FIREBASE_ADMIN_JSON" ]     && put firebase_admin_json "$FIREBASE_ADMIN_JSON"
+          [ -n "$GOOGLE_CREDENTIALS_JSON" ] && put google_credentials_json "$GOOGLE_CREDENTIALS_JSON"
+
+      # Deploy/update App Runner from the ECR image
+      # Ensure the first-time deployer role has iam:CreateServiceLinkedRole and iam:PassRole for the access role
       - name: Deploy to App Runner
         uses: awslabs/amazon-app-runner-deploy@main
         with:
@@ -73,6 +100,4 @@ jobs:
           memory: ${{ env.MEMORY }}
           port: ${{ env.IMAGE_PORT }}
           region: ${{ env.AWS_REGION }}
-          min-size: 1
-          max-size: 2
-          healthcheck-path: /
+          wait-for-service-stability: true
