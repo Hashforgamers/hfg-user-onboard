@@ -21,8 +21,11 @@ class UserService:
     def create_user(data):
         """Creates a new user and related entities in the database, with validations."""
         try:
-            # Check if fid, email, or game_username already exists
+            current_app.logger.debug("Starting user creation process with data: %s", data)
+
+            # Check if fid already exists
             existing_user_by_fid = User.query.filter_by(fid=data['fid']).first()
+            current_app.logger.debug("Checked for existing user by fid: %s", existing_user_by_fid)
             if existing_user_by_fid:
                 return {
                     "status": "error",
@@ -31,7 +34,11 @@ class UserService:
                     "details": {"fid": data['fid']}
                 }
 
-            existing_email = ContactInfo.query.filter_by(email=data['contact']['electronicAddress'].get('emailId')).first()
+            # Check if email already exists
+            existing_email = ContactInfo.query.filter_by(
+                email=data['contact']['electronicAddress'].get('emailId')
+            ).first()
+            current_app.logger.debug("Checked for existing user by email: %s", existing_email)
             if existing_email:
                 return {
                     "status": "error",
@@ -40,7 +47,9 @@ class UserService:
                     "details": {"email": data['contact']['electronicAddress'].get('emailId')}
                 }
 
+            # Check if username already exists
             existing_username = User.query.filter_by(game_username=data['gameUserName']).first()
+            current_app.logger.debug("Checked for existing user by username: %s", existing_username)
             if existing_username:
                 return {
                     "status": "error",
@@ -49,30 +58,20 @@ class UserService:
                     "details": {"gameUserName": data['gameUserName']}
                 }
 
-            # if is_in_cooldown(
-            #     data['contact']['electronicAddress'].get('emailId'),
-            #     data['contact']['electronicAddress'].get('mobileNo')
-            # ):
-            #     return {
-            #         "status": "error",
-            #         "state": "USER_IN_COOLDOWN",
-            #         "message": "Account recently deleted. Please wait 30 days before signing up again.",
-            #         "details": {
-            #             "email": data['contact']['electronicAddress'].get('emailId'),
-            #             "phone": data['contact']['electronicAddress'].get('mobileNo')
-            #         }
-            #     }
-
-            # Parse date of birth if provided
+            # Parse date of birth
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
+            current_app.logger.debug("Parsed date of birth: %s", dob)
 
             referral_input = data.get('referral_code')
+            current_app.logger.debug("Referral input: %s", referral_input)
 
             # Generate a unique referral code
             while True:
                 code = generate_referral_code()
+                current_app.logger.debug("Generated referral code: %s", code)
                 if not User.query.filter_by(referral_code=code).first():
                     break
+            current_app.logger.debug("Final referral code: %s", code)
 
             # Create the User object
             user = User(
@@ -85,57 +84,74 @@ class UserService:
                 parent_type="user",
                 referral_code=code
             )
+            current_app.logger.debug("Created User object: %s", user)
 
             # Add related objects
             UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
+            current_app.logger.debug("Added physical address for user")
+
             UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
+            current_app.logger.debug("Added contact info for user")
 
             if referral_input:
                 referrer = User.query.filter_by(referral_code=referral_input).first()
+                current_app.logger.debug("Found referrer: %s", referrer)
                 if referrer and referrer.referral_code != code:  # Prevent self-referral
                     user.referred_by = referral_input
-                    # Optionally reward both
                     referrer.referral_rewards += 1
-                    db.session.add(ReferralTracking(referrer_code=referrer.referral_code, referred_user_id=user.id))
+                    db.session.add(ReferralTracking(
+                        referrer_code=referrer.referral_code,
+                        referred_user_id=user.id
+                    ))
+                    current_app.logger.debug("Updated referrer rewards and added referral tracking")
 
             db.session.add(user)
-            db.session.flush()  # Assigns user.id from DB without committing
+            current_app.logger.debug("Added user to session")
 
-            # CReation of Hash Wallet
+            db.session.flush()  # Assigns user.id from DB without committing
+            current_app.logger.debug("Flushed session, user id: %s", user.id)
+
+            # Creation of Hash Wallet
             wallet = HashWallet(user_id=user.id, balance=0)
             db.session.add(wallet)
+            current_app.logger.debug("Created and added HashWallet for user")
 
             db.session.commit()
+            current_app.logger.debug("Committed transaction")
 
             # Generate credentials and notify the user
             UserService.generate_credentials_and_notify(user)
+            current_app.logger.debug("Generated credentials and notified user")
 
             return user
 
         except ValueError as ve:
-            current_app.logger.warning(f"Validation error: {str(ve)}")
+            current_app.logger.warning("Validation error: %s", str(ve))
             raise Exception(f"Validation error: {str(ve)}")
 
         except Exception as e:
             db.session.rollback()
-            current_app.logger.error(f"Failed to create user: {str(e)}")
+            current_app.logger.error("Failed to create user: %s", str(e))
             raise Exception("An unexpected error occurred while creating the user.")
 
     @staticmethod
     def _add_physical_address(user, physical_address_data):
-        if physical_address_data:
-            physical_address = PhysicalAddress(
-                address_type=physical_address_data['address_type'],
-                addressLine1=physical_address_data['addressLine1'],
-                addressLine2=physical_address_data.get('addressLine2'),
-                pincode=physical_address_data['pincode'],
-                state=physical_address_data['State'],
-                country=physical_address_data['Country'],
-                is_active=physical_address_data['is_active'],
-                parent_id=user.id,
-                parent_type="user"
-            )
-            user.physical_address = physical_address
+        # If no address or incomplete address, fill with dummy
+        if not physical_address_data or not any(physical_address_data.values()):
+            physical_address_data = {}
+
+        physical_address = PhysicalAddress(
+            address_type=physical_address_data.get('address_type') or "home",
+            addressLine1=physical_address_data.get('addressLine1') or "N/A",
+            addressLine2=physical_address_data.get('addressLine2') or None,
+            pincode=physical_address_data.get('pincode') or "000000",
+            state=physical_address_data.get('State') or "N/A",
+            country=physical_address_data.get('Country') or "N/A",
+            is_active=physical_address_data.get('is_active', True),
+            parent_id=user.id,
+            parent_type="user"
+        )
+        user.physical_address = physical_address
 
     @staticmethod
     def _add_contact_info(user, electronic_address_data):
