@@ -14,6 +14,7 @@ class User(db.Model):
     dob = Column(Date, nullable=True)
     game_username = Column(String(255), unique=True, nullable=False)
     parent_type = Column(String(50), nullable=False, default='user')
+    platform = Column(String(50), nullable=False, default='app')  # DB default [web:3]
 
     created_at = Column(
         DateTime(timezone=True),
