@@ -17,8 +17,8 @@ def create_app():
     mail.init_app(app)
 
     app.register_blueprint(user_blueprint, url_prefix='/api')
-    app.register_blueprint(event_public_bp, url_prefix='/api')
-    app.register_blueprint(event_participation_bp, url_prefix='/api')
+    app.register_blueprint(event_public_bp)
+    app.register_blueprint(event_participation_bp)
 
     # Set up Firebase inside app context
     with app.app_context():
