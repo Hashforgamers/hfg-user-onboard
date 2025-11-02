@@ -1,5 +1,7 @@
 from flask import Flask
 from controllers.user_controller import user_blueprint
+from controllers.event_public_controller import event_public_bp
+from controllers.event_participation_controller import event_participation_bp
 from db.extensions import db, migrate, mail
 from .config import Config
 from services.firebase_service import init_firebase
@@ -15,6 +17,8 @@ def create_app():
     mail.init_app(app)
 
     app.register_blueprint(user_blueprint, url_prefix='/api')
+    app.register_blueprint(event_public_bp)
+    app.register_blueprint(event_participation_bp)
 
     # Set up Firebase inside app context
     with app.app_context():
