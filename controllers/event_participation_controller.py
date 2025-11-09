@@ -32,13 +32,13 @@ def create_team(event_id):
     # Use teamname everywhere instead of name if this matches the DB schema
     t = Team(
         eventid=e.id,
-        teamname=body.get("name"),  # source of name from request
+        teamname=name,
         createdbyuser=int(uid),
-        isindividual=isindividual
+        isindividual=is_individual
     )
     db.session.add(t)
     db.session.flush()
-    db.session.add(TeamMember(teamid=t.id, userid=int(uid), role="captain"))
+    db.session.add(TeamMember(team_id=t.id, user_id=int(uid), role="captain"))
     try:
         db.session.commit()
     except IntegrityError:
