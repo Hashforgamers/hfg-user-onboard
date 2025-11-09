@@ -31,10 +31,10 @@ def create_team(event_id):
 
     # Use teamname everywhere instead of name if this matches the DB schema
     t = Team(
-        eventid=e.id,
-        teamname=name,
-        createdbyuser=int(uid),
-        isindividual=is_individual
+        event_id=e.id,
+        name=name,
+        created_by_user=int(uid),
+        is_individual=is_individual
     )
     db.session.add(t)
     db.session.flush()
