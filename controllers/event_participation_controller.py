@@ -32,7 +32,7 @@ def create_team(event_id):
     # Use teamname everywhere instead of name if this matches the DB schema
     t = Team(
         event_id=e.id,
-        name=name,
+        team_name=name,
         created_by_user=int(uid),
         is_individual=is_individual
     )
