@@ -9,7 +9,7 @@ class Team(db.Model):
     __tablename__ = 'teams'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     event_id = Column(UUID(as_uuid=True), ForeignKey('events.id', ondelete='CASCADE'), nullable=False, index=True)
-    name = Column(String(120), nullable=False)
+    team_name = Column(String(120), nullable=False)
     created_by_user = Column(BigInteger, ForeignKey('users.id', ondelete='RESTRICT'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     is_individual = Column(Boolean, default=False, nullable=False)
