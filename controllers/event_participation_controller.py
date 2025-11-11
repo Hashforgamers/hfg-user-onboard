@@ -44,7 +44,7 @@ def create_team(event_id):
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "team name already exists"}), 409
-    return jsonify({"team_id": str(t.id), "name": t.name}), 201
+    return jsonify({"team_id": str(t.id), "name": t.team_name}), 201
 
 @event_participation_bp.post("/events/<uuid:event_id>/teams/<uuid:team_id>/join")
 def join_team(event_id, team_id):
