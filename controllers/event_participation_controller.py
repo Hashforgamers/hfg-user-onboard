@@ -197,3 +197,33 @@ def payment_webhook():
     db.session.commit()
 
     return jsonify({"ok": True}), 200
+
+@event_participation_bp.get("/events/<uuid:event_id>/teams/<uuid:team_id>/members")
+def get_team_members(event_id, team_id):
+    # Ensure event exists and is visible
+    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+    
+    # Ensure team exists for the event
+    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+
+    # Fetch members joined with user details (optional)
+    members = (
+        db.session.query(TeamMember)
+        .filter(TeamMember.team_id == team_id)
+        .all()
+    )
+
+    # Return a structured response
+    return jsonify({
+        "team_id": str(t.id),
+        "team_name": t.team_name,
+        "is_individual": t.is_individual,
+        "members": [
+            {
+                "user_id": m.user_id,
+                "role": m.role,
+                "joined_at": m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None
+            }
+            for m in members
+        ]
+    }), 200
