@@ -49,10 +49,17 @@ def create_user():
     current_app.logger.debug(f"Started Processing User Onboard Request {request.json} ")
     data = request.json
     try:
-        user = UserService.create_user(data)
-        return jsonify({"message": "User created successfully", "user": user.to_dict()}), 201
+        result = UserService.create_user(data)
+        
+        # Check if it's an error dict
+        if isinstance(result, dict) and result.get('status') == 'error':
+            return jsonify(result), 400
+        
+        # It's a User object
+        return jsonify({"message": "User created successfully", "user": result.to_dict()}), 201
     except Exception as e:
         return jsonify({"message": str(e)}), 400
+
 
 @user_blueprint.route('/users/register-fcm-token', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
