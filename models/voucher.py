@@ -13,7 +13,7 @@ class Voucher(db.Model):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    user = db.relationship("User", backref="vouchers")
+    user = db.relationship("User", back_populates="vouchers")
 
     def __repr__(self):
         return f"<Voucher code={self.code} user_id={self.user_id} active={self.is_active}>"
