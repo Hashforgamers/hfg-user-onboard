@@ -8,12 +8,12 @@ from .utils import generate_credentials, send_email, generate_referral_code
 from werkzeug.security import generate_password_hash
 from models.passwordManager import PasswordManager
 from models.referralTracking import ReferralTracking
-from models.voucher import Voucher  # Import your Voucher model
+from models.voucher import Voucher
 from models.hashWallet import HashWallet
-
-from datetime import datetime
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
+
 
 class UserService:
     
@@ -35,17 +35,17 @@ class UserService:
                 }
 
             # Check if email already exists
-            existing_email = ContactInfo.query.filter_by(
-                email=data['contact']['electronicAddress'].get('emailId')
-            ).first()
-            current_app.logger.debug("Checked for existing user by email: %s", existing_email)
-            if existing_email:
-                return {
-                    "status": "error",
-                    "state": "EMAIL_EXISTS",
-                    "message": "This email is already in use.",
-                    "details": {"email": data['contact']['electronicAddress'].get('emailId')}
-                }
+            email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
+            if email_to_check:
+                existing_email = ContactInfo.query.filter_by(email=email_to_check).first()
+                current_app.logger.debug("Checked for existing user by email: %s", existing_email)
+                if existing_email:
+                    return {
+                        "status": "error",
+                        "state": "EMAIL_EXISTS",
+                        "message": "This email is already in use.",
+                        "details": {"email": email_to_check}
+                    }
 
             # Check if username already exists
             existing_username = User.query.filter_by(game_username=data['gameUserName']).first()
@@ -76,9 +76,9 @@ class UserService:
             # Create the User object
             user = User(
                 fid=data['fid'],
-                avatar_path=data.get('avatar_path'),
-                name=data['name'],
-                gender=data.get('gender'),
+                avatar_path=data.get('avatar_path', ''),
+                name=data.get('name', ''),
+                gender=data.get('gender', ''),
                 dob=dob,
                 game_username=data['gameUserName'],
                 parent_type="user",
@@ -86,11 +86,16 @@ class UserService:
             )
             current_app.logger.debug("Created User object: %s", user)
 
-            # Add related objects
-            UserService._add_physical_address(user, data['contact'].get('physicalAddress'))
+            # Add user to session first
+            db.session.add(user)
+            db.session.flush()  # Assigns user.id from DB without committing
+            current_app.logger.debug("Flushed session, user id: %s", user.id)
+
+            # Add related objects using the relationship (now user.id is available)
+            UserService._add_physical_address(user, data.get('contact', {}).get('physicalAddress'))
             current_app.logger.debug("Added physical address for user")
 
-            UserService._add_contact_info(user, data['contact'].get('electronicAddress'))
+            UserService._add_contact_info(user, data.get('contact', {}).get('electronicAddress'))
             current_app.logger.debug("Added contact info for user")
 
             if referral_input:
@@ -99,17 +104,16 @@ class UserService:
                 if referrer and referrer.referral_code != code:  # Prevent self-referral
                     user.referred_by = referral_input
                     referrer.referral_rewards += 1
-                    db.session.add(ReferralTracking(
+                    
+                    # Flush again to ensure user.id is committed before creating referral tracking
+                    db.session.flush()
+                    
+                    referral_track = ReferralTracking(
                         referrer_code=referrer.referral_code,
                         referred_user_id=user.id
-                    ))
+                    )
+                    db.session.add(referral_track)
                     current_app.logger.debug("Updated referrer rewards and added referral tracking")
-
-            db.session.add(user)
-            current_app.logger.debug("Added user to session")
-
-            db.session.flush()  # Assigns user.id from DB without committing
-            current_app.logger.debug("Flushed session, user id: %s", user.id)
 
             # Creation of Hash Wallet
             wallet = HashWallet(user_id=user.id, balance=0)
@@ -126,43 +130,50 @@ class UserService:
             return user
 
         except ValueError as ve:
+            db.session.rollback()
             current_app.logger.warning("Validation error: %s", str(ve))
             raise Exception(f"Validation error: {str(ve)}")
 
         except Exception as e:
             db.session.rollback()
             current_app.logger.error("Failed to create user: %s", str(e))
-            raise Exception("An unexpected error occurred while creating the user.")
+            raise Exception(f"An unexpected error occurred while creating the user: {str(e)}")
 
     @staticmethod
     def _add_physical_address(user, physical_address_data):
-        # If no address or incomplete address, fill with dummy
-        if not physical_address_data or not any(physical_address_data.values()):
+        """Add physical address to user using relationship"""
+        # If no address or incomplete address, fill with defaults
+        if not physical_address_data:
             physical_address_data = {}
 
         physical_address = PhysicalAddress(
-            address_type=physical_address_data.get('address_type') or "home",
-            addressLine1=physical_address_data.get('addressLine1') or "N/A",
-            addressLine2=physical_address_data.get('addressLine2') or None,
-            pincode=physical_address_data.get('pincode') or "000000",
-            state=physical_address_data.get('State') or "N/A",
-            country=physical_address_data.get('Country') or "N/A",
+            address_type=physical_address_data.get('address_type', 'home'),
+            addressLine1=physical_address_data.get('addressLine1', 'N/A'),
+            addressLine2=physical_address_data.get('addressLine2', ''),
+            pincode=physical_address_data.get('pincode', '000000'),
+            state=physical_address_data.get('State', 'N/A'),
+            country=physical_address_data.get('Country', 'N/A'),
             is_active=physical_address_data.get('is_active', True),
             parent_id=user.id,
             parent_type="user"
         )
+        # Use relationship assignment - this automatically adds to session
         user.physical_address = physical_address
 
     @staticmethod
     def _add_contact_info(user, electronic_address_data):
-        if electronic_address_data:
-            contact_info = ContactInfo(
-                phone=electronic_address_data.get('mobileNo'),
-                email=electronic_address_data.get('emailId'),
-                parent_id=user.id,
-                parent_type="user"
-            )
-            user.contact_info = contact_info
+        """Add contact info to user using relationship"""
+        if not electronic_address_data:
+            electronic_address_data = {}
+            
+        contact_info = ContactInfo(
+            phone=electronic_address_data.get('mobileNo', ''),
+            email=electronic_address_data.get('emailId', ''),
+            parent_id=user.id,
+            parent_type="user"
+        )
+        # Use relationship assignment - this automatically adds to session
+        user.contact_info = contact_info
 
     @staticmethod
     def generate_credentials_and_notify(user):
@@ -184,7 +195,7 @@ class UserService:
 
             db.session.commit()
 
-            # Send email notification
+            # Send email notification (commented out as per your code)
             current_app.logger.info(f"Mail generation started to user: {user.name}")
             # send_email(
             #     subject='Your Account Credentials',
@@ -202,11 +213,26 @@ class UserService:
             raise Exception("Failed to generate credentials and notify user.")
 
     @staticmethod
+    def get_user(user_id):
+        """Fetch a user by ID with eager loading of relationships"""
+        user = User.query.options(
+            joinedload(User.physical_address),
+            joinedload(User.contact_info),
+            joinedload(User.vouchers)
+        ).filter_by(id=user_id).first()
+        return user
+
+    @staticmethod
     def get_user_by_fid(fid):
-        """Fetch a user by FID and expire old vouchers (older than 1 month)."""
-        user = User.query.filter_by(fid=fid).first()
+        """Fetch a user by FID with eager loading and expire old vouchers"""
+        user = User.query.options(
+            joinedload(User.physical_address),
+            joinedload(User.contact_info),
+            joinedload(User.vouchers)
+        ).filter_by(fid=fid).first()
+        
         if not user:
-            return None  # Don't raise here
+            return None
 
         # Expire user's vouchers older than 1 month
         one_month_ago = datetime.utcnow() - timedelta(days=30)
@@ -226,13 +252,15 @@ class UserService:
 
     @staticmethod
     def get_user_vouchers(user_id):
+        """Get all vouchers for a user"""
         return Voucher.query.filter(Voucher.user_id == user_id).all()
 
+    @staticmethod
     def is_in_cooldown(email, phone):
+        """Check if email or phone is in cooldown period"""
         now = datetime.utcnow()
         cooldown = DeletedUserCooldown.query.filter(
             or_(DeletedUserCooldown.email == email, DeletedUserCooldown.phone == phone),
             DeletedUserCooldown.expires_at > now
         ).first()
         return cooldown is not None
-

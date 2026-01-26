@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship, foreign
 from db.extensions import db
 from models.voucher import Voucher
 
+
 class User(db.Model):
     __tablename__ = 'users'
 
@@ -56,6 +57,7 @@ class User(db.Model):
     referred_by = Column(String(10), ForeignKey('users.referral_code'), nullable=True)
     referral_rewards = Column(Integer, default=0)
     fcm_tokens = relationship('FCMToken', back_populates='user', cascade="all, delete-orphan")
+    vouchers = relationship('Voucher', back_populates='user', cascade="all, delete-orphan")
 
     __mapper_args__ = {
         'polymorphic_identity': 'user',
@@ -63,25 +65,36 @@ class User(db.Model):
     }
 
     def to_dict(self):
+        """Safely serialize user object to dictionary"""
+        # Helper function to safely get dict from relationship
+        def safe_serialize(obj):
+            if obj is None:
+                return {}
+            if isinstance(obj, dict):
+                return obj
+            if hasattr(obj, 'to_dict') and callable(obj.to_dict):
+                return obj.to_dict()
+            return {}
+
         return {
-            "avatar_path": self.avatar_path,
-            "name": self.name,
-            "gender": self.gender,
+            "avatar_path": self.avatar_path or "",
+            "name": self.name or "",
+            "gender": self.gender or "",
             "dob": self.dob.strftime('%d-%b-%Y') if self.dob else None,
-            "gameUserName": self.game_username,
+            "gameUserName": self.game_username or "",
             "contact": {
-                "physicalAddress": self.physical_address.to_dict() if self.physical_address else None,
-                "electronicAddress": self.contact_info.to_dict() if self.contact_info else None,
+                "physicalAddress": safe_serialize(self.physical_address),
+                "electronicAddress": safe_serialize(self.contact_info)
             },
-            "referralCode": self.referral_code,
-            "referralRewards": self.referral_rewards,
+            "referralCode": self.referral_code or "",
+            "referralRewards": self.referral_rewards or 0,
             "vouchers": [
                 {
                     "code": v.code,
                     "discountPercentage": v.discount_percentage,
                     "isActive": v.is_active,
-                    "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M')
-                } for v in self.vouchers
+                    "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M') if v.created_at else ""
+                } for v in (self.vouchers if self.vouchers else [])
             ],
             "createdAt": self.created_at.strftime('%d-%b-%Y %H:%M') if self.created_at else None,
             "updatedAt": self.updated_at.strftime('%d-%b-%Y %H:%M') if self.updated_at else None

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from db.extensions import db
 
+
 class PhysicalAddress(db.Model):
     __tablename__ = 'physical_address'
 
@@ -16,24 +17,23 @@ class PhysicalAddress(db.Model):
 
     # Foreign Key to user
     parent_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    parent_type = Column(String(50), nullable=False, default='user')  # 'user' to be used here
+    parent_type = Column(String(50), nullable=False, default='user')
 
     # Relationship to user
     user = relationship(
         'User',
         back_populates='physical_address',
-        uselist=False,
-        cascade="all, delete-orphan",
-        single_parent=True  # Ensure only one PhysicalAddress can be linked to a user at a time
+        foreign_keys=[parent_id]
     )
 
     def to_dict(self):
+        """Safely serialize physical address to dictionary with proper type handling"""
         return {
-            "address_type": self.address_type,
-            "addressLine1": self.addressLine1,
-            "addressLine2": self.addressLine2,
-            "pincode": self.pincode,
-            "State": self.state,
-            "Country": self.country,
-            "is_active": self.is_active,
+            "address_type": str(self.address_type) if self.address_type else "home",
+            "addressLine1": str(self.addressLine1) if self.addressLine1 else "",
+            "addressLine2": str(self.addressLine2) if self.addressLine2 else "",
+            "pincode": str(self.pincode) if self.pincode else "",
+            "State": str(self.state) if self.state else "",
+            "Country": str(self.country) if self.country else "",
+            "is_active": bool(self.is_active) if self.is_active is not None else True
         }
