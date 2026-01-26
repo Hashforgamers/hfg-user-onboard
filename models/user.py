@@ -56,7 +56,8 @@ class User(db.Model):
     referred_by = Column(String(10), ForeignKey('users.referral_code'), nullable=True)
     referral_rewards = Column(Integer, default=0)
     fcm_tokens = relationship('FCMToken', back_populates='user', cascade="all, delete-orphan")
-    
+    vouchers = relationship('Voucher', back_populates='user', cascade="all, delete-orphan")
+
     __mapper_args__ = {
         'polymorphic_identity': 'user',
         'polymorphic_on': parent_type,
