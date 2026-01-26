@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Date, DateTime, Sequence, ForeignKey, text, and_
 from sqlalchemy.orm import relationship, foreign
 from db.extensions import db
-from models.voucher import Voucher
 
 
 class User(db.Model):
