@@ -551,14 +551,14 @@ def user_available_passes():
 
     available_passes = available_passes_query.all()
 
-    # Build result with is_bought info + vendor images
+    # Build result with is_bought info + vendor images + HOUR-BASED PASS DETAILS ✅
     result = []
     for p in available_passes:
         vendor_images = []
         if p.vendor:  # only vendor passes have vendor images
             vendor_images = [{"id": img.id, "url": img.url} for img in p.vendor.images]
 
-        result.append({
+        pass_data = {
             "id": p.id,
             "name": p.name,
             "price": p.price,
@@ -567,11 +567,20 @@ def user_available_passes():
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
-            "vendor_images": vendor_images,   # ✅ added vendor images
-            "is_bought": p.id in bought_pass_ids
-        })
+            "vendor_images": vendor_images,
+            "is_bought": p.id in bought_pass_ids,
+            
+            # ✅ ADDED: Hour-based pass details
+            "pass_mode": p.pass_mode,  # 'date_based' or 'hour_based'
+            "total_hours": float(p.total_hours) if p.total_hours else None,
+            "hour_calculation_mode": p.hour_calculation_mode,  # 'actual_duration' or 'vendor_config'
+            "hours_per_slot": float(p.hours_per_slot) if p.hours_per_slot else None
+        }
+        
+        result.append(pass_data)
 
     return jsonify(result), 200
+
 
 @user_blueprint.route("/user/all_passes", methods=["GET"])
 @auth_required_self(decrypt_user=True) 
@@ -826,3 +835,73 @@ def get_all_fcm():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+    
+@user_blueprint.route('/user/<int:user_id>/available_passes', methods=['GET'])
+def get_user_available_passes_by_id(user_id):
+    """
+    Get available passes for a specific user by user_id.
+    Includes hour-based pass details.
+    Query params: ?type=hash|vendor
+    """
+    try:
+        today = datetime.utcnow().date()
+        pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
+
+        # Check if user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        # --- Get all passes the user has ever purchased (active or expired) ---
+        user_passes_all = db.session.query(UserPass.cafe_pass_id).filter(
+            UserPass.user_id == user_id
+        ).all()
+        bought_pass_ids = set(row[0] for row in user_passes_all)
+
+        # Standard available passes query
+        available_passes_query = CafePass.query.filter(
+            CafePass.is_active == True
+        )
+
+        # Apply type filter
+        if pass_type_filter == 'vendor':
+            available_passes_query = available_passes_query.filter(CafePass.vendor_id.isnot(None))
+        elif pass_type_filter == 'hash':
+            available_passes_query = available_passes_query.filter(CafePass.vendor_id.is_(None))
+
+        available_passes = available_passes_query.all()
+
+        # Build result with hour-based pass details ✅
+        result = []
+        for p in available_passes:
+            vendor_images = []
+            if p.vendor:  # only vendor passes have vendor images
+                vendor_images = [{"id": img.id, "url": img.url} for img in p.vendor.images]
+
+            pass_data = {
+                "id": p.id,
+                "name": p.name,
+                "price": p.price,
+                "days_valid": p.days_valid,
+                "description": p.description,
+                "pass_type": p.pass_type.name if p.pass_type else None,
+                "vendor_id": p.vendor_id,
+                "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+                "vendor_images": vendor_images,
+                "is_bought": p.id in bought_pass_ids,
+                
+                # ✅ Hour-based pass details
+                "pass_mode": p.pass_mode,  # 'date_based' or 'hour_based'
+                "total_hours": float(p.total_hours) if p.total_hours else None,
+                "hour_calculation_mode": p.hour_calculation_mode,  # 'actual_duration' or 'vendor_config'
+                "hours_per_slot": float(p.hours_per_slot) if p.hours_per_slot else None
+            }
+            
+            result.append(pass_data)
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching available passes for user {user_id}: {str(e)}")
+        return jsonify({"error": "Failed to fetch available passes", "details": str(e)}), 500
+
