@@ -239,7 +239,7 @@ def get_user_by_fid_auth(user_fid):
                 current_app.config['ENCRYPT_PUBLIC_KEY']
             ),
             'created_at': ist_now.isoformat(),
-            'exp': ist_now + timedelta(hours=2)
+            'exp': ist_now + timedelta(hours=200)
         }
         custom_jwt = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm="HS256")
 
