@@ -1,8 +1,7 @@
 # models/cafePass.py
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Numeric
 from sqlalchemy.orm import relationship
-from app.extension.extensions import db
-from app.models.passType import PassType 
+from db.extensions import db
 
 class CafePass(db.Model):
     __tablename__ = 'cafe_passes'
