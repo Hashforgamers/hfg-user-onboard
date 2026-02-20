@@ -227,3 +227,44 @@ def get_team_members(event_id, team_id):
             for m in members
         ]
     }), 200
+
+
+@event_participation_bp.get("/users/<int:user_id>/teams")
+def get_user_teams(user_id):
+    """
+    Get all teams a user belongs to, across all events.
+    Optional query param:
+      ?event_id=<uuid>   — filter to a specific event
+    """
+    event_id = request.args.get("event_id")
+
+    q = (
+        db.session.query(Team, TeamMember)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(TeamMember.user_id == user_id)
+    )
+
+    if event_id:
+        q = q.filter(Team.event_id == event_id)
+
+    rows = q.all()
+
+    if not rows:
+        return jsonify([]), 200
+
+    result = []
+    for team, member in rows:
+        # member count for this team
+        member_count = TeamMember.query.filter_by(team_id=team.id).count()
+
+        result.append({
+            "team_id":        str(team.id),
+            "team_name":      team.team_name,
+            "event_id":       str(team.event_id),
+            "is_individual":  team.is_individual,
+            "role":           member.role,           # captain / member
+            "joined_at":      member.joined_at.isoformat() if member.joined_at else None,
+            "member_count":   member_count,
+        })
+
+    return jsonify(result), 200
