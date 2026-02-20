@@ -25,6 +25,8 @@ class Event(db.Model):
     registration_deadline = Column(DateTime(timezone=True))
     capacity_team = Column(Integer)
     capacity_player = Column(Integer)
+    banner_image_url   = Column(Text)           # ← NEW
+    banner_public_id   = Column(Text)
     min_team_size = Column(Integer, default=1, nullable=False)
     max_team_size = Column(Integer, default=5, nullable=False)
     allow_solo = Column(Boolean, default=False, nullable=False)
