@@ -77,6 +77,7 @@ class User(db.Model):
 
         return {
             "avatar_path": self.avatar_path or "",
+            "id": self.id or "",
             "name": self.name or "",
             "gender": self.gender or "",
             "dob": self.dob.strftime('%d-%b-%Y') if self.dob else None,
