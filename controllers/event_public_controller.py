@@ -169,3 +169,48 @@ def get_event_leaderboard(event_id):
             for r in rows
         ]
     }), 200
+
+
+@event_public_bp.get("/events/<uuid:event_id>/results/provisional")
+def get_event_provisional_results(event_id):
+    """
+    Specific event provisional results.
+    Public endpoint.
+    """
+    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+
+    rows = db.session.execute(
+        text("""
+            SELECT
+                pr.id,
+                pr.event_id,
+                pr.team_id,
+                t.team_name,
+                pr.proposed_rank,
+                pr.submitted_by_vendor,
+                pr.published_at
+            FROM provisional_results pr
+            JOIN teams t ON t.id = pr.team_id
+            WHERE pr.event_id = :event_id
+            ORDER BY pr.proposed_rank ASC, t.team_name ASC
+        """),
+        {"event_id": str(e.id)}
+    ).mappings().all()
+
+    return jsonify({
+        "event_id": str(e.id),
+        "event_title": e.title,
+        "result_type": "provisional",
+        "results": [
+            {
+                "id": str(r["id"]),
+                "event_id": str(r["event_id"]),
+                "team_id": str(r["team_id"]),
+                "team_name": r["team_name"],
+                "proposed_rank": int(r["proposed_rank"]),
+                "submitted_by_vendor": int(r["submitted_by_vendor"]),
+                "published_at": r["published_at"].isoformat() if r["published_at"] else None
+            }
+            for r in rows
+        ]
+    }), 200
