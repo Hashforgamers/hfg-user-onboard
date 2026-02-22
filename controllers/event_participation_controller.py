@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from db.extensions import db
 from models.event import Event
 from models.team import Team
@@ -10,6 +12,19 @@ from services.payment_service import create_payment_intent, verify_webhook
 
 
 event_participation_bp = Blueprint("event_participation", __name__, url_prefix="/api")
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _event_flag(start_at, end_at):
+    now = datetime.now(IST)
+    start = start_at.astimezone(IST) if start_at.tzinfo else start_at.replace(tzinfo=IST)
+    end = end_at.astimezone(IST) if end_at.tzinfo else end_at.replace(tzinfo=IST)
+
+    if now < start:
+        return "upcoming"
+    if start <= now <= end:
+        return "live"
+    return "completed"
 
 # Helpers: no JWT, read user_id from body
 def _body():
@@ -268,3 +283,74 @@ def get_user_teams(user_id):
         })
 
     return jsonify(result), 200
+
+
+@event_participation_bp.get("/users/<int:user_id>/tournaments/joined")
+def get_user_joined_tournaments(user_id):
+    rows = (
+        db.session.query(TeamMember, Team, Event)
+        .join(Team, Team.id == TeamMember.team_id)
+        .join(Event, Event.id == Team.event_id)
+        .filter(
+            TeamMember.user_id == user_id,
+            Event.visibility == True
+        )
+        .order_by(Event.start_at.asc(), TeamMember.joined_at.asc())
+        .all()
+    )
+
+    grouped = {"live": [], "upcoming": [], "completed": []}
+    if not rows:
+        return jsonify(grouped), 200
+
+    team_ids = [team.id for _, team, _ in rows]
+    reg_rows = (
+        Registration.query
+        .filter(Registration.team_id.in_(team_ids))
+        .order_by(Registration.created_at.desc())
+        .all()
+    )
+
+    latest_reg_by_team = {}
+    for reg in reg_rows:
+        if reg.team_id not in latest_reg_by_team:
+            latest_reg_by_team[reg.team_id] = reg
+
+    grouped_map = {"live": {}, "upcoming": {}, "completed": {}}
+    for tm, team, event in rows:
+        flag = _event_flag(event.start_at, event.end_at)
+        reg = latest_reg_by_team.get(team.id)
+
+        event_key = str(event.id)
+        if event_key not in grouped_map[flag]:
+            grouped_map[flag][event_key] = {
+                "id": str(event.id),
+                "vendor_id": event.vendor_id,
+                "title": event.title,
+                "description": event.description,
+                "start_at": event.start_at.isoformat(),
+                "end_at": event.end_at.isoformat(),
+                "registration_fee": float(event.registration_fee or 0),
+                "currency": event.currency,
+                "banner_image_url": event.banner_image_url,
+                "flag": flag,
+                "teams": []
+            }
+
+        grouped_map[flag][event_key]["teams"].append({
+            "team_id": str(team.id),
+            "team_name": team.team_name,
+            "is_individual": team.is_individual,
+            "role": tm.role,
+            "joined_at": tm.joined_at.isoformat() if tm.joined_at else None,
+            "registration_id": str(reg.id) if reg else None,
+            "registration_status": reg.status if reg else None,
+            "payment_status": reg.payment_status if reg else None,
+            "registered_at": reg.created_at.isoformat() if reg and reg.created_at else None
+        })
+
+    grouped["live"] = list(grouped_map["live"].values())
+    grouped["upcoming"] = list(grouped_map["upcoming"].values())
+    grouped["completed"] = list(grouped_map["completed"].values())
+
+    return jsonify(grouped), 200
