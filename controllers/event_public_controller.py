@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy import func
+from sqlalchemy import func, text
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from db.extensions import db
@@ -109,4 +109,63 @@ def get_event(event_id):
         "team_count":       int(team_count),
         "banner_image_url": e.banner_image_url,
         "flag":             _event_flag(e.start_at, e.end_at),
+    }), 200
+
+
+@event_public_bp.get("/events/<uuid:event_id>/leaderboard")
+def get_event_leaderboard(event_id):
+    """
+    Specific event leaderboard.
+    Query params:
+      ?stage=auto|winners|provisional
+        auto        -> winners if available, else provisional
+        winners     -> final published winners leaderboard
+        provisional -> provisional leaderboard
+    """
+    stage = (request.args.get("stage") or "auto").strip().lower()
+    if stage not in {"auto", "winners", "provisional"}:
+        return jsonify({"error": "invalid stage. use auto|winners|provisional"}), 400
+
+    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+
+    def _fetch_rows(table_name, rank_column):
+        sql = text(f"""
+            SELECT
+                t.id AS team_id,
+                t.team_name AS team_name,
+                lb.{rank_column} AS rank
+            FROM {table_name} lb
+            JOIN teams t ON t.id = lb.team_id
+            WHERE lb.event_id = :event_id
+            ORDER BY lb.{rank_column} ASC, t.team_name ASC
+        """)
+        return db.session.execute(sql, {"event_id": str(e.id)}).mappings().all()
+
+    selected_stage = stage
+    rows = []
+
+    if stage == "auto":
+        rows = _fetch_rows("winners", "rank")
+        if rows:
+            selected_stage = "winners"
+        else:
+            rows = _fetch_rows("provisional_results", "proposed_rank")
+            selected_stage = "provisional"
+    elif stage == "winners":
+        rows = _fetch_rows("winners", "rank")
+    else:
+        rows = _fetch_rows("provisional_results", "proposed_rank")
+
+    return jsonify({
+        "event_id": str(e.id),
+        "event_title": e.title,
+        "stage": selected_stage,
+        "leaderboard": [
+            {
+                "team_id": str(r["team_id"]),
+                "team_name": r["team_name"],
+                "rank": int(r["rank"])
+            }
+            for r in rows
+        ]
     }), 200
