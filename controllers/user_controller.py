@@ -1,5 +1,5 @@
 from flask import request, jsonify, Blueprint, current_app, g
-from sqlalchemy import text, or_
+from sqlalchemy import text
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
@@ -15,7 +15,6 @@ from models.cafePass import CafePass
 from models.passType import PassType
 from models.transaction import Transaction
 from models.userPass import UserPass
-from models.passModels import PassRedemptionLog
 from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
@@ -32,11 +31,9 @@ from models.voucher import Voucher
 
 from services.security import encode_user, auth_required_self
 
-from firebase_admin import auth
 import jwt
 
 from datetime import datetime, timedelta
-from flask import jsonify
 
 user_blueprint = Blueprint('user', __name__)
 
@@ -50,46 +47,73 @@ def notify_user():
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
-    current_app.logger.debug(f"Started Processing User Onboard Request {request.json} ")
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    required_fields = ("fid", "gameUserName")
+    missing = [field for field in required_fields if not data.get(field)]
+    if missing:
+        return jsonify({
+            "message": "Validation error",
+            "details": f"Missing required fields: {', '.join(missing)}"
+        }), 400
+
     try:
+        current_app.logger.info("Create user request started for fid=%s", data.get("fid"))
         result = UserService.create_user(data)
-        
-        # Check if it's an error dict
+
         if isinstance(result, dict) and result.get('status') == 'error':
-            return jsonify(result), 400
-        
-        # It's a User object
+            state = result.get("state")
+            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 400
+            return jsonify(result), status_code
+
         return jsonify({"message": "User created successfully", "user": result.to_dict()}), 201
-    except Exception as e:
-        return jsonify({"message": str(e)}), 400
+    except Exception:
+        current_app.logger.exception("Create user failed for fid=%s", data.get("fid"))
+        return jsonify({"message": "Internal server error"}), 500
 
 
 @user_blueprint.route('/users/register-fcm-token', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
 def register_fcm_token():
-    user_id = g.auth_user_id 
-    data = request.json
-    token = data.get('token')
-    platform = data.get('platform')
+    user_id = g.auth_user_id
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or "").strip()
+    platform = (data.get('platform') or "").strip().lower() or "unknown"
+    allowed_platforms = {"android", "ios", "web", "unknown"}
 
     if not token:
         return jsonify({'message': 'FCM token is required'}), 400
+    if len(token) > 512:
+        return jsonify({'message': 'FCM token is too long'}), 400
+    if platform not in allowed_platforms:
+        return jsonify({'message': 'Invalid platform'}), 400
 
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
+    try:
+        user_exists = db.session.query(User.id).filter_by(id=user_id).scalar() is not None
+        if not user_exists:
+            return jsonify({'message': 'User not found'}), 404
 
-    existing = FCMToken.query.filter_by(token=token).first()
-    if not existing:
-        new_token = FCMToken(user_id=user.id, token=token, platform=platform)
-        db.session.add(new_token)
-        db.session.commit()
-    else:
-        existing.platform = platform
-        db.session.commit()
+        existing = FCMToken.query.filter_by(token=token).first()
+        if not existing:
+            db.session.add(FCMToken(user_id=user_id, token=token, platform=platform))
+            db.session.commit()
+            return jsonify({'message': 'FCM token registered'}), 201
 
-    return jsonify({'message': 'FCM token registered'}), 200
+        updated = False
+        if existing.user_id != user_id:
+            existing.user_id = user_id
+            updated = True
+        if existing.platform != platform:
+            existing.platform = platform
+            updated = True
+
+        if updated:
+            db.session.commit()
+
+        return jsonify({'message': 'FCM token registered'}), 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to register FCM token for user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
 
 @user_blueprint.route('/users', methods=['DELETE'])
 @auth_required_self(decrypt_user=True)
@@ -100,10 +124,11 @@ def delete_user_id():
         user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
 
         # Remove pass redemption logs linked directly to this user or their passes
-        pass_log_filters = [PassRedemptionLog.user_id == user_id]
-        if user_pass_ids:
-            pass_log_filters.append(PassRedemptionLog.user_pass_id.in_(user_pass_ids))
-        PassRedemptionLog.query.filter(or_(*pass_log_filters)).delete(synchronize_session=False)
+        db.session.execute(text("""
+            DELETE FROM pass_redemption_logs
+            WHERE user_id = :user_id
+               OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id)
+        """), {"user_id": user_id})
 
         # Remove team memberships and teams created by this user (teams.created_by_user is RESTRICT)
         TeamMember.query.filter_by(user_id=user_id).delete(synchronize_session=False)
@@ -259,39 +284,58 @@ def delete_user_id():
 @auth_required_self(decrypt_user=True)
 def get_user():
     user_id = g.auth_user_id
-    user = UserService.get_user(user_id)
-    if not user:
-        return jsonify({"message": "User not found"}), 404
+    try:
+        user = UserService.get_user(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
 
-    return jsonify({"user": user.to_dict()})
+        return jsonify({"user": user.to_dict()}), 200
+    except Exception:
+        current_app.logger.exception("Get user failed for user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
 
 @user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid_auth(user_fid):
     try:
-        # Your user retrieval logic
+        user_fid = (user_fid or "").strip()
+        if not user_fid:
+            return jsonify({'message': 'user_fid is required'}), 400
+        if len(user_fid) > 255:
+            return jsonify({'message': 'user_fid is too long'}), 400
+
         user = UserService.get_user_by_fid(user_fid)
         if not user:
             return jsonify({'message': 'User not found'}), 404
 
-       # Create JWT token with IST timestamp and 2-hour expiry
-        ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)  # Convert UTC → IST
-        payload = {
-            'uid': encode_user(
-                user.id,
-                current_app.config['ENCRYPT_PUBLIC_KEY']
-            ),
-            'created_at': ist_now.isoformat(),
-            'exp': ist_now + timedelta(hours=200)
-        }
-        custom_jwt = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm="HS256")
+        token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
+        now_utc = datetime.utcnow()
+        encoded_user_id = encode_user(
+            user.id,
+            current_app.config['ENCRYPT_PUBLIC_KEY']
+        )
 
-        # Respond with user data and JWT token in Authorization header
-        response = jsonify({'user': user.to_dict()})
+        payload = {
+            # Keep both keys to preserve compatibility with existing consumers.
+            'uid': encoded_user_id,
+            'uuid': encoded_user_id,
+            'iat': now_utc,
+            'created_at': now_utc.isoformat(),
+            'exp': now_utc + timedelta(hours=token_ttl_hours)
+        }
+        jwt_secret = current_app.config.get('JWT_SECRET_KEY') or current_app.config.get('SECRET_KEY')
+        if not jwt_secret:
+            current_app.logger.error("JWT secret missing for fid auth endpoint")
+            return jsonify({'message': 'Internal server error'}), 500
+
+        custom_jwt = jwt.encode(payload, jwt_secret, algorithm="HS256")
+
+        response = jsonify({'user': user.to_dict(), 'token': custom_jwt})
         response.headers['Authorization'] = f'Bearer {custom_jwt}'
+        response.headers['Cache-Control'] = 'no-store'
         return response, 200
 
-    except Exception as e:
-        current_app.logger.error(f'Internal error fetching user: {e}')
+    except Exception:
+        current_app.logger.exception('Internal error fetching user by fid')
         return jsonify({'message': 'Internal server error'}), 500
 
 @user_blueprint.route('/users/create-voucher', methods=['POST'])
