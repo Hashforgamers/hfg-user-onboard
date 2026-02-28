@@ -376,6 +376,99 @@ def leave_team(event_id, team_id):
     return jsonify({"ok": True}), 200
 
 
+@event_participation_bp.delete("/events/<uuid:event_id>/teams/<uuid:team_id>/members/<int:target_user_id>/force-remove")
+def force_remove_team_member(event_id, team_id, target_user_id):
+    """
+    Captain-only member removal endpoint.
+    Body:
+      { "user_id": <captain_user_id> }
+    """
+    body = _body()
+    requester_user_id = body.get("user_id")
+    if requester_user_id is None:
+        return jsonify({"error": "user_id required"}), 400
+
+    try:
+        requester_user_id = int(requester_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "user_id must be an integer"}), 400
+
+    if requester_user_id == int(target_user_id):
+        return jsonify({"error": "captain cannot remove self using force-remove. use leave endpoint"}), 400
+
+    auth_row = db.session.execute(text("""
+        SELECT
+            EXISTS(
+                SELECT 1
+                FROM teams t
+                JOIN events e ON e.id = t.event_id
+                WHERE t.id = :team_id
+                  AND e.id = :event_id
+                  AND e.visibility = true
+            ) AS team_exists,
+            (
+                SELECT tm.role
+                FROM team_members tm
+                WHERE tm.team_id = :team_id AND tm.user_id = :requester_user_id
+                LIMIT 1
+            ) AS requester_role
+    """), {
+        "team_id": str(team_id),
+        "event_id": str(event_id),
+        "requester_user_id": requester_user_id,
+    }).mappings().first()
+
+    if not auth_row or not auth_row["team_exists"]:
+        return jsonify({"message": "Not Found"}), 404
+    if not auth_row["requester_role"]:
+        return jsonify({"error": "only team members can perform this action"}), 403
+    if auth_row["requester_role"] != "captain":
+        return jsonify({"error": "only captain can force remove members"}), 403
+
+    deleted_row = db.session.execute(text("""
+        DELETE FROM team_members tm
+        USING teams t, events e
+        WHERE tm.team_id = t.id
+          AND t.id = :team_id
+          AND t.event_id = e.id
+          AND e.id = :event_id
+          AND e.visibility = true
+          AND tm.user_id = :target_user_id
+          AND tm.role <> 'captain'
+        RETURNING tm.user_id
+    """), {
+        "team_id": str(team_id),
+        "event_id": str(event_id),
+        "target_user_id": int(target_user_id),
+    }).mappings().first()
+
+    if not deleted_row:
+        target_row = db.session.execute(text("""
+            SELECT tm.role
+            FROM team_members tm
+            WHERE tm.team_id = :team_id
+              AND tm.user_id = :target_user_id
+            LIMIT 1
+        """), {
+            "team_id": str(team_id),
+            "target_user_id": int(target_user_id),
+        }).mappings().first()
+        if not target_row:
+            return jsonify({"error": "target user is not a team member"}), 404
+        if target_row["role"] == "captain":
+            return jsonify({"error": "cannot force remove captain"}), 400
+        return jsonify({"error": "unable to remove member"}), 409
+
+    db.session.commit()
+    _invalidate_participation_cache(event_id=event_id, team_id=team_id)
+
+    return jsonify({
+        "ok": True,
+        "message": "member removed successfully",
+        "removed_user_id": int(deleted_row["user_id"])
+    }), 200
+
+
 @event_participation_bp.post("/events/<uuid:event_id>/register")
 def register_team(event_id):
     body = _body()
