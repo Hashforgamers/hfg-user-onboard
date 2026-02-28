@@ -36,12 +36,15 @@ import jwt
 
 from datetime import datetime, timedelta
 import time
+import uuid
 
 user_blueprint = Blueprint('user', __name__)
 _USER_FID_CACHE = {}
 _USER_FID_CACHE_MAX_SIZE = 10000
 _USER_CACHE = {}
 _USER_CACHE_MAX_SIZE = 10000
+_USER_SEARCH_CACHE = {}
+_USER_SEARCH_CACHE_MAX_SIZE = 20000
 
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
@@ -297,20 +300,33 @@ def search_users():
         ).strip()
 
         if not q:
-            return jsonify({"users": [], "count": 0, "page": 1, "limit": 20, "query": q}), 200
+            return jsonify({"users": [], "count": 0, "page": 1, "limit": 20, "query": q, "has_more": False}), 200
 
         limit = request.args.get("limit", default=20, type=int)
         page = request.args.get("page", default=1, type=int)
+        include_count = request.args.get("include_count", default="false").lower() == "true"
         if limit <= 0 or limit > 50:
             return jsonify({"message": "limit must be between 1 and 50"}), 400
         if page <= 0:
             return jsonify({"message": "page must be >= 1"}), 400
+        if len(q) > 64:
+            return jsonify({"message": "query too long"}), 400
 
-        pattern_prefix = f"{q.lower()}%"
+        # Fast path: game username prefix search (index-friendly).
+        # For typeahead, this avoids expensive lower()/count scans on each keystroke.
         offset = (page - 1) * limit
         auth_user_id = g.auth_user_id
+        now_ts = time.time()
+        cache_ttl_sec = int(current_app.config.get("USER_SEARCH_CACHE_TTL_SEC", 10))
+        cache_key = f"{auth_user_id}|{q}|{limit}|{page}|{int(include_count)}"
+        cached = _USER_SEARCH_CACHE.get(cache_key)
+        if cached and cached["expires_at"] > now_ts:
+            return jsonify(cached["payload"]), 200
 
-        # Rank exact + prefix username matches first for real-time typing UX.
+        q_prefix = q
+        q_prefix_hi = f"{q_prefix}\uffff"
+        fetch_limit = limit + 1
+
         rows = db.session.execute(text("""
             SELECT
                 u.id,
@@ -321,47 +337,49 @@ def search_users():
             FROM users u
             WHERE u.parent_type = 'user'
               AND u.id <> :auth_user_id
-              AND (
-                    lower(u.game_username) LIKE :pattern_prefix
-                 OR lower(u.name) LIKE :pattern_prefix
-              )
-            ORDER BY
-                CASE
-                    WHEN lower(u.game_username) = :exact_q THEN 0
-                    WHEN lower(u.game_username) LIKE :pattern_prefix THEN 1
-                    WHEN lower(u.name) LIKE :pattern_prefix THEN 2
-                    ELSE 3
-                END,
-                u.game_username ASC
-            LIMIT :limit OFFSET :offset
+              AND u.game_username >= :q_prefix
+              AND u.game_username < :q_prefix_hi
+            ORDER BY u.game_username ASC
+            LIMIT :fetch_limit OFFSET :offset
         """), {
             "auth_user_id": auth_user_id,
-            "pattern_prefix": pattern_prefix,
-            "exact_q": q.lower(),
-            "limit": limit,
+            "q_prefix": q_prefix,
+            "q_prefix_hi": q_prefix_hi,
+            "fetch_limit": fetch_limit,
             "offset": offset
         }).mappings().all()
 
-        # Separate count query to support pagination in UI.
-        total_count = db.session.execute(text("""
-            SELECT COUNT(1)
-            FROM users u
-            WHERE u.parent_type = 'user'
-              AND u.id <> :auth_user_id
-              AND (
-                    lower(u.game_username) LIKE :pattern_prefix
-                 OR lower(u.name) LIKE :pattern_prefix
-              )
-        """), {
-            "auth_user_id": auth_user_id,
-            "pattern_prefix": pattern_prefix,
-        }).scalar() or 0
+        # Fallback for case-insensitive behavior if fast case-sensitive pass is empty.
+        if not rows:
+            pattern_prefix_ci = f"{q.lower()}%"
+            rows = db.session.execute(text("""
+                SELECT
+                    u.id,
+                    u.name,
+                    u.game_username,
+                    u.avatar_path,
+                    u.fid
+                FROM users u
+                WHERE u.parent_type = 'user'
+                  AND u.id <> :auth_user_id
+                  AND lower(u.game_username) LIKE :pattern_prefix_ci
+                ORDER BY u.game_username ASC
+                LIMIT :fetch_limit OFFSET :offset
+            """), {
+                "auth_user_id": auth_user_id,
+                "pattern_prefix_ci": pattern_prefix_ci,
+                "fetch_limit": fetch_limit,
+                "offset": offset
+            }).mappings().all()
 
-        return jsonify({
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+
+        payload = {
             "query": q,
             "page": page,
             "limit": limit,
-            "count": int(total_count),
+            "has_more": has_more,
             "users": [
                 {
                     "id": row["id"],
@@ -372,7 +390,33 @@ def search_users():
                 }
                 for row in rows
             ]
-        }), 200
+        }
+
+        # Count is optional because COUNT(*) is expensive under high QPS typeahead.
+        if include_count:
+            pattern_prefix_ci = f"{q.lower()}%"
+            total_count = db.session.execute(text("""
+                SELECT COUNT(1)
+                FROM users u
+                WHERE u.parent_type = 'user'
+                  AND u.id <> :auth_user_id
+                  AND lower(u.game_username) LIKE :pattern_prefix_ci
+            """), {
+                "auth_user_id": auth_user_id,
+                "pattern_prefix_ci": pattern_prefix_ci,
+            }).scalar() or 0
+            payload["count"] = int(total_count)
+        else:
+            payload["count"] = None
+
+        if len(_USER_SEARCH_CACHE) >= _USER_SEARCH_CACHE_MAX_SIZE:
+            _USER_SEARCH_CACHE.pop(next(iter(_USER_SEARCH_CACHE)))
+        _USER_SEARCH_CACHE[cache_key] = {
+            "payload": payload,
+            "expires_at": now_ts + cache_ttl_sec,
+        }
+
+        return jsonify(payload), 200
     except Exception:
         current_app.logger.exception("User search failed")
         return jsonify({"message": "Internal server error"}), 500
@@ -1080,4 +1124,66 @@ def mark_notification_read(notification_id):
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Failed to mark notification read for user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
+
+
+@user_blueprint.route('/users/notifications/demo', methods=['POST'])
+@auth_required_self(decrypt_user=True)
+def trigger_demo_notification():
+    """
+    Demo endpoint to create a notification + trigger FCM with invite-like payload.
+    """
+    user_id = g.auth_user_id
+    data = request.get_json(silent=True) or {}
+    invite_status = (data.get("invite_status") or "pending").strip().lower()
+    if invite_status not in {"pending", "accepted", "rejected"}:
+        return jsonify({"message": "invite_status must be one of pending|accepted|rejected"}), 400
+
+    try:
+        reference_id = str(data.get("reference_id") or uuid.uuid4())
+        event_id = str(data.get("event_id") or uuid.uuid4())
+        invite_id = str(data.get("invite_id") or uuid.uuid4())
+        title = (data.get("title") or "Demo Team Invite").strip()
+        message = (data.get("message") or f"Demo invite status: {invite_status}").strip()
+
+        notification = Notification(
+            user_id=user_id,
+            type="demo_notification",
+            reference_id=reference_id,
+            title=title,
+            message=message,
+            is_read=False,
+        )
+        db.session.add(notification)
+        db.session.commit()
+
+        fcm_payload = {
+            "type": "new_notification",
+            "notification_id": str(notification.id),
+            "reference_id": reference_id,
+            "event_id": event_id,
+            "invite_id": invite_id,
+            "invite_status": invite_status,
+        }
+
+        tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == user_id).all()
+        sent_count = 0
+        for token_row in tokens:
+            send_notification(
+                token=token_row[0],
+                title=title,
+                body=message,
+                data=fcm_payload,
+            )
+            sent_count += 1
+
+        return jsonify({
+            "ok": True,
+            "notification": notification.to_dict(),
+            "fcm_payload": fcm_payload,
+            "devices_targeted": sent_count
+        }), 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to trigger demo notification for user_id=%s", user_id)
         return jsonify({"message": "Internal server error"}), 500
