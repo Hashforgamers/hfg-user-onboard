@@ -1,5 +1,5 @@
 from flask import request, jsonify, Blueprint, current_app, g
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
@@ -15,6 +15,7 @@ from models.cafePass import CafePass
 from models.passType import PassType
 from models.transaction import Transaction
 from models.userPass import UserPass
+from models.passModels import PassRedemptionLog
 from models.extraServiceCategory import ExtraServiceCategory
 from models.extraServiceMenu import ExtraServiceMenu
 # Add this line to your existing imports at the top of the file
@@ -23,6 +24,9 @@ from models.paymentTransactionMapping import PaymentTransactionMapping
 from models.physicalAddress import PhysicalAddress
 from models.contactInfo import ContactInfo
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
+from models.team import Team
+from models.teamMember import TeamMember
+from models.referralTracking import ReferralTracking
 
 from models.voucher import Voucher
 
@@ -92,6 +96,22 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id
     try:
+        # Keep pass IDs upfront for dependent cleanup (transactions/logs)
+        user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
+
+        # Remove pass redemption logs linked directly to this user or their passes
+        pass_log_filters = [PassRedemptionLog.user_id == user_id]
+        if user_pass_ids:
+            pass_log_filters.append(PassRedemptionLog.user_pass_id.in_(user_pass_ids))
+        PassRedemptionLog.query.filter(or_(*pass_log_filters)).delete(synchronize_session=False)
+
+        # Remove team memberships and teams created by this user (teams.created_by_user is RESTRICT)
+        TeamMember.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+        Team.query.filter_by(created_by_user=user_id).delete(synchronize_session=False)
+
+        # Remove referral-tracking rows referencing this user
+        ReferralTracking.query.filter_by(referred_user_id=user_id).delete(synchronize_session=False)
+
         # 1. Delete wallet transactions
         HashWalletTransaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
 
@@ -116,9 +136,6 @@ def delete_user_id():
         # cleanup after storing values
         PhysicalAddress.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
         ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
-
-        # 6. Get user pass IDs
-        user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
 
         # 7. Delete payment transaction mappings
         PaymentTransactionMapping.query.filter(
@@ -170,12 +187,18 @@ def delete_user_id():
                     DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
                         SELECT id FROM transactions WHERE user_id = :user_id
                     );
+                    DELETE FROM pass_redemption_logs
+                    WHERE user_id = :user_id
+                       OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
+                    DELETE FROM team_members WHERE user_id = :user_id;
+                    DELETE FROM teams WHERE created_by_user = :user_id;
+                    DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
                     DELETE FROM user_hash_coins WHERE user_id = :user_id;
                     DELETE FROM fcm_tokens WHERE user_id = :user_id;
                     DELETE FROM vouchers WHERE user_id = :user_id;
-                    DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM transactions WHERE user_id = :user_id OR
                         (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
+                    DELETE FROM user_passes WHERE user_id = :user_id;
                     DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
                     DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
                     DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
@@ -196,6 +219,25 @@ def delete_user_id():
         if "No such polymorphic_identity" in error_msg:
             try:
                 db.session.execute(text("""
+                    DELETE FROM pass_redemption_logs
+                    WHERE user_id = :user_id
+                       OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
+                    DELETE FROM team_members WHERE user_id = :user_id;
+                    DELETE FROM teams WHERE created_by_user = :user_id;
+                    DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
+                    DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
+                        SELECT id FROM transactions WHERE user_id = :user_id
+                    );
+                    DELETE FROM user_hash_coins WHERE user_id = :user_id;
+                    DELETE FROM fcm_tokens WHERE user_id = :user_id;
+                    DELETE FROM vouchers WHERE user_id = :user_id;
+                    DELETE FROM transactions WHERE user_id = :user_id OR
+                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
+                    DELETE FROM user_passes WHERE user_id = :user_id;
+                    DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
+                    DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
+                    DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
+                    DELETE FROM hash_wallets WHERE user_id = :user_id;
                     DELETE FROM users WHERE id = :user_id
                 """), {"user_id": user_id})
                 db.session.commit()
@@ -904,4 +946,3 @@ def get_user_available_passes_by_id(user_id):
     except Exception as e:
         current_app.logger.error(f"Error fetching available passes for user {user_id}: {str(e)}")
         return jsonify({"error": "Failed to fetch available passes", "details": str(e)}), 500
-
