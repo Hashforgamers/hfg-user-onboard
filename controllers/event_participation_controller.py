@@ -1,8 +1,11 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor
+import os
+import time
 from db.extensions import db
 from models.event import Event
 from models.team import Team
@@ -18,6 +21,9 @@ from services.firebase_service import send_notification
 
 event_participation_bp = Blueprint("event_participation", __name__, url_prefix="/api")
 IST = ZoneInfo("Asia/Kolkata")
+_PUSH_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("FCM_PUSH_WORKERS", "16")))
+_EVENT_PARTICIPATION_CACHE = {}
+_EVENT_PARTICIPATION_CACHE_MAX_SIZE = 5000
 
 
 def _event_flag(start_at, end_at):
@@ -36,15 +42,41 @@ def _body():
     return request.get_json(silent=True) or {}
 
 
-def _push_notification_for_user(user_id, title, message, data):
-    tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == int(user_id)).all()
-    for token_row in tokens:
+def _send_notifications_batch(tokens, title, message, data):
+    for token in tokens:
         send_notification(
-            token=token_row[0],
+            token=token,
             title=title,
             body=message,
             data=data,
         )
+
+
+def _dispatch_push_async(tokens, title, message, data):
+    if not tokens:
+        return
+    try:
+        _PUSH_EXECUTOR.submit(_send_notifications_batch, tokens, title, message, data)
+    except Exception:
+        # Never fail request path if async dispatch cannot be queued.
+        pass
+
+
+def _invalidate_participation_cache(event_id=None, team_id=None):
+    if event_id is None and team_id is None:
+        _EVENT_PARTICIPATION_CACHE.clear()
+        return
+    prefixes = []
+    if event_id and team_id:
+        prefixes.append(f"members:{event_id}:{team_id}")
+    for key in list(_EVENT_PARTICIPATION_CACHE.keys()):
+        if any(key.startswith(prefix) for prefix in prefixes):
+            _EVENT_PARTICIPATION_CACHE.pop(key, None)
+
+
+def _push_notification_for_user(user_id, title, message, data):
+    tokens = [r[0] for r in db.session.query(FCMToken.token).filter(FCMToken.user_id == int(user_id)).all() if r and r[0]]
+    _dispatch_push_async(tokens, title, message, data)
 
 @event_participation_bp.post("/events/<uuid:event_id>/teams")
 def create_team(event_id):
@@ -75,6 +107,7 @@ def create_team(event_id):
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "team name already exists"}), 409
+    _invalidate_participation_cache(event_id=e.id, team_id=t.id)
     return jsonify({"team_id": str(t.id), "name": t.team_name}), 201
 
 @event_participation_bp.post("/events/<uuid:event_id>/teams/<uuid:team_id>/join")
@@ -85,9 +118,10 @@ def join_team(event_id, team_id):
         return jsonify({"error": "user_id required"}), 400
 
     e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
-    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+    # Row lock serializes join attempts per team, reducing race under concurrency.
+    t = Team.query.filter_by(id=team_id, event_id=e.id).with_for_update().first_or_404()
 
-    size = TeamMember.query.filter_by(team_id=team_id).count()
+    size = db.session.query(func.count(TeamMember.user_id)).filter_by(team_id=team_id).scalar() or 0
     if t.is_individual or e.max_team_size == 1:
         return jsonify({"error": "individual team cannot accept members"}), 400
     if e.max_team_size and size >= e.max_team_size:
@@ -115,22 +149,17 @@ def join_team(event_id, team_id):
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "already joined"}), 409
+    _invalidate_participation_cache(event_id=e.id, team_id=t.id)
 
     if notification is not None:
-        tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == notification.user_id).all()
+        tokens = [r[0] for r in db.session.query(FCMToken.token).filter(FCMToken.user_id == notification.user_id).all() if r and r[0]]
         payload = {
             "type": "new_notification",
             "notification_id": str(notification.id),
             "reference_id": str(t.id),
             "event_id": str(e.id),
         }
-        for token_row in tokens:
-            send_notification(
-                token=token_row[0],
-                title=notification.title,
-                body=notification.message,
-                data=payload,
-            )
+        _dispatch_push_async(tokens, notification.title, notification.message, payload)
 
     return jsonify({
         "ok": True,
@@ -153,7 +182,7 @@ def invite_user_to_team(event_id, team_id):
         return jsonify({"error": "cannot invite yourself"}), 400
 
     e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
-    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+    t = Team.query.filter_by(id=team_id, event_id=e.id).with_for_update().first_or_404()
 
     if t.is_individual or e.max_team_size == 1:
         return jsonify({"error": "individual team cannot accept invitations"}), 400
@@ -232,13 +261,13 @@ def respond_team_invite(event_id, team_id, invite_id):
     user_id = int(user_id)
 
     e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
-    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+    t = Team.query.filter_by(id=team_id, event_id=e.id).with_for_update().first_or_404()
 
     invite = TeamInvite.query.filter_by(
         id=invite_id,
         event_id=e.id,
         team_id=t.id,
-    ).first_or_404()
+    ).with_for_update().first_or_404()
 
     if invite.invited_user_id != user_id:
         return jsonify({"error": "only invited user can respond"}), 403
@@ -249,7 +278,7 @@ def respond_team_invite(event_id, team_id, invite_id):
     invitee_name = db.session.query(User.name).filter(User.id == invite.invited_user_id).scalar() or "User"
 
     if action == "accept":
-        size = TeamMember.query.filter_by(team_id=team_id).count()
+        size = db.session.query(func.count(TeamMember.user_id)).filter_by(team_id=team_id).scalar() or 0
         if t.is_individual or e.max_team_size == 1:
             return jsonify({"error": "individual team cannot accept members"}), 400
         if e.max_team_size and size >= e.max_team_size:
@@ -270,6 +299,7 @@ def respond_team_invite(event_id, team_id, invite_id):
         )
         db.session.add(inviter_notification)
         db.session.commit()
+        _invalidate_participation_cache(event_id=e.id, team_id=t.id)
 
         _push_notification_for_user(
             user_id=invite.inviter_user_id,
@@ -304,6 +334,7 @@ def respond_team_invite(event_id, team_id, invite_id):
     )
     db.session.add(inviter_notification)
     db.session.commit()
+    _invalidate_participation_cache(event_id=e.id, team_id=t.id)
 
     _push_notification_for_user(
         user_id=invite.inviter_user_id,
@@ -340,6 +371,7 @@ def leave_team(event_id, team_id):
 
     db.session.delete(tm)
     db.session.commit()
+    _invalidate_participation_cache(event_id=event_id, team_id=team_id)
 
     return jsonify({"ok": True}), 200
 
@@ -353,22 +385,23 @@ def register_team(event_id):
         return jsonify({"error": "user_id and team_id required"}), 400
 
     e = Event.query.filter_by(id=event_id, visibility=True, status="published").first_or_404()
-    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+    t = Team.query.filter_by(id=team_id, event_id=e.id).with_for_update().first_or_404()
 
     is_member = TeamMember.query.filter_by(team_id=team_id, user_id=int(uid)).first() is not None
     if not is_member:
         return jsonify({"error": "only team member can register"}), 403
 
-    team_count = db.session.query(func.count(Team.id)).filter(Team.event_id == e.id).scalar()
+    counts = db.session.execute(text("""
+        SELECT
+            (SELECT COUNT(*)::int FROM teams WHERE event_id = :event_id) AS team_count,
+            (SELECT COUNT(*)::int FROM team_members tm
+                JOIN teams t ON t.id = tm.team_id
+                WHERE t.event_id = :event_id) AS player_count
+    """), {"event_id": str(e.id)}).mappings().first()
+    team_count = int((counts or {}).get("team_count") or 0)
+    player_count = int((counts or {}).get("player_count") or 0)
     if e.capacity_team and team_count >= e.capacity_team:
         return jsonify({"error": "team capacity reached"}), 409
-
-    player_count = (
-        db.session.query(func.count(TeamMember.user_id))
-        .join(Team, Team.id == TeamMember.team_id)
-        .filter(Team.event_id == e.id)
-        .scalar()
-    )
 
     cap_player = getattr(e, "capacity_player", None)
     if cap_player and player_count >= cap_player:
@@ -449,33 +482,47 @@ def payment_webhook():
 
 @event_participation_bp.get("/events/<uuid:event_id>/teams/<uuid:team_id>/members")
 def get_team_members(event_id, team_id):
-    # Ensure event exists and is visible
-    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
-    
-    # Ensure team exists for the event
-    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+    cache_ttl_sec = 5
+    cache_key = f"members:{event_id}:{team_id}"
+    now_ts = time.time()
+    cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
+    if cached and cached["expires_at"] > now_ts:
+        return jsonify(cached["payload"]), 200
 
-    # Fetch members joined with user details (optional)
-    members = (
-        db.session.query(TeamMember)
-        .filter(TeamMember.team_id == team_id)
-        .all()
-    )
+    row = db.session.execute(text("""
+        SELECT t.id, t.team_name, t.is_individual
+        FROM teams t
+        JOIN events e ON e.id = t.event_id
+        WHERE e.id = :event_id AND e.visibility = true AND t.id = :team_id
+        LIMIT 1
+    """), {"event_id": str(event_id), "team_id": str(team_id)}).mappings().first()
+    if not row:
+        return jsonify({"message": "Not Found"}), 404
 
-    # Return a structured response
-    return jsonify({
-        "team_id": str(t.id),
-        "team_name": t.team_name,
-        "is_individual": t.is_individual,
+    members = db.session.execute(text("""
+        SELECT tm.user_id, tm.role, tm.joined_at
+        FROM team_members tm
+        WHERE tm.team_id = :team_id
+        ORDER BY tm.joined_at ASC
+    """), {"team_id": str(team_id)}).mappings().all()
+
+    payload = {
+        "team_id": str(row["id"]),
+        "team_name": row["team_name"],
+        "is_individual": row["is_individual"],
         "members": [
             {
-                "user_id": m.user_id,
-                "role": m.role,
-                "joined_at": m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None
+                "user_id": m["user_id"],
+                "role": m["role"],
+                "joined_at": m["joined_at"].isoformat() if m["joined_at"] else None
             }
             for m in members
         ]
-    }), 200
+    }
+    if len(_EVENT_PARTICIPATION_CACHE) >= _EVENT_PARTICIPATION_CACHE_MAX_SIZE:
+        _EVENT_PARTICIPATION_CACHE.pop(next(iter(_EVENT_PARTICIPATION_CACHE)))
+    _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": payload, "expires_at": now_ts + cache_ttl_sec}
+    return jsonify(payload), 200
 
 
 @event_participation_bp.get("/users/<int:user_id>/teams")
