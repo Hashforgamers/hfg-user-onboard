@@ -482,7 +482,7 @@ def payment_webhook():
 
 @event_participation_bp.get("/events/<uuid:event_id>/teams/<uuid:team_id>/members")
 def get_team_members(event_id, team_id):
-    cache_ttl_sec = 5
+    cache_ttl_sec = 20
     cache_key = f"members:{event_id}:{team_id}"
     now_ts = time.time()
     cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
@@ -490,21 +490,36 @@ def get_team_members(event_id, team_id):
         return jsonify(cached["payload"]), 200
 
     row = db.session.execute(text("""
-        SELECT t.id, t.team_name, t.is_individual
+        SELECT
+            t.id,
+            t.team_name,
+            t.is_individual,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'id', tm.user_id,
+                        'user_id', tm.user_id,
+                        'name', COALESCE(u.name, ''),
+                        'gameUserName', COALESCE(u.game_username, ''),
+                        'role', tm.role,
+                        'joined_at', tm.joined_at
+                    )
+                    ORDER BY tm.joined_at ASC
+                ) FILTER (WHERE tm.user_id IS NOT NULL),
+                '[]'::json
+            ) AS members
         FROM teams t
         JOIN events e ON e.id = t.event_id
-        WHERE e.id = :event_id AND e.visibility = true AND t.id = :team_id
+        LEFT JOIN team_members tm ON tm.team_id = t.id
+        LEFT JOIN users u ON u.id = tm.user_id
+        WHERE e.id = :event_id
+          AND e.visibility = true
+          AND t.id = :team_id
+        GROUP BY t.id, t.team_name, t.is_individual
         LIMIT 1
     """), {"event_id": str(event_id), "team_id": str(team_id)}).mappings().first()
     if not row:
         return jsonify({"message": "Not Found"}), 404
-
-    members = db.session.execute(text("""
-        SELECT tm.user_id, tm.role, tm.joined_at
-        FROM team_members tm
-        WHERE tm.team_id = :team_id
-        ORDER BY tm.joined_at ASC
-    """), {"team_id": str(team_id)}).mappings().all()
 
     payload = {
         "team_id": str(row["id"]),
@@ -512,12 +527,11 @@ def get_team_members(event_id, team_id):
         "is_individual": row["is_individual"],
         "members": [
             {
-                "user_id": m["user_id"],
-                "role": m["role"],
-                "joined_at": m["joined_at"].isoformat() if m["joined_at"] else None
+                **m,
+                "joined_at": m.get("joined_at").isoformat() if m.get("joined_at") else None
             }
-            for m in members
-        ]
+            for m in (row["members"] or [])
+        ],
     }
     if len(_EVENT_PARTICIPATION_CACHE) >= _EVENT_PARTICIPATION_CACHE_MAX_SIZE:
         _EVENT_PARTICIPATION_CACHE.pop(next(iter(_EVENT_PARTICIPATION_CACHE)))
