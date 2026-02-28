@@ -7,8 +7,13 @@ from db.extensions import db
 from models.event import Event
 from models.team import Team
 from models.teamMember import TeamMember
+from models.teamInvite import TeamInvite
 from models.registration import Registration
+from models.notification import Notification
+from models.fcmToken import FCMToken
+from models.user import User
 from services.payment_service import create_payment_intent, verify_webhook
+from services.firebase_service import send_notification
 
 
 event_participation_bp = Blueprint("event_participation", __name__, url_prefix="/api")
@@ -29,6 +34,17 @@ def _event_flag(start_at, end_at):
 # Helpers: no JWT, read user_id from body
 def _body():
     return request.get_json(silent=True) or {}
+
+
+def _push_notification_for_user(user_id, title, message, data):
+    tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == int(user_id)).all()
+    for token_row in tokens:
+        send_notification(
+            token=token_row[0],
+            title=title,
+            body=message,
+            data=data,
+        )
 
 @event_participation_bp.post("/events/<uuid:event_id>/teams")
 def create_team(event_id):
@@ -79,17 +95,235 @@ def join_team(event_id, team_id):
 
     db.session.add(TeamMember(team_id=team_id, user_id=int(uid), role="member"))
 
+    # Persist notification in backend first (source of truth), then send FCM.
+    notification = None
+    recipient_user_id = int(t.created_by_user) if t.created_by_user is not None else None
+    if recipient_user_id and recipient_user_id != int(uid):
+        joiner_name = db.session.query(User.name).filter(User.id == int(uid)).scalar() or "A user"
+        notification = Notification(
+            user_id=recipient_user_id,
+            type="team_invite",
+            reference_id=str(t.id),
+            title="Team Invite Update",
+            message=f"{joiner_name} joined your team {t.team_name}",
+            is_read=False,
+        )
+        db.session.add(notification)
+
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "already joined"}), 409
 
+    if notification is not None:
+        tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == notification.user_id).all()
+        payload = {
+            "type": "new_notification",
+            "notification_id": str(notification.id),
+            "reference_id": str(t.id),
+            "event_id": str(e.id),
+        }
+        for token_row in tokens:
+            send_notification(
+                token=token_row[0],
+                title=notification.title,
+                body=notification.message,
+                data=payload,
+            )
+
     return jsonify({
         "ok": True,
         "team_id": str(t.id),
         "team_name": t.team_name
     }), 201
+
+
+@event_participation_bp.post("/events/<uuid:event_id>/teams/<uuid:team_id>/invite")
+def invite_user_to_team(event_id, team_id):
+    body = _body()
+    inviter_user_id = body.get("inviter_user_id")
+    invited_user_id = body.get("invited_user_id")
+
+    if inviter_user_id is None or invited_user_id is None:
+        return jsonify({"error": "inviter_user_id and invited_user_id required"}), 400
+    inviter_user_id = int(inviter_user_id)
+    invited_user_id = int(invited_user_id)
+    if inviter_user_id == invited_user_id:
+        return jsonify({"error": "cannot invite yourself"}), 400
+
+    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+
+    if t.is_individual or e.max_team_size == 1:
+        return jsonify({"error": "individual team cannot accept invitations"}), 400
+
+    inviter_member = TeamMember.query.filter_by(team_id=team_id, user_id=inviter_user_id).first()
+    if not inviter_member:
+        return jsonify({"error": "only team members can invite"}), 403
+
+    invited_user_exists = db.session.query(User.id).filter(User.id == invited_user_id).scalar() is not None
+    if not invited_user_exists:
+        return jsonify({"error": "invited user not found"}), 404
+
+    already_member = TeamMember.query.filter_by(team_id=team_id, user_id=invited_user_id).first() is not None
+    if already_member:
+        return jsonify({"error": "user is already a team member"}), 409
+
+    pending_invite = TeamInvite.query.filter_by(
+        event_id=e.id,
+        team_id=t.id,
+        invited_user_id=invited_user_id,
+        status="pending",
+    ).first()
+    if pending_invite:
+        return jsonify({"error": "pending invite already exists", "invite_id": str(pending_invite.id)}), 409
+
+    inviter_name = db.session.query(User.name).filter(User.id == inviter_user_id).scalar() or "A teammate"
+    invite = TeamInvite(
+        event_id=e.id,
+        team_id=t.id,
+        inviter_user_id=inviter_user_id,
+        invited_user_id=invited_user_id,
+        status="pending",
+    )
+    db.session.add(invite)
+    db.session.flush()
+
+    notification = Notification(
+        user_id=invited_user_id,
+        type="team_invite",
+        reference_id=str(t.id),
+        title="Team Invite",
+        message=f"{inviter_name} invited you to join {t.team_name}",
+        is_read=False,
+    )
+    db.session.add(notification)
+    db.session.commit()
+
+    _push_notification_for_user(
+        user_id=invited_user_id,
+        title=notification.title,
+        message=notification.message,
+        data={
+            "type": "new_notification",
+            "notification_id": str(notification.id),
+            "reference_id": str(t.id),
+            "event_id": str(e.id),
+            "invite_id": str(invite.id),
+            "invite_status": "pending",
+        },
+    )
+
+    return jsonify({
+        "ok": True,
+        "invite": invite.to_dict(),
+    }), 201
+
+
+@event_participation_bp.post("/events/<uuid:event_id>/teams/<uuid:team_id>/invites/<uuid:invite_id>/respond")
+def respond_team_invite(event_id, team_id, invite_id):
+    body = _body()
+    user_id = body.get("user_id")
+    action = (body.get("action") or "").strip().lower()
+
+    if user_id is None or action not in {"accept", "reject"}:
+        return jsonify({"error": "user_id and valid action(accept|reject) required"}), 400
+    user_id = int(user_id)
+
+    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+    t = Team.query.filter_by(id=team_id, event_id=e.id).first_or_404()
+
+    invite = TeamInvite.query.filter_by(
+        id=invite_id,
+        event_id=e.id,
+        team_id=t.id,
+    ).first_or_404()
+
+    if invite.invited_user_id != user_id:
+        return jsonify({"error": "only invited user can respond"}), 403
+    if invite.status != "pending":
+        return jsonify({"error": f"invite already {invite.status}"}), 409
+
+    invite.responded_at = datetime.now(IST)
+    invitee_name = db.session.query(User.name).filter(User.id == invite.invited_user_id).scalar() or "User"
+
+    if action == "accept":
+        size = TeamMember.query.filter_by(team_id=team_id).count()
+        if t.is_individual or e.max_team_size == 1:
+            return jsonify({"error": "individual team cannot accept members"}), 400
+        if e.max_team_size and size >= e.max_team_size:
+            return jsonify({"error": f"max team size {e.max_team_size} reached"}), 400
+
+        already_member = TeamMember.query.filter_by(team_id=team_id, user_id=user_id).first()
+        if not already_member:
+            db.session.add(TeamMember(team_id=team_id, user_id=user_id, role="member"))
+        invite.status = "accepted"
+
+        inviter_notification = Notification(
+            user_id=invite.inviter_user_id,
+            type="team_invite_accepted",
+            reference_id=str(t.id),
+            title="Invite Accepted",
+            message=f"{invitee_name} accepted your invite to {t.team_name}",
+            is_read=False,
+        )
+        db.session.add(inviter_notification)
+        db.session.commit()
+
+        _push_notification_for_user(
+            user_id=invite.inviter_user_id,
+            title=inviter_notification.title,
+            message=inviter_notification.message,
+            data={
+                "type": "new_notification",
+                "notification_id": str(inviter_notification.id),
+                "reference_id": str(t.id),
+                "event_id": str(e.id),
+                "invite_id": str(invite.id),
+                "invite_status": "accepted",
+            },
+        )
+
+        return jsonify({
+            "ok": True,
+            "invite": invite.to_dict(),
+            "team_id": str(t.id),
+            "team_name": t.team_name,
+            "joined": True,
+        }), 200
+
+    invite.status = "rejected"
+    inviter_notification = Notification(
+        user_id=invite.inviter_user_id,
+        type="team_invite_rejected",
+        reference_id=str(t.id),
+        title="Invite Rejected",
+        message=f"{invitee_name} rejected your invite to {t.team_name}",
+        is_read=False,
+    )
+    db.session.add(inviter_notification)
+    db.session.commit()
+
+    _push_notification_for_user(
+        user_id=invite.inviter_user_id,
+        title=inviter_notification.title,
+        message=inviter_notification.message,
+        data={
+            "type": "new_notification",
+            "notification_id": str(inviter_notification.id),
+            "reference_id": str(t.id),
+            "event_id": str(e.id),
+            "invite_id": str(invite.id),
+            "invite_status": "rejected",
+        },
+    )
+
+    return jsonify({
+        "ok": True,
+        "invite": invite.to_dict(),
+        "joined": False,
+    }), 200
 
 
 @event_participation_bp.delete("/events/<uuid:event_id>/teams/<uuid:team_id>/leave")

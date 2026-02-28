@@ -26,6 +26,7 @@ from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from models.team import Team
 from models.teamMember import TeamMember
 from models.referralTracking import ReferralTracking
+from models.notification import Notification
 
 from models.voucher import Voucher
 
@@ -154,9 +155,11 @@ def delete_user_id():
             DELETE FROM pass_redemption_logs
             WHERE user_id = :user_id
                OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
+            DELETE FROM team_invites WHERE inviter_user_id = :user_id OR invited_user_id = :user_id;
             DELETE FROM team_members WHERE user_id = :user_id;
             DELETE FROM teams WHERE created_by_user = :user_id;
             DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
+            DELETE FROM notifications WHERE user_id = :user_id;
             DELETE FROM user_hash_coins WHERE user_id = :user_id;
             DELETE FROM fcm_tokens WHERE user_id = :user_id;
             DELETE FROM vouchers WHERE user_id = :user_id;
@@ -925,3 +928,55 @@ def get_user_available_passes_by_id(user_id):
     except Exception as e:
         current_app.logger.error(f"Error fetching available passes for user {user_id}: {str(e)}")
         return jsonify({"error": "Failed to fetch available passes", "details": str(e)}), 500
+
+
+@user_blueprint.route('/users/notifications', methods=['GET'])
+@auth_required_self(decrypt_user=True)
+def list_user_notifications():
+    user_id = g.auth_user_id
+    try:
+        limit = request.args.get("limit", default=50, type=int)
+        unread_only = request.args.get("unread_only", default="false").lower() == "true"
+        if limit <= 0 or limit > 200:
+            return jsonify({"message": "limit must be between 1 and 200"}), 400
+
+        q = Notification.query.filter(Notification.user_id == user_id)
+        if unread_only:
+            q = q.filter(Notification.is_read == False)
+
+        items = q.order_by(Notification.created_at.desc()).limit(limit).all()
+        unread_count = Notification.query.filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False
+        ).count()
+
+        return jsonify({
+            "notifications": [n.to_dict() for n in items],
+            "unread_count": unread_count
+        }), 200
+    except Exception:
+        current_app.logger.exception("Failed to list notifications for user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
+
+
+@user_blueprint.route('/users/notifications/<uuid:notification_id>/read', methods=['PATCH'])
+@auth_required_self(decrypt_user=True)
+def mark_notification_read(notification_id):
+    user_id = g.auth_user_id
+    try:
+        notif = Notification.query.filter(
+            Notification.id == notification_id,
+            Notification.user_id == user_id
+        ).first()
+        if not notif:
+            return jsonify({"message": "Notification not found"}), 404
+
+        if not notif.is_read:
+            notif.is_read = True
+            db.session.commit()
+
+        return jsonify({"message": "Notification marked as read", "notification_id": str(notif.id)}), 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to mark notification read for user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
