@@ -1166,7 +1166,7 @@ def trigger_demo_notification():
                 return jsonify({"message": "user not found"}), 404
             notification = Notification(
                 user_id=target_user_id,
-                type="demo_notification",
+                type="team_invite",
                 reference_id=reference_id,
                 title=title,
                 message=message,
