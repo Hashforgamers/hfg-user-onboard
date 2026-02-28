@@ -12,7 +12,7 @@ from models.voucher import Voucher
 from models.hashWallet import HashWallet
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from sqlalchemy import or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 
 class UserService:
@@ -218,35 +218,33 @@ class UserService:
         user = User.query.options(
             joinedload(User.physical_address),
             joinedload(User.contact_info),
-            joinedload(User.vouchers)
+            selectinload(User.vouchers)
         ).filter_by(id=user_id).first()
         return user
 
     @staticmethod
     def get_user_by_fid(fid):
-        """Fetch a user by FID with eager loading and expire old vouchers"""
+        """Fetch a user by FID with eager loading and efficient voucher expiration."""
+        user_id = db.session.query(User.id).filter_by(fid=fid).scalar()
+        if not user_id:
+            return None
+
+        # Expire old vouchers in a single DB statement.
+        one_month_ago = datetime.utcnow() - timedelta(days=30)
+        updated_rows = Voucher.query.filter(
+            Voucher.user_id == user_id,
+            Voucher.is_active == True,
+            Voucher.created_at < one_month_ago
+        ).update({Voucher.is_active: False}, synchronize_session=False)
+
+        if updated_rows:
+            db.session.commit()
+
         user = User.query.options(
             joinedload(User.physical_address),
             joinedload(User.contact_info),
-            joinedload(User.vouchers)
-        ).filter_by(fid=fid).first()
-        
-        if not user:
-            return None
-
-        # Expire user's vouchers older than 1 month
-        one_month_ago = datetime.utcnow() - timedelta(days=30)
-        expired_vouchers = Voucher.query.filter(
-            Voucher.user_id == user.id,
-            Voucher.is_active == True,
-            Voucher.created_at < one_month_ago
-        ).all()
-
-        for voucher in expired_vouchers:
-            voucher.is_active = False
-
-        if expired_vouchers:
-            db.session.commit()
+            selectinload(User.vouchers)
+        ).filter_by(id=user_id).first()
 
         return user
 
