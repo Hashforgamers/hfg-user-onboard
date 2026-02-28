@@ -227,10 +227,9 @@ def get_user_by_fid_auth(user_fid):
         if cached and cached["expires_at"] > now_ts:
             user_payload = cached["payload"]
         else:
-            user = UserService.get_user_by_fid(user_fid)
-            if not user:
+            user_payload = UserService.get_user_auth_payload_by_fid(user_fid)
+            if not user_payload:
                 return jsonify({'message': 'User not found'}), 404
-            user_payload = user.to_dict()
             if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
                 _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
             _USER_FID_CACHE[user_fid] = {
