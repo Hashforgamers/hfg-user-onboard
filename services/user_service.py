@@ -250,6 +250,98 @@ class UserService:
         ).filter_by(fid=fid).first()
 
     @staticmethod
+    def get_user_auth_payload_by_fid(fid):
+        """
+        Fetch only fields required by /users/fid auth response.
+        Returns already-serialized payload to avoid ORM hydration overhead.
+        """
+        row = (
+            db.session.query(
+                User.id,
+                User.fid,
+                User.avatar_path,
+                User.name,
+                User.gender,
+                User.dob,
+                User.game_username,
+                User.referral_code,
+                User.referral_rewards,
+                User.created_at,
+                User.updated_at,
+                PhysicalAddress.address_type,
+                PhysicalAddress.addressLine1,
+                PhysicalAddress.addressLine2,
+                PhysicalAddress.pincode,
+                PhysicalAddress.state,
+                PhysicalAddress.country,
+                PhysicalAddress.is_active,
+                ContactInfo.phone,
+                ContactInfo.email,
+            )
+            .outerjoin(
+                PhysicalAddress,
+                (PhysicalAddress.parent_id == User.id) & (PhysicalAddress.parent_type == "user"),
+            )
+            .outerjoin(
+                ContactInfo,
+                (ContactInfo.parent_id == User.id) & (ContactInfo.parent_type == "user"),
+            )
+            .filter(User.fid == fid)
+            .first()
+        )
+
+        if not row:
+            return None
+
+        vouchers = (
+            db.session.query(
+                Voucher.code,
+                Voucher.discount_percentage,
+                Voucher.is_active,
+                Voucher.created_at,
+            )
+            .filter(Voucher.user_id == row.id)
+            .all()
+        )
+
+        return {
+            "avatar_path": row.avatar_path or "",
+            "id": row.id or "",
+            "name": row.name or "",
+            "gender": row.gender or "",
+            "dob": row.dob.strftime('%d-%b-%Y') if row.dob else None,
+            "gameUserName": row.game_username or "",
+            "contact": {
+                "physicalAddress": {
+                    "address_type": str(row.address_type) if row.address_type else "home",
+                    "addressLine1": str(row.addressLine1) if row.addressLine1 else "",
+                    "addressLine2": str(row.addressLine2) if row.addressLine2 else "",
+                    "pincode": str(row.pincode) if row.pincode else "",
+                    "State": str(row.state) if row.state else "",
+                    "Country": str(row.country) if row.country else "",
+                    "is_active": bool(row.is_active) if row.is_active is not None else True,
+                } if row.address_type or row.addressLine1 or row.pincode or row.state or row.country else {},
+                "electronicAddress": {
+                    "mobileNo": str(row.phone) if row.phone else "",
+                    "emailId": str(row.email) if row.email else "",
+                } if row.phone or row.email else {},
+            },
+            "referralCode": row.referral_code or "",
+            "referralRewards": row.referral_rewards or 0,
+            "vouchers": [
+                {
+                    "code": v.code,
+                    "discountPercentage": v.discount_percentage,
+                    "isActive": v.is_active,
+                    "createdAt": v.created_at.strftime('%d-%b-%Y %H:%M') if v.created_at else "",
+                }
+                for v in vouchers
+            ],
+            "createdAt": row.created_at.strftime('%d-%b-%Y %H:%M') if row.created_at else None,
+            "updatedAt": row.updated_at.strftime('%d-%b-%Y %H:%M') if row.updated_at else None,
+        }
+
+    @staticmethod
     def get_user_vouchers(user_id):
         """Get all vouchers for a user"""
         return Voucher.query.filter(Voucher.user_id == user_id).all()
