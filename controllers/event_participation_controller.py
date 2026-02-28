@@ -621,7 +621,11 @@ def get_team_members(event_id, team_id):
         "members": [
             {
                 **m,
-                "joined_at": m.get("joined_at").isoformat() if m.get("joined_at") else None
+                "joined_at": (
+                    m.get("joined_at").isoformat()
+                    if m.get("joined_at") is not None and hasattr(m.get("joined_at"), "isoformat")
+                    else m.get("joined_at")
+                )
             }
             for m in (row["members"] or [])
         ],
