@@ -34,8 +34,13 @@ from services.security import encode_user, auth_required_self
 import jwt
 
 from datetime import datetime, timedelta
+import time
 
 user_blueprint = Blueprint('user', __name__)
+_USER_FID_CACHE = {}
+_USER_FID_CACHE_MAX_SIZE = 10000
+_USER_CACHE = {}
+_USER_CACHE_MAX_SIZE = 10000
 
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
@@ -65,6 +70,13 @@ def create_user():
             status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 400
             return jsonify(result), status_code
 
+        if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
+            _USER_CACHE.pop(next(iter(_USER_CACHE)))
+        _USER_CACHE[result.id] = {
+            "payload": result.to_dict(),
+            "expires_at": time.time() + int(current_app.config.get("USER_CACHE_TTL_SEC", 15)),
+        }
+
         return jsonify({"message": "User created successfully", "user": result.to_dict()}), 201
     except Exception:
         current_app.logger.exception("Create user failed for fid=%s", data.get("fid"))
@@ -88,27 +100,15 @@ def register_fcm_token():
         return jsonify({'message': 'Invalid platform'}), 400
 
     try:
-        user_exists = db.session.query(User.id).filter_by(id=user_id).scalar() is not None
-        if not user_exists:
-            return jsonify({'message': 'User not found'}), 404
-
-        existing = FCMToken.query.filter_by(token=token).first()
-        if not existing:
-            db.session.add(FCMToken(user_id=user_id, token=token, platform=platform))
-            db.session.commit()
-            return jsonify({'message': 'FCM token registered'}), 201
-
-        updated = False
-        if existing.user_id != user_id:
-            existing.user_id = user_id
-            updated = True
-        if existing.platform != platform:
-            existing.platform = platform
-            updated = True
-
-        if updated:
-            db.session.commit()
-
+        db.session.execute(text("""
+            INSERT INTO fcm_tokens (user_id, token, platform, created_at)
+            VALUES (:user_id, :token, :platform, NOW())
+            ON CONFLICT (token)
+            DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                platform = EXCLUDED.platform
+        """), {"user_id": user_id, "token": token, "platform": platform})
+        db.session.commit()
         return jsonify({'message': 'FCM token registered'}), 200
     except Exception:
         db.session.rollback()
@@ -120,176 +120,93 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id
     try:
-        # Keep pass IDs upfront for dependent cleanup (transactions/logs)
-        user_pass_ids = [up.id for up in UserPass.query.filter_by(user_id=user_id).all()]
-
-        # Remove pass redemption logs linked directly to this user or their passes
-        db.session.execute(text("""
-            DELETE FROM pass_redemption_logs
-            WHERE user_id = :user_id
-               OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id)
-        """), {"user_id": user_id})
-
-        # Remove team memberships and teams created by this user (teams.created_by_user is RESTRICT)
-        TeamMember.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-        Team.query.filter_by(created_by_user=user_id).delete(synchronize_session=False)
-
-        # Remove referral-tracking rows referencing this user
-        ReferralTracking.query.filter_by(referred_user_id=user_id).delete(synchronize_session=False)
-
-        # 1. Delete wallet transactions
-        HashWalletTransaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 2. Delete wallet
-        HashWallet.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 3. Delete FCM tokens
-        FCMToken.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 4. Delete vouchers
-        Voucher.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 5. Delete Physical Address & Contact Info (explicit cleanup)
-
-        # --- fetch email & phone BEFORE delete ---
-        contact = ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').first()
-        email, phone = None, None
-        if contact:
-            email = contact.email
-            phone = contact.phone
-
-        # cleanup after storing values
-        PhysicalAddress.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
-        ContactInfo.query.filter_by(parent_id=user_id, parent_type='user').delete(synchronize_session=False)
-
-        # 7. Delete payment transaction mappings
-        PaymentTransactionMapping.query.filter(
-            PaymentTransactionMapping.transaction_id.in_(
-                db.session.query(Transaction.id).filter_by(user_id=user_id)
-            )
-        ).delete(synchronize_session=False)
-
-        # 8. Delete pass purchase transactions
-        if user_pass_ids:
-            Transaction.query.filter(
-                Transaction.reference_id.in_([str(p_id) for p_id in user_pass_ids]),
-                Transaction.booking_type == 'pass_purchase'
-            ).delete(synchronize_session=False)
-
-        # 9. Delete user passes
-        UserPass.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 10. Delete regular transactions
-        Transaction.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 11. Delete user hash coins
-        UserHashCoin.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-
-        # 12. Finally delete the user
-        user = User.query.get(user_id)
-        if not user:
+        user_row = db.session.execute(text("""
+            SELECT u.id, u.referred_by, c.email, c.phone
+            FROM users u
+            LEFT JOIN contact_info c
+                ON c.parent_id = u.id AND c.parent_type = 'user'
+            WHERE u.id = :user_id
+            LIMIT 1
+        """), {"user_id": user_id}).mappings().first()
+        if not user_row:
             return jsonify({"message": "User not found"}), 404
 
-        try:
-            # Capture user’s details
-            cooldown_entry = DeletedUserCooldown(
-                email=email,
-                phone=phone,
-                referred_by=getattr(user, "referred_by", None)  # if field exists
+        db.session.execute(text("""
+            INSERT INTO deleted_user_cooldown (email, phone, referred_by, created_at, expires_at)
+            VALUES (
+                COALESCE(:email, ''),
+                COALESCE(:phone, ''),
+                :referred_by,
+                NOW(),
+                NOW() + INTERVAL '30 days'
             )
+        """), {
+            "email": user_row.get("email"),
+            "phone": user_row.get("phone"),
+            "referred_by": user_row.get("referred_by"),
+        })
 
-            db.session.add(cooldown_entry)
-            db.session.flush()  # ensures insert before commit
+        db.session.execute(text("""
+            DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
+                SELECT id FROM transactions WHERE user_id = :user_id OR
+                    (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
+            );
+            DELETE FROM pass_redemption_logs
+            WHERE user_id = :user_id
+               OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
+            DELETE FROM team_members WHERE user_id = :user_id;
+            DELETE FROM teams WHERE created_by_user = :user_id;
+            DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
+            DELETE FROM user_hash_coins WHERE user_id = :user_id;
+            DELETE FROM fcm_tokens WHERE user_id = :user_id;
+            DELETE FROM vouchers WHERE user_id = :user_id;
+            DELETE FROM transactions WHERE user_id = :user_id OR
+                (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
+            DELETE FROM user_passes WHERE user_id = :user_id;
+            DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
+            DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
+            DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
+            DELETE FROM hash_wallets WHERE user_id = :user_id;
+            DELETE FROM users WHERE id = :user_id;
+        """), {"user_id": user_id})
 
-            db.session.delete(user)
-            # inside delete_user_id(), before db.session.delete(user)
-
-            db.session.commit()
-        except Exception as e:
-            if "No such polymorphic_identity" in str(e):
-                # Fallback delete all related records directly
-                db.session.execute(text("""
-                    DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
-                        SELECT id FROM transactions WHERE user_id = :user_id
-                    );
-                    DELETE FROM pass_redemption_logs
-                    WHERE user_id = :user_id
-                       OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
-                    DELETE FROM team_members WHERE user_id = :user_id;
-                    DELETE FROM teams WHERE created_by_user = :user_id;
-                    DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
-                    DELETE FROM user_hash_coins WHERE user_id = :user_id;
-                    DELETE FROM fcm_tokens WHERE user_id = :user_id;
-                    DELETE FROM vouchers WHERE user_id = :user_id;
-                    DELETE FROM transactions WHERE user_id = :user_id OR
-                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
-                    DELETE FROM user_passes WHERE user_id = :user_id;
-                    DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
-                    DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
-                    DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
-                    DELETE FROM hash_wallets WHERE user_id = :user_id;
-                    DELETE FROM users WHERE id = :user_id;
-                """), {'user_id': user_id})
-                db.session.commit()
-                return jsonify({"message": "User deleted (fallback method)"}), 200
-            raise
+        db.session.commit()
+        _USER_CACHE.pop(user_id, None)
+        _USER_FID_CACHE.clear()
 
         return jsonify({"message": "User deleted successfully"}), 200
 
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        current_app.logger.error(f"Error deleting user {user_id}: {e}")
-        error_msg = str(e)
-
-        if "No such polymorphic_identity" in error_msg:
-            try:
-                db.session.execute(text("""
-                    DELETE FROM pass_redemption_logs
-                    WHERE user_id = :user_id
-                       OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
-                    DELETE FROM team_members WHERE user_id = :user_id;
-                    DELETE FROM teams WHERE created_by_user = :user_id;
-                    DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
-                    DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
-                        SELECT id FROM transactions WHERE user_id = :user_id
-                    );
-                    DELETE FROM user_hash_coins WHERE user_id = :user_id;
-                    DELETE FROM fcm_tokens WHERE user_id = :user_id;
-                    DELETE FROM vouchers WHERE user_id = :user_id;
-                    DELETE FROM transactions WHERE user_id = :user_id OR
-                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
-                    DELETE FROM user_passes WHERE user_id = :user_id;
-                    DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
-                    DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
-                    DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
-                    DELETE FROM hash_wallets WHERE user_id = :user_id;
-                    DELETE FROM users WHERE id = :user_id
-                """), {"user_id": user_id})
-                db.session.commit()
-                return jsonify({"message": "User deleted (fallback method)"}), 200
-            except Exception as fallback_error:
-                db.session.rollback()
-                current_app.logger.error(f"Fallback delete failed for user {user_id}: {fallback_error}")
-                return jsonify({
-                    "message": "Failed to delete user",
-                    "error": f"{error_msg}. Fallback error: {str(fallback_error)}"
-                }), 500
-        else:
-            return jsonify({
-                "message": "Failed to delete user",
-                "error": error_msg
-            }), 500
+        current_app.logger.exception("Error deleting user %s", user_id)
+        return jsonify({
+            "message": "Failed to delete user",
+            "error": "internal_server_error"
+        }), 500
 
 @user_blueprint.route('/users', methods=['GET'])
 @auth_required_self(decrypt_user=True)
 def get_user():
     user_id = g.auth_user_id
     try:
+        cache_ttl_sec = int(current_app.config.get("USER_CACHE_TTL_SEC", 15))
+        cached = _USER_CACHE.get(user_id)
+        now_ts = time.time()
+        if cached and cached["expires_at"] > now_ts:
+            return jsonify({"user": cached["payload"]}), 200
+
         user = UserService.get_user(user_id)
         if not user:
             return jsonify({"message": "User not found"}), 404
 
-        return jsonify({"user": user.to_dict()}), 200
+        user_payload = user.to_dict()
+        if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
+            _USER_CACHE.pop(next(iter(_USER_CACHE)))
+        _USER_CACHE[user_id] = {
+            "payload": user_payload,
+            "expires_at": now_ts + cache_ttl_sec,
+        }
+        return jsonify({"user": user_payload}), 200
     except Exception:
         current_app.logger.exception("Get user failed for user_id=%s", user_id)
         return jsonify({"message": "Internal server error"}), 500
@@ -297,20 +214,34 @@ def get_user():
 @user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid_auth(user_fid):
     try:
+        started = time.perf_counter()
         user_fid = (user_fid or "").strip()
         if not user_fid:
             return jsonify({'message': 'user_fid is required'}), 400
         if len(user_fid) > 255:
             return jsonify({'message': 'user_fid is too long'}), 400
 
-        user = UserService.get_user_by_fid(user_fid)
-        if not user:
-            return jsonify({'message': 'User not found'}), 404
+        cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
+        cached = _USER_FID_CACHE.get(user_fid)
+        now_ts = time.time()
+        if cached and cached["expires_at"] > now_ts:
+            user_payload = cached["payload"]
+        else:
+            user = UserService.get_user_by_fid(user_fid)
+            if not user:
+                return jsonify({'message': 'User not found'}), 404
+            user_payload = user.to_dict()
+            if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
+                _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
+            _USER_FID_CACHE[user_fid] = {
+                "payload": user_payload,
+                "expires_at": now_ts + cache_ttl_sec,
+            }
 
         token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
         now_utc = datetime.utcnow()
         encoded_user_id = encode_user(
-            user.id,
+            user_payload["id"],
             current_app.config['ENCRYPT_PUBLIC_KEY']
         )
 
@@ -329,9 +260,14 @@ def get_user_by_fid_auth(user_fid):
 
         custom_jwt = jwt.encode(payload, jwt_secret, algorithm="HS256")
 
-        response = jsonify({'user': user.to_dict(), 'token': custom_jwt})
+        response = jsonify({'user': user_payload, 'token': custom_jwt})
         response.headers['Authorization'] = f'Bearer {custom_jwt}'
         response.headers['Cache-Control'] = 'no-store'
+        current_app.logger.info(
+            "GET /users/fid completed in %.2f ms for fid=%s",
+            (time.perf_counter() - started) * 1000,
+            user_fid,
+        )
         return response, 200
 
     except Exception:

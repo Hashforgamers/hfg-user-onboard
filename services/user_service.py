@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from db.extensions import db
 from models.user import User
 from models.contactInfo import ContactInfo
@@ -12,7 +12,7 @@ from models.voucher import Voucher
 from models.hashWallet import HashWallet
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from sqlalchemy import or_
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload, selectinload, load_only
 
 
 class UserService:
@@ -23,10 +23,8 @@ class UserService:
         try:
             current_app.logger.debug("Starting user creation process with data: %s", data)
 
-            # Check if fid already exists
-            existing_user_by_fid = User.query.filter_by(fid=data['fid']).first()
-            current_app.logger.debug("Checked for existing user by fid: %s", existing_user_by_fid)
-            if existing_user_by_fid:
+            # Check if fid already exists (scalar lookup is faster than loading full row)
+            if db.session.query(User.id).filter_by(fid=data['fid']).scalar():
                 return {
                     "status": "error",
                     "state": "USER_EXISTS",
@@ -37,9 +35,7 @@ class UserService:
             # Check if email already exists
             email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
             if email_to_check:
-                existing_email = ContactInfo.query.filter_by(email=email_to_check).first()
-                current_app.logger.debug("Checked for existing user by email: %s", existing_email)
-                if existing_email:
+                if db.session.query(ContactInfo.id).filter_by(email=email_to_check).scalar():
                     return {
                         "status": "error",
                         "state": "EMAIL_EXISTS",
@@ -48,9 +44,7 @@ class UserService:
                     }
 
             # Check if username already exists
-            existing_username = User.query.filter_by(game_username=data['gameUserName']).first()
-            current_app.logger.debug("Checked for existing user by username: %s", existing_username)
-            if existing_username:
+            if db.session.query(User.id).filter_by(game_username=data['gameUserName']).scalar():
                 return {
                     "status": "error",
                     "state": "USERNAME_TAKEN",
@@ -115,17 +109,23 @@ class UserService:
                     db.session.add(referral_track)
                     current_app.logger.debug("Updated referrer rewards and added referral tracking")
 
-            # Creation of Hash Wallet
+            # Creation of Hash Wallet + PasswordManager in same transaction
             wallet = HashWallet(user_id=user.id, balance=0)
             db.session.add(wallet)
             current_app.logger.debug("Created and added HashWallet for user")
 
+            _, password = generate_credentials()
+            password_manager = PasswordManager(
+                userid=user.id,
+                password=password,
+                parent_id=user.id,
+                parent_type="user"
+            )
+            db.session.add(password_manager)
+            current_app.logger.info("PasswordManager created for user ID: %s", user.id)
+
             db.session.commit()
             current_app.logger.debug("Committed transaction")
-
-            # Generate credentials and notify the user
-            UserService.generate_credentials_and_notify(user)
-            current_app.logger.debug("Generated credentials and notified user")
 
             return user
 
@@ -224,29 +224,30 @@ class UserService:
 
     @staticmethod
     def get_user_by_fid(fid):
-        """Fetch a user by FID with eager loading and efficient voucher expiration."""
-        user_id = db.session.query(User.id).filter_by(fid=fid).scalar()
-        if not user_id:
-            return None
-
-        # Expire old vouchers in a single DB statement.
-        one_month_ago = datetime.utcnow() - timedelta(days=30)
-        updated_rows = Voucher.query.filter(
-            Voucher.user_id == user_id,
-            Voucher.is_active == True,
-            Voucher.created_at < one_month_ago
-        ).update({Voucher.is_active: False}, synchronize_session=False)
-
-        if updated_rows:
-            db.session.commit()
-
-        user = User.query.options(
+        """Fetch a user by FID for auth flow (read-only and low-latency)."""
+        return User.query.options(
+            load_only(
+                User.id,
+                User.fid,
+                User.avatar_path,
+                User.name,
+                User.gender,
+                User.dob,
+                User.game_username,
+                User.referral_code,
+                User.referral_rewards,
+                User.created_at,
+                User.updated_at,
+            ),
             joinedload(User.physical_address),
             joinedload(User.contact_info),
-            selectinload(User.vouchers)
-        ).filter_by(id=user_id).first()
-
-        return user
+            selectinload(User.vouchers).load_only(
+                Voucher.code,
+                Voucher.discount_percentage,
+                Voucher.is_active,
+                Voucher.created_at,
+            ),
+        ).filter_by(fid=fid).first()
 
     @staticmethod
     def get_user_vouchers(user_id):
