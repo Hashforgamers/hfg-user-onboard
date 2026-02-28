@@ -276,6 +276,107 @@ def get_user_by_fid_auth(user_fid):
         current_app.logger.exception('Internal error fetching user by fid')
         return jsonify({'message': 'Internal server error'}), 500
 
+
+@user_blueprint.route('/users/search', methods=['GET'])
+@auth_required_self(decrypt_user=True)
+def search_users():
+    """
+    Fast incremental user search for invite flows.
+    Query params:
+      - q | search | username | email
+      - limit (default 20, max 50)
+      - page (default 1)
+    """
+    try:
+        q = (
+            request.args.get("q")
+            or request.args.get("search")
+            or request.args.get("username")
+            or request.args.get("email")
+            or ""
+        ).strip()
+
+        if not q:
+            return jsonify({"users": [], "count": 0, "page": 1, "limit": 20, "query": q}), 200
+
+        limit = request.args.get("limit", default=20, type=int)
+        page = request.args.get("page", default=1, type=int)
+        if limit <= 0 or limit > 50:
+            return jsonify({"message": "limit must be between 1 and 50"}), 400
+        if page <= 0:
+            return jsonify({"message": "page must be >= 1"}), 400
+
+        pattern_prefix = f"{q.lower()}%"
+        offset = (page - 1) * limit
+        auth_user_id = g.auth_user_id
+
+        # Rank exact + prefix username matches first for real-time typing UX.
+        rows = db.session.execute(text("""
+            SELECT
+                u.id,
+                u.name,
+                u.game_username,
+                u.avatar_path,
+                u.fid
+            FROM users u
+            WHERE u.parent_type = 'user'
+              AND u.id <> :auth_user_id
+              AND (
+                    lower(u.game_username) LIKE :pattern_prefix
+                 OR lower(u.name) LIKE :pattern_prefix
+              )
+            ORDER BY
+                CASE
+                    WHEN lower(u.game_username) = :exact_q THEN 0
+                    WHEN lower(u.game_username) LIKE :pattern_prefix THEN 1
+                    WHEN lower(u.name) LIKE :pattern_prefix THEN 2
+                    ELSE 3
+                END,
+                u.game_username ASC
+            LIMIT :limit OFFSET :offset
+        """), {
+            "auth_user_id": auth_user_id,
+            "pattern_prefix": pattern_prefix,
+            "exact_q": q.lower(),
+            "limit": limit,
+            "offset": offset
+        }).mappings().all()
+
+        # Separate count query to support pagination in UI.
+        total_count = db.session.execute(text("""
+            SELECT COUNT(1)
+            FROM users u
+            WHERE u.parent_type = 'user'
+              AND u.id <> :auth_user_id
+              AND (
+                    lower(u.game_username) LIKE :pattern_prefix
+                 OR lower(u.name) LIKE :pattern_prefix
+              )
+        """), {
+            "auth_user_id": auth_user_id,
+            "pattern_prefix": pattern_prefix,
+        }).scalar() or 0
+
+        return jsonify({
+            "query": q,
+            "page": page,
+            "limit": limit,
+            "count": int(total_count),
+            "users": [
+                {
+                    "id": row["id"],
+                    "name": row["name"] or "",
+                    "gameUserName": row["game_username"] or "",
+                    "avatar_path": row["avatar_path"] or "",
+                    "fid": row["fid"] or "",
+                }
+                for row in rows
+            ]
+        }), 200
+    except Exception:
+        current_app.logger.exception("User search failed")
+        return jsonify({"message": "Internal server error"}), 500
+
 @user_blueprint.route('/users/create-voucher', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
 def create_voucher_for_referral_points():
