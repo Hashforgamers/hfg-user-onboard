@@ -14,10 +14,11 @@ class Config:
 
     # Add safe engine options for Neon / Postgres
     SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_pre_ping": True,    # Test connections before using
-        "pool_recycle": 1800,     # Recycle every 30 min (avoid stale)
-        "pool_size": 5,           # Keep small pool
-        "max_overflow": 10        # Allow short bursts
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE_SEC", "1800")),
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "40")),
+        "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SEC", "30")),
     }
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev')
