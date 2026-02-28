@@ -1128,49 +1128,82 @@ def mark_notification_read(notification_id):
 
 
 @user_blueprint.route('/users/notifications/demo', methods=['POST'])
-@auth_required_self(decrypt_user=True)
 def trigger_demo_notification():
     """
     Demo endpoint to create a notification + trigger FCM with invite-like payload.
+    Auth-free for Postman testing.
+    Accepts either:
+      - user_id (sends to all registered tokens for that user and persists notification), or
+      - fcm_token (sends directly to that token), or both.
     """
-    user_id = g.auth_user_id
     data = request.get_json(silent=True) or {}
     invite_status = (data.get("invite_status") or "pending").strip().lower()
     if invite_status not in {"pending", "accepted", "rejected"}:
         return jsonify({"message": "invite_status must be one of pending|accepted|rejected"}), 400
+    raw_user_id = data.get("user_id")
+    target_fcm_token = (data.get("fcm_token") or "").strip()
+    if raw_user_id is None and not target_fcm_token:
+        return jsonify({"message": "provide user_id or fcm_token"}), 400
 
     try:
+        target_user_id = None
+        if raw_user_id is not None:
+            try:
+                target_user_id = int(raw_user_id)
+            except (TypeError, ValueError):
+                return jsonify({"message": "user_id must be an integer"}), 400
+
         reference_id = str(data.get("reference_id") or uuid.uuid4())
         event_id = str(data.get("event_id") or uuid.uuid4())
         invite_id = str(data.get("invite_id") or uuid.uuid4())
         title = (data.get("title") or "Demo Team Invite").strip()
         message = (data.get("message") or f"Demo invite status: {invite_status}").strip()
-
-        notification = Notification(
-            user_id=user_id,
-            type="demo_notification",
-            reference_id=reference_id,
-            title=title,
-            message=message,
-            is_read=False,
-        )
-        db.session.add(notification)
-        db.session.commit()
+        notification = None
+        notification_id = str(uuid.uuid4())
+        if target_user_id is not None:
+            user_exists = db.session.query(User.id).filter(User.id == target_user_id).scalar() is not None
+            if not user_exists:
+                return jsonify({"message": "user not found"}), 404
+            notification = Notification(
+                user_id=target_user_id,
+                type="demo_notification",
+                reference_id=reference_id,
+                title=title,
+                message=message,
+                is_read=False,
+            )
+            db.session.add(notification)
+            db.session.commit()
+            notification_id = str(notification.id)
 
         fcm_payload = {
             "type": "new_notification",
-            "notification_id": str(notification.id),
+            "notification_id": notification_id,
             "reference_id": reference_id,
             "event_id": event_id,
             "invite_id": invite_id,
             "invite_status": invite_status,
         }
+        tokens = set()
+        if target_user_id is not None:
+            user_tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == target_user_id).all()
+            for token_row in user_tokens:
+                if token_row and token_row[0]:
+                    tokens.add(token_row[0])
+        if target_fcm_token:
+            tokens.add(target_fcm_token)
+        if not tokens:
+            return jsonify({
+                "ok": False,
+                "message": "No FCM tokens found for target",
+                "fcm_payload": fcm_payload,
+                "devices_targeted": 0
+            }), 404
 
-        tokens = db.session.query(FCMToken.token).filter(FCMToken.user_id == user_id).all()
         sent_count = 0
-        for token_row in tokens:
+        for token in tokens:
             send_notification(
-                token=token_row[0],
+                token=token,
                 title=title,
                 body=message,
                 data=fcm_payload,
@@ -1179,11 +1212,11 @@ def trigger_demo_notification():
 
         return jsonify({
             "ok": True,
-            "notification": notification.to_dict(),
+            "notification": notification.to_dict() if notification else None,
             "fcm_payload": fcm_payload,
             "devices_targeted": sent_count
         }), 200
     except Exception:
         db.session.rollback()
-        current_app.logger.exception("Failed to trigger demo notification for user_id=%s", user_id)
+        current_app.logger.exception("Failed to trigger demo notification for target_user_id=%s", raw_user_id)
         return jsonify({"message": "Internal server error"}), 500
