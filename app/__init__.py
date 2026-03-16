@@ -1,5 +1,6 @@
 from flask import Flask
 from controllers.user_controller import user_blueprint
+from controllers.review_controller import review_blueprint
 from controllers.event_public_controller import event_public_bp
 from controllers.event_participation_controller import event_participation_bp
 from db.extensions import db, migrate, mail
@@ -17,6 +18,7 @@ def create_app():
     mail.init_app(app)
 
     app.register_blueprint(user_blueprint, url_prefix='/api')
+    app.register_blueprint(review_blueprint, url_prefix='/api')
     app.register_blueprint(event_public_bp)
     app.register_blueprint(event_participation_bp)
 
