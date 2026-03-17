@@ -1,4 +1,5 @@
 from flask import Flask
+from flask_cors import CORS
 from controllers.user_controller import user_blueprint
 from controllers.review_controller import review_blueprint
 from controllers.event_public_controller import event_public_bp
@@ -12,6 +13,14 @@ import os
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    CORS(
+        app,
+        resources={r"/*": {"origins": "*"}},
+        supports_credentials=False,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
 
     db.init_app(app)
     migrate.init_app(app, db)
