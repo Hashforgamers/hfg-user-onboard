@@ -11,7 +11,9 @@ class CafeReview(db.Model):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    booking_id = Column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Keep booking_id as plain integer because the booking table lives in another service/schema.
+    # Enforcing a FK here breaks ORM flush if the bookings table isn't in this service's metadata.
+    booking_id = Column(Integer, nullable=True, index=True)
 
     rating = Column(Integer, nullable=False)
     title = Column(String(120), nullable=True)
