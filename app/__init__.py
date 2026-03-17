@@ -1,5 +1,7 @@
 from flask import Flask
+from flask_cors import CORS
 from controllers.user_controller import user_blueprint
+from controllers.review_controller import review_blueprint
 from controllers.event_public_controller import event_public_bp
 from controllers.event_participation_controller import event_participation_bp
 from db.extensions import db, migrate, mail
@@ -12,11 +14,20 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    CORS(
+        app,
+        resources={r"/*": {"origins": "*"}},
+        supports_credentials=False,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
+
     db.init_app(app)
     migrate.init_app(app, db)
     mail.init_app(app)
 
     app.register_blueprint(user_blueprint, url_prefix='/api')
+    app.register_blueprint(review_blueprint, url_prefix='/api')
     app.register_blueprint(event_public_bp)
     app.register_blueprint(event_participation_bp)
 

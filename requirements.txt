@@ -4,6 +4,7 @@ Flask-Migrate==4.0.4
 psycopg2-binary==2.9.6
 Werkzeug==2.3.4
 Flask-Mail==0.9.1
+Flask-Cors==4.0.0
 firebase-admin
 pyjwt
 cryptography
