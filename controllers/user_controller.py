@@ -151,6 +151,24 @@ def delete_user_id():
         })
 
         db.session.execute(text("""
+            DELETE FROM monthly_credit_ledgers
+            WHERE account_id IN (
+                    SELECT id FROM monthly_credit_accounts WHERE user_id = :user_id
+                )
+               OR transaction_id IN (
+                    SELECT id FROM transactions WHERE user_id = :user_id OR
+                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
+               );
+            DELETE FROM monthly_credit_accounts WHERE user_id = :user_id;
+            DELETE FROM time_wallet_ledgers
+            WHERE account_id IN (
+                    SELECT id FROM time_wallet_accounts WHERE user_id = :user_id
+                )
+               OR transaction_id IN (
+                    SELECT id FROM transactions WHERE user_id = :user_id OR
+                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
+               );
+            DELETE FROM time_wallet_accounts WHERE user_id = :user_id;
             DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
                 SELECT id FROM transactions WHERE user_id = :user_id OR
                     (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
