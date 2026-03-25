@@ -1,14 +1,9 @@
-# app/utils.py
-
-import string
 import random
+import string
+from flask import current_app
 from flask_mail import Message
 from db.extensions import mail
-from flask import current_app
-from datetime import datetime
-import re
-from flask import current_app
-import random, string
+from services.email_template import build_hfg_email_html
 
 def generate_referral_code(length=6):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
@@ -24,6 +19,7 @@ def send_email(subject, recipients, body):
     current_app.logger.info(f"subject: {subject}, recipients: {recipients}, body:{body}")
     msg = Message(subject, recipients=recipients)
     msg.body = body
+    msg.html = build_hfg_email_html(subject=subject, body_text=body)
     current_app.logger.info(f"msg: {msg}")
     mail.send(msg)
     current_app.logger.info(f"Mail Sent Succussfully")
