@@ -1,41 +1,42 @@
 import html
 import os
 
+DEFAULT_HASH_LOGO = "https://res.cloudinary.com/dxjjigepf/image/upload/v1774469992/hash_logo_fmngta.png"
+
 
 def build_hfg_email_html(subject: str, body_text: str) -> str:
     safe_subject = html.escape(subject or "Hash For Gamers Update")
     safe_body = html.escape(body_text or "").replace("\n", "<br/>")
-    logo_url = (
-        os.getenv("HASH_EMAIL_LOGO_URL")
-        or "https://dashboard.hashforgamers.com/whitehashlogo.png"
-    ).strip()
+    logo_url = (os.getenv("HASH_EMAIL_LOGO_URL") or DEFAULT_HASH_LOGO).strip()
+
     return f"""<!doctype html>
 <html>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset=\"UTF-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
     <title>{safe_subject}</title>
   </head>
-  <body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
+  <body style=\"margin:0;padding:0;background:#050912;font-family:Arial,Helvetica,sans-serif;color:#e5e7eb;\">
+    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:24px 12px;\">
       <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+        <td align=\"center\">
+          <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:700px;background:#0b1220;border:1px solid #1e2a44;border-radius:12px;overflow:hidden;\">
             <tr>
-              <td style="padding:20px 24px;background:#0b1220;color:#ffffff;">
-                <img src="{html.escape(logo_url)}" alt="Hash For Gamers" style="display:block;height:42px;width:auto;margin:0 0 10px 0;" />
-                <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#22c55e;font-weight:700;">Hash For Gamers</div>
-                <div style="margin-top:8px;font-size:22px;font-weight:700;line-height:1.35;">{safe_subject}</div>
+              <td style=\"padding:20px 24px;background:#050b18;color:#ffffff;\">
+                <img src=\"{html.escape(logo_url)}\" alt=\"Hash For Gamers\" style=\"display:block;height:46px;width:auto;margin:0 0 10px 0;\" />
+                <div style=\"font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#22c55e;font-weight:700;\">Hash For Gamers</div>
+                <div style=\"margin-top:8px;font-size:22px;line-height:1.35;font-weight:700;\">{safe_subject}</div>
               </td>
             </tr>
             <tr>
-              <td style="padding:24px;font-size:14px;line-height:1.7;color:#111827;">
+              <td style=\"padding:24px;font-size:14px;line-height:1.75;color:#e2e8f0;\">
                 {safe_body}
               </td>
             </tr>
             <tr>
-              <td style="padding:14px 24px;border-top:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;font-size:12px;">
-                Need help? Contact <a href="mailto:support@hashforgamers.co.in" style="color:#2563eb;text-decoration:none;">support@hashforgamers.co.in</a>
+              <td style=\"padding:14px 24px;border-top:1px solid #1e2a44;background:#091122;color:#94a3b8;font-size:12px;\">
+                Need help? Contact <a href=\"mailto:support@hashforgamers.co.in\" style=\"color:#60a5fa;text-decoration:none;\">support@hashforgamers.co.in</a><br/>
+                © 2026 Hash For Gamers. All rights reserved.
               </td>
             </tr>
           </table>
