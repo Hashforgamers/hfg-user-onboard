@@ -45,6 +45,8 @@ _USER_CACHE = {}
 _USER_CACHE_MAX_SIZE = 10000
 _USER_SEARCH_CACHE = {}
 _USER_SEARCH_CACHE_MAX_SIZE = 20000
+_USER_PHONE_CACHE = {}
+_USER_PHONE_CACHE_MAX_SIZE = 20000
 
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
@@ -234,6 +236,171 @@ def get_user():
     except Exception:
         current_app.logger.exception("Get user failed for user_id=%s", user_id)
         return jsonify({"message": "Internal server error"}), 500
+
+
+def _normalize_indian_phone(raw_phone):
+    phone = str(raw_phone or "").strip()
+    if not phone:
+        return None
+    # Keep only digits for consistent storage + fast equality match.
+    digits = "".join(ch for ch in phone if ch.isdigit())
+
+    # Accept Indian variants:
+    # 10 digits: 9876543210
+    # 11 digits with leading 0: 09876543210
+    # 12 digits with country code: 919876543210
+    if len(digits) == 10:
+        normalized = digits
+    elif len(digits) == 11 and digits.startswith("0"):
+        normalized = digits[1:]
+    elif len(digits) == 12 and digits.startswith("91"):
+        normalized = digits[2:]
+    else:
+        return None
+
+    # Basic Indian mobile guard: starts with 6-9.
+    if len(normalized) != 10 or normalized[0] not in {"6", "7", "8", "9"}:
+        return None
+    return normalized
+
+
+@user_blueprint.route('/users/phone/registered', methods=['GET'])
+@auth_required_self(decrypt_user=True)
+def get_registered_phone_status():
+    """
+    Fast auth-bound endpoint to check whether user has a registered phone number.
+    Optimized for low latency with minimal SELECT + in-memory short TTL cache.
+    """
+    user_id = g.auth_user_id
+    started = time.perf_counter()
+    cache_ttl_sec = int(current_app.config.get("USER_PHONE_CACHE_TTL_SEC", 30))
+    now_ts = time.time()
+    cache_key = int(user_id)
+
+    try:
+        cached = _USER_PHONE_CACHE.get(cache_key)
+        if cached and cached["expires_at"] > now_ts:
+            response = jsonify(cached["payload"])
+            response.headers["Cache-Control"] = "no-store"
+            return response, 200
+
+        row = db.session.execute(text("""
+            SELECT c.phone
+            FROM contact_info c
+            WHERE c.parent_id = :user_id
+              AND c.parent_type = 'user'
+            LIMIT 1
+        """), {"user_id": int(user_id)}).mappings().first()
+
+        phone = str((row or {}).get("phone") or "").strip()
+        payload = {
+            "success": True,
+            "user_id": int(user_id),
+            "is_phone_registered": bool(phone),
+            "phone": phone if phone else None,
+        }
+
+        if len(_USER_PHONE_CACHE) >= _USER_PHONE_CACHE_MAX_SIZE:
+            _USER_PHONE_CACHE.pop(next(iter(_USER_PHONE_CACHE)))
+        _USER_PHONE_CACHE[cache_key] = {
+            "payload": payload,
+            "expires_at": now_ts + cache_ttl_sec,
+        }
+
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        current_app.logger.info(
+            "GET /users/phone/registered user_id=%s completed in %.2f ms",
+            user_id,
+            (time.perf_counter() - started) * 1000,
+        )
+        return response, 200
+    except Exception:
+        current_app.logger.exception("Phone status check failed for user_id=%s", user_id)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+@user_blueprint.route('/users/phone', methods=['PUT'])
+@auth_required_self(decrypt_user=True)
+def update_registered_phone():
+    """
+    Update (or create) user phone entry in contact_info.
+    Production-safe checks:
+      - strict input validation
+      - uniqueness across users
+      - single transaction upsert
+    """
+    user_id = g.auth_user_id
+    started = time.perf_counter()
+    data = request.get_json(silent=True) or {}
+    normalized_phone = _normalize_indian_phone(data.get("phone"))
+
+    if not normalized_phone:
+        return jsonify({
+            "success": False,
+            "message": "Valid Indian phone number is required",
+            "format": "Use 10-digit mobile number (supports +91/0 prefix input)",
+        }), 400
+
+    try:
+        duplicate_user = db.session.execute(text("""
+            SELECT parent_id
+            FROM contact_info
+            WHERE parent_type = 'user'
+              AND phone = :phone
+              AND parent_id <> :user_id
+            LIMIT 1
+        """), {"phone": normalized_phone, "user_id": int(user_id)}).scalar()
+        if duplicate_user:
+            return jsonify({
+                "success": False,
+                "message": "Phone number already registered with another user",
+            }), 409
+
+        existing_contact_id = db.session.execute(text("""
+            SELECT id
+            FROM contact_info
+            WHERE parent_id = :user_id
+              AND parent_type = 'user'
+            LIMIT 1
+        """), {"user_id": int(user_id)}).scalar()
+
+        if existing_contact_id:
+            db.session.execute(text("""
+                UPDATE contact_info
+                SET phone = :phone
+                WHERE id = :contact_id
+            """), {"phone": normalized_phone, "contact_id": int(existing_contact_id)})
+        else:
+            db.session.execute(text("""
+                INSERT INTO contact_info (email, phone, parent_id, parent_type)
+                VALUES (:email, :phone, :user_id, 'user')
+            """), {
+                "email": "",
+                "phone": normalized_phone,
+                "user_id": int(user_id),
+            })
+
+        db.session.commit()
+        _USER_PHONE_CACHE.pop(int(user_id), None)
+        _USER_CACHE.pop(int(user_id), None)
+        response = jsonify({
+            "success": True,
+            "message": "Phone number updated successfully",
+            "user_id": int(user_id),
+            "phone": normalized_phone,
+        })
+        response.headers["Cache-Control"] = "no-store"
+        current_app.logger.info(
+            "PUT /users/phone user_id=%s completed in %.2f ms",
+            user_id,
+            (time.perf_counter() - started) * 1000,
+        )
+        return response, 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Phone update failed for user_id=%s", user_id)
+        return jsonify({"success": False, "message": "Internal server error"}), 500
 
 @user_blueprint.route('/users/fid/<string:user_fid>', methods=['GET'])
 def get_user_by_fid_auth(user_fid):
