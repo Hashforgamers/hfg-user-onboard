@@ -223,6 +223,18 @@ def _build_auth_response_for_fid(user_fid: str, user_payload: dict = None):
     return response_payload, custom_jwt, None
 
 
+def _invalidate_fid_caches(*fids):
+    keys = [str(fid or "").strip() for fid in fids if str(fid or "").strip()]
+    if not keys:
+        return
+    with _USER_FID_CACHE_LOCK:
+        for fid in keys:
+            _USER_FID_CACHE.pop(fid, None)
+    with _USER_FID_AUTH_CACHE_LOCK:
+        for fid in keys:
+            _USER_FID_AUTH_CACHE.pop(fid, None)
+
+
 def _find_existing_user_fid_by_email(email: str):
     normalized = str(email or "").strip().lower()
     if not normalized:
@@ -243,6 +255,87 @@ def _find_existing_user_fid_by_email(email: str):
         {"email": normalized},
     ).mappings().first()
     return str(row["fid"]).strip() if row and row.get("fid") else None
+
+
+def _relink_fid_for_existing_email(email: str, requested_fid: str):
+    """
+    Attach requested_fid to the existing user identified by email.
+    Returns dict: {status, user_id, old_fid, new_fid, reason?}
+    status in {"linked", "already_linked", "conflict", "not_found"}.
+    """
+    normalized_email = str(email or "").strip().lower()
+    target_fid = str(requested_fid or "").strip()
+    if not normalized_email or not target_fid:
+        return {"status": "not_found"}
+
+    row = db.session.execute(
+        text(
+            """
+            SELECT u.id, u.fid
+            FROM users u
+            JOIN contact_info c
+              ON c.parent_id = u.id
+             AND c.parent_type = 'user'
+            WHERE lower(c.email) = :email
+            ORDER BY u.id DESC
+            LIMIT 1
+            """
+        ),
+        {"email": normalized_email},
+    ).mappings().first()
+    if not row:
+        return {"status": "not_found"}
+
+    user_id = int(row["id"])
+    old_fid = str(row["fid"] or "").strip()
+    if old_fid == target_fid:
+        return {
+            "status": "already_linked",
+            "user_id": user_id,
+            "old_fid": old_fid,
+            "new_fid": target_fid,
+        }
+
+    collision = db.session.execute(
+        text(
+            """
+            SELECT id
+            FROM users
+            WHERE fid = :fid
+              AND id <> :user_id
+            LIMIT 1
+            """
+        ),
+        {"fid": target_fid, "user_id": user_id},
+    ).scalar()
+    if collision:
+        return {
+            "status": "conflict",
+            "user_id": user_id,
+            "old_fid": old_fid,
+            "new_fid": target_fid,
+            "reason": "requested_fid_already_in_use",
+        }
+
+    db.session.execute(
+        text(
+            """
+            UPDATE users
+            SET fid = :new_fid,
+                updated_at = TIMEZONE('Asia/Kolkata', now())
+            WHERE id = :user_id
+            """
+        ),
+        {"new_fid": target_fid, "user_id": user_id},
+    )
+    db.session.commit()
+    _invalidate_fid_caches(old_fid, target_fid)
+    return {
+        "status": "linked",
+        "user_id": user_id,
+        "old_fid": old_fid,
+        "new_fid": target_fid,
+    }
 
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
@@ -304,6 +397,50 @@ def create_user():
                     .strip()
                     .lower()
                 )
+                requested_fid = str(data.get("fid") or "").strip()
+                if bool(current_app.config.get("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", False)):
+                    try:
+                        relink = _relink_fid_for_existing_email(existing_email, requested_fid)
+                        relink_status = relink.get("status")
+                        if relink_status in {"linked", "already_linked"}:
+                            recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(requested_fid)
+                            if recovered_payload and recovered_token:
+                                response = jsonify({
+                                    "message": (
+                                        "Existing account linked with latest sign-in identity."
+                                        if relink_status == "linked"
+                                        else "Email already exists. Signed in to existing account."
+                                    ),
+                                    "state": "EMAIL_EXISTS_FID_LINKED" if relink_status == "linked" else "EMAIL_EXISTS_RECOVERED",
+                                    "recovered_by": "email_fid_link" if relink_status == "linked" else "email",
+                                    "fid_linked": relink_status == "linked",
+                                    **recovered_payload,
+                                })
+                                response.headers['Authorization'] = f'Bearer {recovered_token}'
+                                response.headers['Cache-Control'] = 'no-store'
+                                return response, 200
+                            current_app.logger.warning(
+                                "Create user email/fid recovery failed fid=%s status=%s err=%s",
+                                requested_fid,
+                                relink_status,
+                                recover_err,
+                            )
+                        elif relink_status == "conflict":
+                            current_app.logger.warning(
+                                "Create user fid relink skipped fid=%s reason=%s existing_user_id=%s old_fid=%s",
+                                requested_fid,
+                                relink.get("reason"),
+                                relink.get("user_id"),
+                                relink.get("old_fid"),
+                            )
+                    except Exception as relink_err:
+                        db.session.rollback()
+                        current_app.logger.warning(
+                            "Create user fid relink errored fid=%s email=%s err=%s",
+                            requested_fid,
+                            existing_email,
+                            relink_err,
+                        )
                 existing_fid = _find_existing_user_fid_by_email(existing_email)
                 if existing_fid:
                     recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(existing_fid)

@@ -60,6 +60,8 @@ class Config:
     API_CACHE_USERS_NOTIFICATIONS_TTL_SEC = int(os.getenv("API_CACHE_USERS_NOTIFICATIONS_TTL_SEC", "20") or 20)
     USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC = int(os.getenv("USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC", "20") or 20)
     USER_CREATE_TIMING_LOGS = os.getenv("USER_CREATE_TIMING_LOGS", "true").lower() in ("true", "1", "t", "yes", "y")
+    USER_SIGNUP_EMAIL_RECOVERY_ENABLED = os.getenv("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
+    USER_SIGNUP_EMAIL_LINK_FID_ENABLED = os.getenv("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
 
     # Auth performance + logging controls
     AUTH_DEBUG_LOGS = os.getenv("AUTH_DEBUG_LOGS", "false").lower() in ("true", "1", "t", "yes", "y")
