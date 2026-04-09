@@ -250,6 +250,13 @@ def create_user():
 
         if isinstance(result, dict) and result.get('status') == 'error':
             state = result.get("state")
+            current_app.logger.warning(
+                "Create user conflict_state fid=%s state=%s status=%s details=%s",
+                data.get("fid"),
+                state,
+                ("409" if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else "429" if state == "COOLDOWN_ACTIVE" else "400"),
+                result.get("details"),
+            )
             if state == "USER_EXISTS":
                 recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(data.get("fid"))
                 if recovered_payload and recovered_token:
