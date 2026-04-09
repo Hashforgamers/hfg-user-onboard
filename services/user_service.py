@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from db.extensions import db
 from models.user import User
 from models.contactInfo import ContactInfo
@@ -12,7 +13,9 @@ from models.voucher import Voucher
 from models.hashWallet import HashWallet
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
 from sqlalchemy import or_
+from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload, load_only
+from sqlalchemy.exc import IntegrityError
 
 
 class UserService:
@@ -21,20 +24,52 @@ class UserService:
     def create_user(data):
         """Creates a new user and related entities in the database, with validations."""
         try:
-            current_app.logger.debug("Starting user creation process with data: %s", data)
+            timing_enabled = bool(current_app.config.get("USER_CREATE_TIMING_LOGS", True))
+            t0 = time.perf_counter()
+            t_last = t0
+            timing_steps = []
 
-            # Check if fid already exists (scalar lookup is faster than loading full row)
-            if db.session.query(User.id).filter_by(fid=data['fid']).scalar():
+            def mark(step_name):
+                nonlocal t_last
+                if not timing_enabled:
+                    return
+                now = time.perf_counter()
+                timing_steps.append((step_name, (now - t_last) * 1000))
+                t_last = now
+
+            fid_value = data['fid']
+            game_username = data['gameUserName']
+
+            # Fast duplicate check in a single DB roundtrip for fid + username.
+            duplicate_row = db.session.execute(text("""
+                SELECT
+                    EXISTS(SELECT 1 FROM users WHERE fid = :fid) AS fid_exists,
+                    EXISTS(SELECT 1 FROM users WHERE game_username = :game_username) AS username_exists
+            """), {
+                "fid": fid_value,
+                "game_username": game_username,
+            }).mappings().first()
+            mark("duplicate_check")
+
+            if duplicate_row and duplicate_row.get("fid_exists"):
                 return {
                     "status": "error",
                     "state": "USER_EXISTS",
                     "message": "A user with this FID already exists.",
-                    "details": {"fid": data['fid']}
+                    "details": {"fid": fid_value}
                 }
 
             # Check if email already exists
             email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
             if email_to_check:
+                phone_to_check = data.get('contact', {}).get('electronicAddress', {}).get('mobileNo')
+                if UserService.is_in_cooldown(email_to_check, phone_to_check):
+                    return {
+                        "status": "error",
+                        "state": "COOLDOWN_ACTIVE",
+                        "message": "This account identifier is in cooldown period.",
+                        "details": {"email": email_to_check}
+                    }
                 if db.session.query(ContactInfo.id).filter_by(email=email_to_check).scalar():
                     return {
                         "status": "error",
@@ -42,30 +77,32 @@ class UserService:
                         "message": "This email is already in use.",
                         "details": {"email": email_to_check}
                     }
+            mark("email_check")
 
             # Check if username already exists
-            if db.session.query(User.id).filter_by(game_username=data['gameUserName']).scalar():
+            if duplicate_row and duplicate_row.get("username_exists"):
                 return {
                     "status": "error",
                     "state": "USERNAME_TAKEN",
                     "message": "This game username is already taken.",
-                    "details": {"gameUserName": data['gameUserName']}
+                    "details": {"gameUserName": game_username}
                 }
 
             # Parse date of birth
             dob = datetime.strptime(data['dob'], '%d-%b-%Y') if data.get('dob') else None
-            current_app.logger.debug("Parsed date of birth: %s", dob)
-
             referral_input = data.get('referral_code')
-            current_app.logger.debug("Referral input: %s", referral_input)
+            mark("dob_parse")
 
             # Generate a unique referral code
+            attempts = 0
             while True:
+                attempts += 1
+                if attempts > 20:
+                    raise Exception("Unable to generate unique referral code")
                 code = generate_referral_code()
-                current_app.logger.debug("Generated referral code: %s", code)
-                if not User.query.filter_by(referral_code=code).first():
+                if not db.session.query(User.id).filter_by(referral_code=code).scalar():
                     break
-            current_app.logger.debug("Final referral code: %s", code)
+            mark("referral_code_generation")
 
             # Create the User object
             user = User(
@@ -78,23 +115,18 @@ class UserService:
                 parent_type="user",
                 referral_code=code
             )
-            current_app.logger.debug("Created User object: %s", user)
-
             # Add user to session first
             db.session.add(user)
             db.session.flush()  # Assigns user.id from DB without committing
-            current_app.logger.debug("Flushed session, user id: %s", user.id)
+            mark("user_insert_flush")
 
             # Add related objects using the relationship (now user.id is available)
             UserService._add_physical_address(user, data.get('contact', {}).get('physicalAddress'))
-            current_app.logger.debug("Added physical address for user")
-
             UserService._add_contact_info(user, data.get('contact', {}).get('electronicAddress'))
-            current_app.logger.debug("Added contact info for user")
+            mark("contact_address_attach")
 
             if referral_input:
                 referrer = User.query.filter_by(referral_code=referral_input).first()
-                current_app.logger.debug("Found referrer: %s", referrer)
                 if referrer and referrer.referral_code != code:  # Prevent self-referral
                     user.referred_by = referral_input
                     referrer.referral_rewards += 1
@@ -107,12 +139,11 @@ class UserService:
                         referred_user_id=user.id
                     )
                     db.session.add(referral_track)
-                    current_app.logger.debug("Updated referrer rewards and added referral tracking")
+            mark("referral_link")
 
             # Creation of Hash Wallet + PasswordManager in same transaction
             wallet = HashWallet(user_id=user.id, balance=0)
             db.session.add(wallet)
-            current_app.logger.debug("Created and added HashWallet for user")
 
             _, password = generate_credentials()
             password_manager = PasswordManager(
@@ -122,10 +153,21 @@ class UserService:
                 parent_type="user"
             )
             db.session.add(password_manager)
-            current_app.logger.info("PasswordManager created for user ID: %s", user.id)
+            mark("wallet_password_attach")
 
             db.session.commit()
-            current_app.logger.debug("Committed transaction")
+            mark("commit")
+
+            if timing_enabled:
+                total_ms = (time.perf_counter() - t0) * 1000
+                breakdown = ", ".join(f"{name}={value:.2f}ms" for name, value in timing_steps)
+                current_app.logger.info(
+                    "create_user_timing fid=%s user_id=%s total=%.2fms steps=[%s]",
+                    fid_value,
+                    user.id,
+                    total_ms,
+                    breakdown,
+                )
 
             return user
 
@@ -133,6 +175,33 @@ class UserService:
             db.session.rollback()
             current_app.logger.warning("Validation error: %s", str(ve))
             raise Exception(f"Validation error: {str(ve)}")
+
+        except IntegrityError as ie:
+            db.session.rollback()
+            message = str(getattr(ie, "orig", ie)).lower()
+            if "users_fid_key" in message or "fid" in message:
+                return {
+                    "status": "error",
+                    "state": "USER_EXISTS",
+                    "message": "A user with this FID already exists.",
+                    "details": {"fid": data.get("fid")}
+                }
+            if "users_game_username_key" in message or "game_username" in message:
+                return {
+                    "status": "error",
+                    "state": "USERNAME_TAKEN",
+                    "message": "This game username is already taken.",
+                    "details": {"gameUserName": data.get("gameUserName")}
+                }
+            if "contact_info" in message and "email" in message:
+                return {
+                    "status": "error",
+                    "state": "EMAIL_EXISTS",
+                    "message": "This email is already in use.",
+                    "details": {"email": data.get("contact", {}).get("electronicAddress", {}).get("emailId")}
+                }
+            current_app.logger.error("Integrity error while creating user: %s", message)
+            raise Exception("User creation failed due to integrity constraints.")
 
         except Exception as e:
             db.session.rollback()
@@ -349,9 +418,16 @@ class UserService:
     @staticmethod
     def is_in_cooldown(email, phone):
         """Check if email or phone is in cooldown period"""
+        if not email and not phone:
+            return False
         now = datetime.utcnow()
+        predicates = []
+        if email:
+            predicates.append(DeletedUserCooldown.email == email)
+        if phone:
+            predicates.append(DeletedUserCooldown.phone == phone)
         cooldown = DeletedUserCooldown.query.filter(
-            or_(DeletedUserCooldown.email == email, DeletedUserCooldown.phone == phone),
+            or_(*predicates),
             DeletedUserCooldown.expires_at > now
         ).first()
         return cooldown is not None

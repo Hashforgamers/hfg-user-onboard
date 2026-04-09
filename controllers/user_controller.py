@@ -37,6 +37,7 @@ import jwt
 from datetime import datetime, timedelta
 import time
 import uuid
+import re
 from threading import Lock
 
 user_blueprint = Blueprint('user', __name__)
@@ -48,8 +49,16 @@ _USER_SEARCH_CACHE = {}
 _USER_SEARCH_CACHE_MAX_SIZE = 20000
 _USER_PHONE_CACHE = {}
 _USER_PHONE_CACHE_MAX_SIZE = 20000
+_USER_FID_AUTH_CACHE = {}
+_USER_FID_AUTH_CACHE_MAX_SIZE = 20000
+_USER_FID_CACHE_LOCK = Lock()
+_USER_FID_AUTH_CACHE_LOCK = Lock()
 _API_MICROCACHE = {}
 _API_MICROCACHE_LOCK = Lock()
+
+_GAME_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_FID_RE = re.compile(r"^[A-Za-z0-9:_\-]{6,255}$")
 
 
 def _microcache_get(cache_key):
@@ -84,6 +93,68 @@ def _invalidate_user_microcache(user_id, prefixes):
         for key in stale_keys:
             _API_MICROCACHE.pop(key, None)
 
+
+def _sanitize_signup_payload(data):
+    payload = dict(data or {})
+    payload["fid"] = str(payload.get("fid") or "").strip()
+    payload["gameUserName"] = str(payload.get("gameUserName") or "").strip()
+    payload["name"] = str(payload.get("name") or "").strip()
+    payload["gender"] = str(payload.get("gender") or "").strip().lower()
+    payload["avatar_path"] = str(payload.get("avatar_path") or "").strip()
+    payload["referral_code"] = str(payload.get("referral_code") or "").strip().upper() or None
+
+    contact = payload.get("contact")
+    if not isinstance(contact, dict):
+        contact = {}
+    payload["contact"] = contact
+
+    electronic = contact.get("electronicAddress")
+    if not isinstance(electronic, dict):
+        electronic = {}
+    contact["electronicAddress"] = electronic
+
+    email = str(electronic.get("emailId") or "").strip().lower()
+    phone = str(electronic.get("mobileNo") or "").strip()
+    electronic["emailId"] = email
+    electronic["mobileNo"] = phone
+
+    physical = contact.get("physicalAddress")
+    if not isinstance(physical, dict):
+        physical = {}
+    contact["physicalAddress"] = physical
+    return payload
+
+
+def _validate_signup_payload(data):
+    fid = str(data.get("fid") or "")
+    game_username = str(data.get("gameUserName") or "")
+    if not fid or not _FID_RE.match(fid):
+        return "fid must be 6-255 chars and contain only letters, digits, ':', '_' or '-'"
+    if not game_username or not _GAME_USERNAME_RE.match(game_username):
+        return "gameUserName must be 3-32 chars and contain only letters, digits, '_', '-' or '.'"
+
+    dob_raw = data.get("dob")
+    if dob_raw:
+        try:
+            dob = datetime.strptime(str(dob_raw), "%d-%b-%Y").date()
+        except ValueError:
+            return "dob must be in format DD-Mon-YYYY (e.g. 09-Apr-2000)"
+        today = datetime.utcnow().date()
+        if dob > today:
+            return "dob cannot be in the future"
+        if (today - dob).days > 120 * 365:
+            return "dob is outside valid range"
+
+    email = (data.get("contact") or {}).get("electronicAddress", {}).get("emailId")
+    if email:
+        if len(email) > 254 or not _EMAIL_RE.match(str(email)):
+            return "emailId is invalid"
+
+    referral_code = data.get("referral_code")
+    if referral_code and len(str(referral_code)) > 20:
+        return "referral_code is too long"
+    return None
+
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
     token = request.json["token"]  # Lookup token in DB ideally
@@ -94,7 +165,7 @@ def notify_user():
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
-    data = request.get_json(silent=True) or {}
+    data = _sanitize_signup_payload(request.get_json(silent=True) or {})
     required_fields = ("fid", "gameUserName")
     missing = [field for field in required_fields if not data.get(field)]
     if missing:
@@ -102,6 +173,9 @@ def create_user():
             "message": "Validation error",
             "details": f"Missing required fields: {', '.join(missing)}"
         }), 400
+    validation_error = _validate_signup_payload(data)
+    if validation_error:
+        return jsonify({"message": "Validation error", "details": validation_error}), 400
 
     try:
         current_app.logger.info("Create user request started for fid=%s", data.get("fid"))
@@ -109,17 +183,18 @@ def create_user():
 
         if isinstance(result, dict) and result.get('status') == 'error':
             state = result.get("state")
-            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 400
+            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
+        user_payload = result.to_dict()
         if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
             _USER_CACHE.pop(next(iter(_USER_CACHE)))
         _USER_CACHE[result.id] = {
-            "payload": result.to_dict(),
+            "payload": user_payload,
             "expires_at": time.time() + int(current_app.config.get("USER_CACHE_TTL_SEC", 15)),
         }
 
-        return jsonify({"message": "User created successfully", "user": result.to_dict()}), 201
+        return jsonify({"message": "User created successfully", "user": user_payload}), 201
     except Exception:
         current_app.logger.exception("Create user failed for fid=%s", data.get("fid"))
         return jsonify({"message": "Internal server error"}), 500
@@ -447,24 +522,38 @@ def get_user_by_fid_auth(user_fid):
             return jsonify({'message': 'user_fid is required'}), 400
         if len(user_fid) > 255:
             return jsonify({'message': 'user_fid is too long'}), 400
+        if not _FID_RE.match(user_fid):
+            return jsonify({'message': 'invalid user_fid format'}), 400
+
+        now_ts = time.time()
+        auth_cache_ttl_sec = int(current_app.config.get("USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC", 20))
+        with _USER_FID_AUTH_CACHE_LOCK:
+            cached_auth = _USER_FID_AUTH_CACHE.get(user_fid)
+        if cached_auth and cached_auth["expires_at"] > now_ts:
+            response = jsonify(cached_auth["payload"])
+            response.headers['Authorization'] = f"Bearer {cached_auth['token']}"
+            response.headers['Cache-Control'] = 'no-store'
+            return response, 200
 
         cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
-        cached = _USER_FID_CACHE.get(user_fid)
-        now_ts = time.time()
+        with _USER_FID_CACHE_LOCK:
+            cached = _USER_FID_CACHE.get(user_fid)
         if cached and cached["expires_at"] > now_ts:
             user_payload = cached["payload"]
         else:
             user_payload = UserService.get_user_auth_payload_by_fid(user_fid)
             if not user_payload:
                 return jsonify({'message': 'User not found'}), 404
-            if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
-                _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
-            _USER_FID_CACHE[user_fid] = {
-                "payload": user_payload,
-                "expires_at": now_ts + cache_ttl_sec,
-            }
+            with _USER_FID_CACHE_LOCK:
+                if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
+                    _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
+                _USER_FID_CACHE[user_fid] = {
+                    "payload": user_payload,
+                    "expires_at": now_ts + cache_ttl_sec,
+                }
 
         token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
+        token_ttl_hours = max(1, min(token_ttl_hours, 24))
         now_utc = datetime.utcnow()
         encoded_user_id = encode_user(
             user_payload["id"],
@@ -483,10 +572,25 @@ def get_user_by_fid_auth(user_fid):
         if not jwt_secret:
             current_app.logger.error("JWT secret missing for fid auth endpoint")
             return jsonify({'message': 'Internal server error'}), 500
+        if (
+            bool(current_app.config.get("JWT_REQUIRE_STRONG_SECRET", True))
+            and len(str(jwt_secret or "")) < 32
+        ):
+            current_app.logger.error("JWT secret is below 32 bytes for fid auth")
+            return jsonify({'message': 'Internal server error'}), 500
 
         custom_jwt = jwt.encode(payload, jwt_secret, algorithm="HS256")
+        response_payload = {'user': user_payload, 'token': custom_jwt}
+        with _USER_FID_AUTH_CACHE_LOCK:
+            if len(_USER_FID_AUTH_CACHE) >= _USER_FID_AUTH_CACHE_MAX_SIZE:
+                _USER_FID_AUTH_CACHE.pop(next(iter(_USER_FID_AUTH_CACHE)))
+            _USER_FID_AUTH_CACHE[user_fid] = {
+                "payload": response_payload,
+                "token": custom_jwt,
+                "expires_at": now_ts + auth_cache_ttl_sec,
+            }
 
-        response = jsonify({'user': user_payload, 'token': custom_jwt})
+        response = jsonify(response_payload)
         response.headers['Authorization'] = f'Bearer {custom_jwt}'
         response.headers['Cache-Control'] = 'no-store'
         current_app.logger.info(
