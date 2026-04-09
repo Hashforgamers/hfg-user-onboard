@@ -69,6 +69,9 @@ def _invalidate_participation_cache(event_id=None, team_id=None):
     prefixes = []
     if event_id and team_id:
         prefixes.append(f"members:{event_id}:{team_id}")
+    if event_id:
+        prefixes.append(f"user-tournaments:")
+        prefixes.append(f"user-teams:")
     for key in list(_EVENT_PARTICIPATION_CACHE.keys()):
         if any(key.startswith(prefix) for prefix in prefixes):
             _EVENT_PARTICIPATION_CACHE.pop(key, None)
@@ -645,40 +648,62 @@ def get_user_teams(user_id):
     """
     event_id = request.args.get("event_id")
 
-    q = (
-        db.session.query(Team, TeamMember)
-        .join(TeamMember, TeamMember.team_id == Team.id)
-        .filter(TeamMember.user_id == user_id)
-    )
+    cache_key = f"user-teams:{int(user_id)}:{event_id or ''}"
+    now_ts = time.time()
+    cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
+    if cached and cached["expires_at"] > now_ts:
+        return jsonify(cached["payload"]), 200
 
-    if event_id:
-        q = q.filter(Team.event_id == event_id)
-
-    rows = q.all()
+    params = {"user_id": int(user_id), "event_id": str(event_id) if event_id else None}
+    rows = db.session.execute(text("""
+        SELECT
+            t.id AS team_id,
+            t.team_name,
+            t.event_id,
+            t.is_individual,
+            tm.role,
+            tm.joined_at,
+            COALESCE(mc.member_count, 0)::int AS member_count
+        FROM team_members tm
+        JOIN teams t ON t.id = tm.team_id
+        LEFT JOIN (
+            SELECT team_id, COUNT(1)::int AS member_count
+            FROM team_members
+            GROUP BY team_id
+        ) mc ON mc.team_id = t.id
+        WHERE tm.user_id = :user_id
+          AND (:event_id IS NULL OR t.event_id = CAST(:event_id AS uuid))
+        ORDER BY tm.joined_at DESC
+    """), params).mappings().all()
 
     if not rows:
+        _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": [], "expires_at": now_ts + 30}
         return jsonify([]), 200
 
     result = []
-    for team, member in rows:
-        # member count for this team
-        member_count = TeamMember.query.filter_by(team_id=team.id).count()
-
+    for row in rows:
         result.append({
-            "team_id":        str(team.id),
-            "team_name":      team.team_name,
-            "event_id":       str(team.event_id),
-            "is_individual":  team.is_individual,
-            "role":           member.role,           # captain / member
-            "joined_at":      member.joined_at.isoformat() if member.joined_at else None,
-            "member_count":   member_count,
+            "team_id":        str(row["team_id"]),
+            "team_name":      row["team_name"],
+            "event_id":       str(row["event_id"]),
+            "is_individual":  bool(row["is_individual"]),
+            "role":           row["role"],
+            "joined_at":      row["joined_at"].isoformat() if row["joined_at"] else None,
+            "member_count":   int(row["member_count"] or 0),
         })
 
+    _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": result, "expires_at": now_ts + 30}
     return jsonify(result), 200
 
 
 @event_participation_bp.get("/users/<int:user_id>/tournaments/joined")
 def get_user_joined_tournaments(user_id):
+    cache_key = f"user-tournaments:{int(user_id)}"
+    now_ts = time.time()
+    cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
+    if cached and cached["expires_at"] > now_ts:
+        return jsonify(cached["payload"]), 200
+
     rows = (
         db.session.query(TeamMember, Team, Event)
         .join(Team, Team.id == TeamMember.team_id)
@@ -745,4 +770,5 @@ def get_user_joined_tournaments(user_id):
     grouped["upcoming"] = list(grouped_map["upcoming"].values())
     grouped["completed"] = list(grouped_map["completed"].values())
 
+    _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": grouped, "expires_at": now_ts + 30}
     return jsonify(grouped), 200

@@ -12,6 +12,27 @@ from services.security import auth_required_self
 review_blueprint = Blueprint("reviews", __name__)
 
 EDIT_WINDOW_HOURS = 24
+_REVIEW_CACHE = {}
+_REVIEW_CACHE_MAX_SIZE = 20000
+
+
+def _review_cache_get(cache_key):
+    item = _REVIEW_CACHE.get(cache_key)
+    if not item:
+        return None
+    if item["expires_at"] <= datetime.now(timezone.utc).timestamp():
+        _REVIEW_CACHE.pop(cache_key, None)
+        return None
+    return item["payload"]
+
+
+def _review_cache_set(cache_key, payload, ttl_sec):
+    if len(_REVIEW_CACHE) >= _REVIEW_CACHE_MAX_SIZE:
+        _REVIEW_CACHE.pop(next(iter(_REVIEW_CACHE)), None)
+    _REVIEW_CACHE[cache_key] = {
+        "payload": payload,
+        "expires_at": datetime.now(timezone.utc).timestamp() + max(int(ttl_sec or 0), 1),
+    }
 
 
 def _internal_authorized() -> bool:
@@ -148,6 +169,7 @@ def create_review():
     )
     db.session.add(review)
     db.session.commit()
+    _REVIEW_CACHE.pop(f"reviews-summary:{int(vendor_id)}", None)
 
     return jsonify({
         "ok": True,
@@ -193,6 +215,7 @@ def edit_review(review_id):
         review.is_anonymous = bool(data.get("is_anonymous"))
 
     db.session.commit()
+    _REVIEW_CACHE.pop(f"reviews-summary:{int(review.vendor_id)}", None)
     return jsonify({"ok": True}), 200
 
 
@@ -227,17 +250,24 @@ def list_reviews(vendor_id):
     for review, user in rows:
         payload.append(_serialize_review(review, user))
 
-    return jsonify({
+    response_payload = {
         "items": payload,
         "limit": limit,
         "offset": offset,
         "count": len(payload),
-    }), 200
+    }
+    _review_cache_set(cache_key, response_payload, ttl_sec=30)
+    return jsonify(response_payload), 200
 
 
 @review_blueprint.route("/vendors/<int:vendor_id>/reviews/summary", methods=["GET"])
 def reviews_summary(vendor_id):
+    cache_key = f"reviews-summary:{int(vendor_id)}"
+    cached = _review_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
     summary = _rating_counts(int(vendor_id))
+    _review_cache_set(cache_key, summary, ttl_sec=30)
     return jsonify(summary), 200
 
 
@@ -309,6 +339,7 @@ def internal_respond_review(review_id):
     review.responded_at = datetime.now(timezone.utc)
     review.responded_by = responded_by
     db.session.commit()
+    _REVIEW_CACHE.pop(f"reviews-summary:{int(vendor_id)}", None)
     return jsonify({"ok": True}), 200
 
 
@@ -331,4 +362,5 @@ def internal_update_review_status(review_id):
 
     review.status = status
     db.session.commit()
+    _REVIEW_CACHE.pop(f"reviews-summary:{int(vendor_id)}", None)
     return jsonify({"ok": True}), 200

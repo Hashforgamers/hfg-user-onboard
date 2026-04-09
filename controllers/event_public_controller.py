@@ -52,7 +52,7 @@ def list_public_events():
     if flag_filter and flag_filter not in {"live", "upcoming", "completed"}:
         return jsonify({"error": "invalid flag. use live|upcoming|completed"}), 400
 
-    cache_ttl_sec = 10
+    cache_ttl_sec = 60
     cache_key = f"public:{vendor_id}:{flag_filter}:{limit}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)
@@ -126,7 +126,7 @@ def get_event(event_id):
     Single event detail — no auth required.
     Returns full event info including team count and flag.
     """
-    cache_ttl_sec = 10
+    cache_ttl_sec = 60
     cache_key = f"event:{event_id}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)
@@ -209,7 +209,7 @@ def get_event_leaderboard(event_id):
     if stage not in {"auto", "winners", "provisional"}:
         return jsonify({"error": "invalid stage. use auto|winners|provisional"}), 400
 
-    cache_ttl_sec = 10
+    cache_ttl_sec = 60
     cache_key = f"leaderboard:{event_id}:{stage}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)
@@ -271,7 +271,7 @@ def get_event_provisional_results(event_id):
     Specific event provisional results.
     Public endpoint.
     """
-    cache_ttl_sec = 10
+    cache_ttl_sec = 60
     cache_key = f"provisional:{event_id}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)

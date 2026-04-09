@@ -701,9 +701,14 @@ def get_user_hash_coins():
         if cached is not None:
             return jsonify(cached), 200
 
-        user_hash_coin = db.session.query(UserHashCoin).filter_by(user_id=user_id).first()
+        coin_balance = db.session.execute(text("""
+            SELECT hash_coins
+            FROM user_hash_coins
+            WHERE user_id = :user_id
+            LIMIT 1
+        """), {"user_id": int(user_id)}).scalar()
 
-        if not user_hash_coin:
+        if coin_balance is None:
             payload = {
                 "user_id": user_id,
                 "hash_coins": 0,
@@ -718,7 +723,7 @@ def get_user_hash_coins():
 
         payload = {
             "user_id": user_id,
-            "hash_coins": user_hash_coin.hash_coins
+            "hash_coins": int(coin_balance or 0),
         }
         _microcache_set(
             cache_key,
@@ -789,10 +794,15 @@ def get_wallet_balance_auth():
     if cached is not None:
         return jsonify(cached), 200
 
-    wallet = HashWallet.query.filter_by(user_id=user_id).first()
-    if not wallet:
+    balance = db.session.execute(text("""
+        SELECT balance
+        FROM hash_wallets
+        WHERE user_id = :user_id
+        LIMIT 1
+    """), {"user_id": int(user_id)}).scalar()
+    if balance is None:
         return jsonify({"message": "Wallet not found"}), 404
-    payload = {"balance": wallet.balance}
+    payload = {"balance": int(balance or 0)}
     _microcache_set(
         cache_key,
         payload,
