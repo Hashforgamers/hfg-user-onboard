@@ -155,6 +155,73 @@ def _validate_signup_payload(data):
         return "referral_code is too long"
     return None
 
+
+def _build_auth_response_for_fid(user_fid: str, user_payload: dict = None):
+    """
+    Build the same payload contract as GET /users/fid/<fid>:
+    {"user": ..., "token": ...}
+    Also refreshes hot caches for that fid.
+    """
+    fid = (user_fid or "").strip()
+    if not fid:
+        return None, None, "user_fid is required"
+
+    now_ts = time.time()
+    if user_payload is None:
+        user_payload = UserService.get_user_auth_payload_by_fid(fid)
+        if not user_payload:
+            return None, None, "User not found"
+
+    cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
+    with _USER_FID_CACHE_LOCK:
+        if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
+            _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
+        _USER_FID_CACHE[fid] = {
+            "payload": user_payload,
+            "expires_at": now_ts + cache_ttl_sec,
+        }
+
+    token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
+    token_ttl_hours = max(1, min(token_ttl_hours, 24))
+    now_utc = datetime.utcnow()
+    encoded_user_id = encode_user(
+        user_payload["id"],
+        current_app.config['ENCRYPT_PUBLIC_KEY']
+    )
+    token_payload = {
+        "uid": encoded_user_id,
+        "uuid": encoded_user_id,
+        "iat": now_utc,
+        "created_at": now_utc.isoformat(),
+        "exp": now_utc + timedelta(hours=token_ttl_hours),
+    }
+
+    jwt_secret = current_app.config.get('JWT_SECRET_KEY') or current_app.config.get('SECRET_KEY')
+    if not jwt_secret:
+        current_app.logger.error("JWT secret missing for fid auth payload")
+        return None, None, "Internal server error"
+    if (
+        bool(current_app.config.get("JWT_REQUIRE_STRONG_SECRET", True))
+        and len(str(jwt_secret or "")) < 32
+    ):
+        current_app.logger.error("JWT secret is below 32 bytes for fid auth payload")
+        return None, None, "Internal server error"
+
+    custom_jwt = jwt.encode(token_payload, jwt_secret, algorithm="HS256")
+    response_payload = {"user": user_payload, "token": custom_jwt}
+
+    auth_cache_ttl_sec = int(current_app.config.get("USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC", 20))
+    with _USER_FID_AUTH_CACHE_LOCK:
+        if len(_USER_FID_AUTH_CACHE) >= _USER_FID_AUTH_CACHE_MAX_SIZE:
+            _USER_FID_AUTH_CACHE.pop(next(iter(_USER_FID_AUTH_CACHE)))
+        _USER_FID_AUTH_CACHE[fid] = {
+            "payload": response_payload,
+            "token": custom_jwt,
+            "expires_at": now_ts + auth_cache_ttl_sec,
+        }
+
+    return response_payload, custom_jwt, None
+
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
     token = request.json["token"]  # Lookup token in DB ideally
@@ -183,6 +250,22 @@ def create_user():
 
         if isinstance(result, dict) and result.get('status') == 'error':
             state = result.get("state")
+            if state == "USER_EXISTS":
+                recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(data.get("fid"))
+                if recovered_payload and recovered_token:
+                    response = jsonify({
+                        "message": "User already exists. Returning existing account.",
+                        "state": "USER_EXISTS_RECOVERED",
+                        **recovered_payload,
+                    })
+                    response.headers['Authorization'] = f'Bearer {recovered_token}'
+                    response.headers['Cache-Control'] = 'no-store'
+                    return response, 200
+                current_app.logger.warning(
+                    "Create user conflict recovery failed for fid=%s err=%s",
+                    data.get("fid"),
+                    recover_err,
+                )
             status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
@@ -552,43 +635,11 @@ def get_user_by_fid_auth(user_fid):
                     "expires_at": now_ts + cache_ttl_sec,
                 }
 
-        token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
-        token_ttl_hours = max(1, min(token_ttl_hours, 24))
-        now_utc = datetime.utcnow()
-        encoded_user_id = encode_user(
-            user_payload["id"],
-            current_app.config['ENCRYPT_PUBLIC_KEY']
-        )
-
-        payload = {
-            # Keep both keys to preserve compatibility with existing consumers.
-            'uid': encoded_user_id,
-            'uuid': encoded_user_id,
-            'iat': now_utc,
-            'created_at': now_utc.isoformat(),
-            'exp': now_utc + timedelta(hours=token_ttl_hours)
-        }
-        jwt_secret = current_app.config.get('JWT_SECRET_KEY') or current_app.config.get('SECRET_KEY')
-        if not jwt_secret:
-            current_app.logger.error("JWT secret missing for fid auth endpoint")
+        response_payload, custom_jwt, build_err = _build_auth_response_for_fid(user_fid, user_payload=user_payload)
+        if not response_payload or not custom_jwt:
+            if build_err == "User not found":
+                return jsonify({'message': 'User not found'}), 404
             return jsonify({'message': 'Internal server error'}), 500
-        if (
-            bool(current_app.config.get("JWT_REQUIRE_STRONG_SECRET", True))
-            and len(str(jwt_secret or "")) < 32
-        ):
-            current_app.logger.error("JWT secret is below 32 bytes for fid auth")
-            return jsonify({'message': 'Internal server error'}), 500
-
-        custom_jwt = jwt.encode(payload, jwt_secret, algorithm="HS256")
-        response_payload = {'user': user_payload, 'token': custom_jwt}
-        with _USER_FID_AUTH_CACHE_LOCK:
-            if len(_USER_FID_AUTH_CACHE) >= _USER_FID_AUTH_CACHE_MAX_SIZE:
-                _USER_FID_AUTH_CACHE.pop(next(iter(_USER_FID_AUTH_CACHE)))
-            _USER_FID_AUTH_CACHE[user_fid] = {
-                "payload": response_payload,
-                "token": custom_jwt,
-                "expires_at": now_ts + auth_cache_ttl_sec,
-            }
 
         response = jsonify(response_payload)
         response.headers['Authorization'] = f'Bearer {custom_jwt}'
