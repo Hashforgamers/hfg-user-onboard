@@ -38,3 +38,23 @@ class Config:
     # Encryption keys
     ENCRYPT_PRIVATE_KEY = load_key_from_file(os.getenv("ENCRYPT_PRIVATE_KEY_PATH"))
     ENCRYPT_PUBLIC_KEY = load_key_from_file(os.getenv("ENCRYPT_PUBLIC_KEY_PATH"))
+
+    # API performance / observability knobs
+    API_ENABLE_TIMING_HEADERS = os.getenv("API_ENABLE_TIMING_HEADERS", "true").lower() in ("true", "1", "t", "yes", "y")
+    API_SLOW_REQUEST_MS = int(os.getenv("API_SLOW_REQUEST_MS", "120") or 120)
+    API_PUBLIC_CACHE_CONTROL = os.getenv("API_PUBLIC_CACHE_CONTROL", "public, max-age=15, stale-while-revalidate=30")
+    API_PRIVATE_CACHE_CONTROL = os.getenv("API_PRIVATE_CACHE_CONTROL", "no-store")
+
+    # Endpoint-level microcache profiles
+    API_MICROCACHE_MAX_ITEMS = int(os.getenv("API_MICROCACHE_MAX_ITEMS", "50000") or 50000)
+    API_CACHE_USERS_VOUCHER_TTL_SEC = int(os.getenv("API_CACHE_USERS_VOUCHER_TTL_SEC", "20") or 20)
+    API_CACHE_USERS_HASH_COINS_TTL_SEC = int(os.getenv("API_CACHE_USERS_HASH_COINS_TTL_SEC", "10") or 10)
+    API_CACHE_USERS_WALLET_TTL_SEC = int(os.getenv("API_CACHE_USERS_WALLET_TTL_SEC", "8") or 8)
+    API_CACHE_USERS_TRANSACTIONS_TTL_SEC = int(os.getenv("API_CACHE_USERS_TRANSACTIONS_TTL_SEC", "8") or 8)
+    API_CACHE_USER_AVAILABLE_PASSES_TTL_SEC = int(os.getenv("API_CACHE_USER_AVAILABLE_PASSES_TTL_SEC", "20") or 20)
+    API_CACHE_USER_ALL_PASSES_TTL_SEC = int(os.getenv("API_CACHE_USER_ALL_PASSES_TTL_SEC", "20") or 20)
+    API_CACHE_USER_PASSES_TTL_SEC = int(os.getenv("API_CACHE_USER_PASSES_TTL_SEC", "10") or 10)
+    API_CACHE_USER_PASSES_HISTORY_TTL_SEC = int(os.getenv("API_CACHE_USER_PASSES_HISTORY_TTL_SEC", "15") or 15)
+    API_CACHE_PASS_DETAILS_TTL_SEC = int(os.getenv("API_CACHE_PASS_DETAILS_TTL_SEC", "30") or 30)
+    API_CACHE_VENDOR_EXTRAS_TTL_SEC = int(os.getenv("API_CACHE_VENDOR_EXTRAS_TTL_SEC", "20") or 20)
+    API_CACHE_USERS_NOTIFICATIONS_TTL_SEC = int(os.getenv("API_CACHE_USERS_NOTIFICATIONS_TTL_SEC", "5") or 5)

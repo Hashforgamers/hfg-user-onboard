@@ -37,6 +37,7 @@ import jwt
 from datetime import datetime, timedelta
 import time
 import uuid
+from threading import Lock
 
 user_blueprint = Blueprint('user', __name__)
 _USER_FID_CACHE = {}
@@ -47,6 +48,41 @@ _USER_SEARCH_CACHE = {}
 _USER_SEARCH_CACHE_MAX_SIZE = 20000
 _USER_PHONE_CACHE = {}
 _USER_PHONE_CACHE_MAX_SIZE = 20000
+_API_MICROCACHE = {}
+_API_MICROCACHE_LOCK = Lock()
+
+
+def _microcache_get(cache_key):
+    now_ts = time.time()
+    with _API_MICROCACHE_LOCK:
+        item = _API_MICROCACHE.get(cache_key)
+        if not item:
+            return None
+        if item["expires_at"] <= now_ts:
+            _API_MICROCACHE.pop(cache_key, None)
+            return None
+        return item["payload"]
+
+
+def _microcache_set(cache_key, payload, ttl_sec):
+    now_ts = time.time()
+    max_items = int(current_app.config.get("API_MICROCACHE_MAX_ITEMS", 50000))
+    ttl = max(int(ttl_sec or 0), 1)
+    with _API_MICROCACHE_LOCK:
+        if len(_API_MICROCACHE) >= max_items:
+            _API_MICROCACHE.pop(next(iter(_API_MICROCACHE)), None)
+        _API_MICROCACHE[cache_key] = {"payload": payload, "expires_at": now_ts + ttl}
+
+
+def _invalidate_user_microcache(user_id, prefixes):
+    uid = int(user_id)
+    with _API_MICROCACHE_LOCK:
+        stale_keys = [
+            key for key in _API_MICROCACHE.keys()
+            if f"|u:{uid}|" in key and any(key.startswith(prefix) for prefix in prefixes)
+        ]
+        for key in stale_keys:
+            _API_MICROCACHE.pop(key, None)
 
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
@@ -621,6 +657,7 @@ def create_voucher_for_referral_points():
                 f"You have earned a voucher: {voucher.code} for {voucher.discount_percentage}% off! Check your rewards."
             )
         # ---
+        _invalidate_user_microcache(user_id, ["users-voucher"])
         return jsonify({
             "message": "Voucher created successfully",
             "voucher": {
@@ -636,10 +673,21 @@ def create_voucher_for_referral_points():
 def get_voucher_by_user():
     user_id = g.auth_user_id 
     try:
+        cache_key = f"users-voucher|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         vouchers = UserService.get_user_vouchers(user_id)
-        return jsonify({
+        payload = {
             "vouchers": [v.to_dict() for v in vouchers],
-        }), 200
+        }
+        _microcache_set(
+            cache_key,
+            payload,
+            int(current_app.config.get("API_CACHE_USERS_VOUCHER_TTL_SEC", 20)),
+        )
+        return jsonify(payload), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -648,19 +696,36 @@ def get_voucher_by_user():
 def get_user_hash_coins():
     user_id = g.auth_user_id 
     try:
+        cache_key = f"users-hash-coins|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         user_hash_coin = db.session.query(UserHashCoin).filter_by(user_id=user_id).first()
 
         if not user_hash_coin:
-            return jsonify({
+            payload = {
                 "user_id": user_id,
                 "hash_coins": 0,
                 "message": "No hash coins found for this user"
-            }), 200
+            }
+            _microcache_set(
+                cache_key,
+                payload,
+                int(current_app.config.get("API_CACHE_USERS_HASH_COINS_TTL_SEC", 10)),
+            )
+            return jsonify(payload), 200
 
-        return jsonify({
+        payload = {
             "user_id": user_id,
             "hash_coins": user_hash_coin.hash_coins
-        }), 200
+        }
+        _microcache_set(
+            cache_key,
+            payload,
+            int(current_app.config.get("API_CACHE_USERS_HASH_COINS_TTL_SEC", 10)),
+        )
+        return jsonify(payload), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -701,6 +766,11 @@ def add_hash_coins():
             f"You have received {amount} Hash Coins. Total Hash Coins: {user_hash_coin.hash_coins}."
         )
         # ---
+        _invalidate_user_microcache(user_id, [
+            "users-hash-coins",
+            "users-wallet",
+            "users-transactions",
+        ])
         return jsonify({
             "user_id": user_id,
             "new_hash_coins": user_hash_coin.hash_coins,
@@ -714,10 +784,21 @@ def add_hash_coins():
 @auth_required_self(decrypt_user=True)  # set to False if sub is not encrypted
 def get_wallet_balance_auth():
     user_id = g.auth_user_id  # injected by the decorator
+    cache_key = f"users-wallet|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     wallet = HashWallet.query.filter_by(user_id=user_id).first()
     if not wallet:
         return jsonify({"message": "Wallet not found"}), 404
-    return jsonify({"balance": wallet.balance}), 200
+    payload = {"balance": wallet.balance}
+    _microcache_set(
+        cache_key,
+        payload,
+        int(current_app.config.get("API_CACHE_USERS_WALLET_TTL_SEC", 8)),
+    )
+    return jsonify(payload), 200
 
 @user_blueprint.route('/users/wallet', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
@@ -760,6 +841,10 @@ def add_wallet_balance():
             f"Your wallet has been topped up with {amount} coins. New balance: {wallet.balance}."
         )
         # ---
+        _invalidate_user_microcache(user_id, [
+            "users-wallet",
+            "users-transactions",
+        ])
 
         return jsonify({"message": "Wallet updated", "new_balance": wallet.balance})
     except Exception as e:
@@ -820,6 +905,13 @@ def user_purchase_pass():
         db.session.add(transaction)
 
         db.session.commit()
+        _invalidate_user_microcache(user_id, [
+            "user-available-passes",
+            "user-all-passes",
+            "user-passes",
+            "user-passes-history",
+            "users-transactions",
+        ])
 
         return jsonify({
             "message": "Pass purchased successfully",
@@ -842,6 +934,11 @@ def user_purchase_pass():
 def user_transaction_history():
     user_id = g.auth_user_id 
     try:
+        cache_key = f"users-transactions|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         all_txns = []
 
         # 1. Normal Transactions from Transaction table
@@ -873,7 +970,13 @@ def user_transaction_history():
         # Sort all by date and time (newest first)
         all_txns.sort(key=lambda x: (x['date'], x['time']), reverse=True)
 
-        return jsonify({"transactions": all_txns}), 200
+        payload = {"transactions": all_txns}
+        _microcache_set(
+            cache_key,
+            payload,
+            int(current_app.config.get("API_CACHE_USERS_TRANSACTIONS_TTL_SEC", 8)),
+        )
+        return jsonify(payload), 200
 
     except Exception as e:
         current_app.logger.error(f"Error fetching transactions for user {user_id}: {e}")
@@ -885,6 +988,10 @@ def user_available_passes():
     user_id = g.auth_user_id 
     today = datetime.utcnow().date()
     pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
+    cache_key = f"user-available-passes|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
 
     # --- Get all passes the user has ever purchased (active or expired) ---
     user_passes_all = db.session.query(UserPass.cafe_pass_id).filter(
@@ -933,6 +1040,11 @@ def user_available_passes():
         
         result.append(pass_data)
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_USER_AVAILABLE_PASSES_TTL_SEC", 20)),
+    )
     return jsonify(result), 200
 
 
@@ -941,6 +1053,10 @@ def user_available_passes():
 def user_all_passes():
     user_id = g.auth_user_id 
     today = datetime.utcnow().date()
+    cache_key = f"user-all-passes|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
 
     # User's active passes
     user_passes = db.session.query(UserPass).filter(
@@ -967,6 +1083,11 @@ def user_all_passes():
             "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
             "already_purchased": bool(up)
         })
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_USER_ALL_PASSES_TTL_SEC", 20)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/user/passes", methods=["GET"])
@@ -974,6 +1095,10 @@ def user_all_passes():
 def user_passes():
     user_id = g.auth_user_id 
     today = datetime.utcnow().date()
+    cache_key = f"user-passes|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
 
     user_passes = UserPass.query.join(CafePass).filter(
         UserPass.user_id == user_id,
@@ -1001,6 +1126,11 @@ def user_passes():
             "pass_type": cafe_pass.pass_type.name if cafe_pass.pass_type else None
         })
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_USER_PASSES_TTL_SEC", 10)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/user/passes/history", methods=["GET"])
@@ -1008,6 +1138,10 @@ def user_passes():
 def user_passes_history():
     user_id = g.auth_user_id 
     today = datetime.utcnow().date()
+    cache_key = f"user-passes-history|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
     expired_passes = UserPass.query.join(CafePass).filter(
         UserPass.user_id == user_id,
         ((UserPass.valid_to < today) | (UserPass.is_active == False))
@@ -1024,10 +1158,20 @@ def user_passes_history():
         "is_active": up.is_active
     } for up in expired_passes]
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_USER_PASSES_HISTORY_TTL_SEC", 15)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/passes/<int:pass_id>", methods=["GET"])
 def pass_details(pass_id):
+    cache_key = f"pass-details|u:0|q:{int(pass_id)}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     cafe_pass = CafePass.query.filter_by(id=pass_id, is_active=True).first()
     if not cafe_pass:
         return jsonify({"message": "Pass not found"}), 404
@@ -1042,10 +1186,20 @@ def pass_details(pass_id):
         "vendor_id": cafe_pass.vendor_id,
         "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass"
     }
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_PASS_DETAILS_TTL_SEC", 30)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/vendor/<int:vendor_id>/extras/categories", methods=["GET"])
 def get_extra_service_categories(vendor_id):
+    cache_key = f"vendor-extra-categories|u:0|q:{int(vendor_id)}:{request.query_string.decode('utf-8')}"
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     categories = ExtraServiceCategory.query.filter_by(
         vendor_id=vendor_id,
         is_active=True
@@ -1057,10 +1211,22 @@ def get_extra_service_categories(vendor_id):
         "description": cat.description
     } for cat in categories]
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_VENDOR_EXTRAS_TTL_SEC", 20)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/vendor/<int:vendor_id>/extras/category/<int:category_id>/menus", methods=["GET"])
 def get_extra_service_menus(vendor_id, category_id):
+    cache_key = (
+        f"vendor-extra-menus|u:0|q:{int(vendor_id)}:{int(category_id)}:{request.query_string.decode('utf-8')}"
+    )
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     # Confirm category belongs to this vendor and is active
     category = ExtraServiceCategory.query.filter_by(
         id=category_id,
@@ -1080,10 +1246,22 @@ def get_extra_service_menus(vendor_id, category_id):
         "description": menu.description
     } for menu in menus]
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_VENDOR_EXTRAS_TTL_SEC", 20)),
+    )
     return jsonify(result), 200
 
 @user_blueprint.route("/vendor/<int:vendor_id>/extras/category/<int:category_id>/menu/<int:menu_id>", methods=["GET"])
 def get_extra_service_menu_item(vendor_id, category_id, menu_id):
+    cache_key = (
+        f"vendor-extra-menu-item|u:0|q:{int(vendor_id)}:{int(category_id)}:{int(menu_id)}:{request.query_string.decode('utf-8')}"
+    )
+    cached = _microcache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     # Validate category belongs to vendor and active
     category = ExtraServiceCategory.query.filter_by(
         id=category_id,
@@ -1104,6 +1282,11 @@ def get_extra_service_menu_item(vendor_id, category_id, menu_id):
         "description": menu.description
     }
 
+    _microcache_set(
+        cache_key,
+        result,
+        int(current_app.config.get("API_CACHE_VENDOR_EXTRAS_TTL_SEC", 20)),
+    )
     return jsonify(result), 200
 
 
@@ -1114,6 +1297,11 @@ def get_extra_service(vendor_id):
     Returns categories with nested menus including image URLs
     """
     try:
+        cache_key = f"vendor-extra-service|u:0|q:{int(vendor_id)}:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         categories = ExtraServiceCategory.query.filter_by(
             vendor_id=vendor_id,
             is_active=True
@@ -1156,7 +1344,13 @@ def get_extra_service(vendor_id):
                 "menus": menu_items
             })
 
-        return jsonify({"categories": result}), 200
+        payload = {"categories": result}
+        _microcache_set(
+            cache_key,
+            payload,
+            int(current_app.config.get("API_CACHE_VENDOR_EXTRAS_TTL_SEC", 20)),
+        )
+        return jsonify(payload), 200
 
     except Exception as e:
         current_app.logger.error(f"Error fetching extra services for vendor {vendor_id}: {str(e)}")
@@ -1198,6 +1392,11 @@ def get_user_available_passes_by_id(user_id):
     Query params: ?type=hash|vendor
     """
     try:
+        cache_key = f"user-id-available-passes|u:0|q:{int(user_id)}:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         today = datetime.utcnow().date()
         pass_type_filter = request.args.get('type', None)  # 'vendor', 'hash', or None
 
@@ -1253,6 +1452,11 @@ def get_user_available_passes_by_id(user_id):
             
             result.append(pass_data)
 
+        _microcache_set(
+            cache_key,
+            result,
+            int(current_app.config.get("API_CACHE_USER_AVAILABLE_PASSES_TTL_SEC", 20)),
+        )
         return jsonify(result), 200
 
     except Exception as e:
@@ -1270,6 +1474,11 @@ def list_user_notifications():
         if limit <= 0 or limit > 200:
             return jsonify({"message": "limit must be between 1 and 200"}), 400
 
+        cache_key = f"users-notifications|u:{int(user_id)}|q:{request.query_string.decode('utf-8')}"
+        cached = _microcache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached), 200
+
         q = Notification.query.filter(Notification.user_id == user_id)
         if unread_only:
             q = q.filter(Notification.is_read == False)
@@ -1280,10 +1489,16 @@ def list_user_notifications():
             Notification.is_read == False
         ).count()
 
-        return jsonify({
+        payload = {
             "notifications": [n.to_dict() for n in items],
             "unread_count": unread_count
-        }), 200
+        }
+        _microcache_set(
+            cache_key,
+            payload,
+            int(current_app.config.get("API_CACHE_USERS_NOTIFICATIONS_TTL_SEC", 5)),
+        )
+        return jsonify(payload), 200
     except Exception:
         current_app.logger.exception("Failed to list notifications for user_id=%s", user_id)
         return jsonify({"message": "Internal server error"}), 500
@@ -1304,6 +1519,7 @@ def mark_notification_read(notification_id):
         if not notif.is_read:
             notif.is_read = True
             db.session.commit()
+            _invalidate_user_microcache(user_id, ["users-notifications"])
 
         return jsonify({"message": "Notification marked as read", "notification_id": str(notif.id)}), 200
     except Exception:
