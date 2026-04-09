@@ -21,7 +21,7 @@ class Config:
         "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SEC", "30")),
     }
 
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev')
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-jwt-secret-change-me-please-32bytes')
 
     # Mail server settings
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.hashforgamers.co.in")
