@@ -1479,19 +1479,41 @@ def list_user_notifications():
         if cached is not None:
             return jsonify(cached), 200
 
-        q = Notification.query.filter(Notification.user_id == user_id)
-        if unread_only:
-            q = q.filter(Notification.is_read == False)
+        rows = db.session.execute(text("""
+            SELECT id, user_id, type, reference_id, title, message, is_read, created_at
+            FROM notifications
+            WHERE user_id = :user_id
+              AND (:unread_only = false OR is_read = false)
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """), {
+            "user_id": int(user_id),
+            "unread_only": bool(unread_only),
+            "limit": int(limit),
+        }).mappings().all()
 
-        items = q.order_by(Notification.created_at.desc()).limit(limit).all()
-        unread_count = Notification.query.filter(
-            Notification.user_id == user_id,
-            Notification.is_read == False
-        ).count()
+        unread_count = db.session.execute(text("""
+            SELECT COUNT(1)::int AS unread_count
+            FROM notifications
+            WHERE user_id = :user_id
+              AND is_read = false
+        """), {"user_id": int(user_id)}).scalar() or 0
 
         payload = {
-            "notifications": [n.to_dict() for n in items],
-            "unread_count": unread_count
+            "notifications": [
+                {
+                    "id": str(row["id"]),
+                    "user_id": int(row["user_id"]),
+                    "type": row["type"],
+                    "reference_id": row["reference_id"],
+                    "title": row["title"],
+                    "message": row["message"],
+                    "is_read": bool(row["is_read"]),
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                }
+                for row in rows
+            ],
+            "unread_count": int(unread_count),
         }
         _microcache_set(
             cache_key,
