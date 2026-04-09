@@ -225,6 +225,10 @@ def list_reviews(vendor_id):
     offset = max(int(request.args.get("offset", 0)), 0)
     rating = request.args.get("rating")
     sort = (request.args.get("sort") or "recent").lower()
+    cache_key = f"reviews:{int(vendor_id)}:{limit}:{offset}:{rating or ''}:{sort}"
+    cached = _review_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
 
     query = (
         db.session.query(CafeReview, User)
