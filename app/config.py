@@ -58,7 +58,11 @@ class Config:
     API_CACHE_PASS_DETAILS_TTL_SEC = int(os.getenv("API_CACHE_PASS_DETAILS_TTL_SEC", "30") or 30)
     API_CACHE_VENDOR_EXTRAS_TTL_SEC = int(os.getenv("API_CACHE_VENDOR_EXTRAS_TTL_SEC", "20") or 20)
     API_CACHE_USERS_NOTIFICATIONS_TTL_SEC = int(os.getenv("API_CACHE_USERS_NOTIFICATIONS_TTL_SEC", "20") or 20)
+    USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC = int(os.getenv("USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC", "20") or 20)
+    USER_CREATE_TIMING_LOGS = os.getenv("USER_CREATE_TIMING_LOGS", "true").lower() in ("true", "1", "t", "yes", "y")
 
     # Auth performance + logging controls
     AUTH_DEBUG_LOGS = os.getenv("AUTH_DEBUG_LOGS", "false").lower() in ("true", "1", "t", "yes", "y")
     AUTH_DECRYPT_CACHE_TTL_SEC = int(os.getenv("AUTH_DECRYPT_CACHE_TTL_SEC", "300") or 300)
+    AUTH_ALLOW_EXPIRED_TOKENS = os.getenv("AUTH_ALLOW_EXPIRED_TOKENS", "false").lower() in ("true", "1", "t", "yes", "y")
+    JWT_REQUIRE_STRONG_SECRET = os.getenv("JWT_REQUIRE_STRONG_SECRET", "true").lower() in ("true", "1", "t", "yes", "y")
