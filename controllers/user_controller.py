@@ -222,6 +222,28 @@ def _build_auth_response_for_fid(user_fid: str, user_payload: dict = None):
 
     return response_payload, custom_jwt, None
 
+
+def _find_existing_user_fid_by_email(email: str):
+    normalized = str(email or "").strip().lower()
+    if not normalized:
+        return None
+    row = db.session.execute(
+        text(
+            """
+            SELECT u.fid
+            FROM users u
+            JOIN contact_info c
+              ON c.parent_id = u.id
+             AND c.parent_type = 'user'
+            WHERE lower(c.email) = :email
+            ORDER BY u.id DESC
+            LIMIT 1
+            """
+        ),
+        {"email": normalized},
+    ).mappings().first()
+    return str(row["fid"]).strip() if row and row.get("fid") else None
+
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
     token = request.json["token"]  # Lookup token in DB ideally
@@ -273,6 +295,34 @@ def create_user():
                     data.get("fid"),
                     recover_err,
                 )
+            elif (
+                state == "EMAIL_EXISTS"
+                and bool(current_app.config.get("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", False))
+            ):
+                existing_email = (
+                    str((result.get("details") or {}).get("email") or "")
+                    .strip()
+                    .lower()
+                )
+                existing_fid = _find_existing_user_fid_by_email(existing_email)
+                if existing_fid:
+                    recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(existing_fid)
+                    if recovered_payload and recovered_token:
+                        response = jsonify({
+                            "message": "Email already exists. Signed in to existing account.",
+                            "state": "EMAIL_EXISTS_RECOVERED",
+                            "recovered_by": "email",
+                            **recovered_payload,
+                        })
+                        response.headers['Authorization'] = f'Bearer {recovered_token}'
+                        response.headers['Cache-Control'] = 'no-store'
+                        return response, 200
+                    current_app.logger.warning(
+                        "Create user email recovery failed fid=%s existing_fid=%s err=%s",
+                        data.get("fid"),
+                        existing_fid,
+                        recover_err,
+                    )
             status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
