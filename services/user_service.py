@@ -12,7 +12,7 @@ from models.referralTracking import ReferralTracking
 from models.voucher import Voucher
 from models.hashWallet import HashWallet
 from models.deletedUserCoolDownPeriod import DeletedUserCooldown
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload, load_only
 from sqlalchemy.exc import IntegrityError
@@ -62,6 +62,7 @@ class UserService:
             # Check if email already exists
             email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
             if email_to_check:
+                normalized_email = str(email_to_check).strip().lower()
                 phone_to_check = data.get('contact', {}).get('electronicAddress', {}).get('mobileNo')
                 if UserService.is_in_cooldown(email_to_check, phone_to_check):
                     return {
@@ -70,16 +71,44 @@ class UserService:
                         "message": "This account identifier is in cooldown period.",
                         "details": {"email": email_to_check}
                     }
-                if db.session.query(ContactInfo.id).filter(
-                    ContactInfo.email == email_to_check,
-                    ContactInfo.parent_type == "user",
-                ).scalar():
+                email_owned_by_user = (
+                    db.session.query(User.id)
+                    .join(
+                        ContactInfo,
+                        (ContactInfo.parent_id == User.id) & (ContactInfo.parent_type == "user"),
+                    )
+                    .filter(func.lower(ContactInfo.email) == normalized_email)
+                    .scalar()
+                )
+                if email_owned_by_user:
                     return {
                         "status": "error",
                         "state": "EMAIL_EXISTS",
                         "message": "This email is already in use.",
                         "details": {"email": email_to_check}
                     }
+                # Clean stale/orphan contact rows that reference non-existent users so they do not
+                # cause perpetual EMAIL_EXISTS loops in signup flows.
+                stale_rows = (
+                    db.session.query(ContactInfo.id)
+                    .outerjoin(User, User.id == ContactInfo.parent_id)
+                    .filter(
+                        ContactInfo.parent_type == "user",
+                        func.lower(ContactInfo.email) == normalized_email,
+                        User.id.is_(None),
+                    )
+                    .all()
+                )
+                if stale_rows:
+                    stale_ids = [int(r[0]) for r in stale_rows if r and r[0] is not None]
+                    if stale_ids:
+                        db.session.query(ContactInfo).filter(ContactInfo.id.in_(stale_ids)).delete(synchronize_session=False)
+                        db.session.flush()
+                        current_app.logger.warning(
+                            "create_user cleaned stale user contact rows for email=%s count=%s",
+                            normalized_email,
+                            len(stale_ids),
+                        )
             mark("email_check")
 
             # Check if username already exists
