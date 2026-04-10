@@ -63,6 +63,7 @@ class Config:
     USER_CREATE_ASYNC_FINALIZE_ENABLED = os.getenv("USER_CREATE_ASYNC_FINALIZE_ENABLED", "true").lower() in ("true", "1", "t", "yes", "y")
     USER_SIGNUP_EMAIL_RECOVERY_ENABLED = os.getenv("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
     USER_SIGNUP_EMAIL_LINK_FID_ENABLED = os.getenv("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
+    USER_DELETION_COOLDOWN_DAYS = int(os.getenv("USER_DELETION_COOLDOWN_DAYS", "30") or 30)
 
     # Auth performance + logging controls
     AUTH_DEBUG_LOGS = os.getenv("AUTH_DEBUG_LOGS", "false").lower() in ("true", "1", "t", "yes", "y")
