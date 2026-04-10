@@ -16,9 +16,24 @@ from sqlalchemy import or_, func
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload, load_only
 from sqlalchemy.exc import IntegrityError
+from concurrent.futures import ThreadPoolExecutor
+
+_USER_POST_CREATE_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="user-post-create")
 
 
 class UserService:
+
+    @staticmethod
+    def _referral_code_from_user_id(user_id: int) -> str:
+        chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        value = int(user_id)
+        if value <= 0:
+            return "U0"
+        encoded = []
+        while value:
+            value, remainder = divmod(value, 36)
+            encoded.append(chars[remainder])
+        return "U" + "".join(reversed(encoded))
     
     @staticmethod
     def create_user(data):
@@ -39,15 +54,31 @@ class UserService:
 
             fid_value = data['fid']
             game_username = data['gameUserName']
+            email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
+            normalized_email = str(email_to_check or "").strip().lower()
+            has_email = bool(normalized_email)
 
-            # Fast duplicate check in a single DB roundtrip for fid + username.
+            # Fast duplicate check in a single DB roundtrip for fid + username (+ email ownership when provided).
             duplicate_row = db.session.execute(text("""
                 SELECT
                     EXISTS(SELECT 1 FROM users WHERE fid = :fid) AS fid_exists,
-                    EXISTS(SELECT 1 FROM users WHERE game_username = :game_username) AS username_exists
+                    EXISTS(SELECT 1 FROM users WHERE game_username = :game_username) AS username_exists,
+                    CASE
+                        WHEN :has_email = FALSE THEN FALSE
+                        ELSE EXISTS(
+                            SELECT 1
+                            FROM users u
+                            JOIN contact_info c
+                              ON c.parent_id = u.id
+                             AND c.parent_type = 'user'
+                            WHERE lower(c.email) = :email
+                        )
+                    END AS email_exists
             """), {
                 "fid": fid_value,
                 "game_username": game_username,
+                "email": normalized_email,
+                "has_email": has_email,
             }).mappings().first()
             mark("duplicate_check")
 
@@ -60,9 +91,14 @@ class UserService:
                 }
 
             # Check if email already exists
-            email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
-            if email_to_check:
-                normalized_email = str(email_to_check).strip().lower()
+            if has_email:
+                if duplicate_row and duplicate_row.get("email_exists"):
+                    return {
+                        "status": "error",
+                        "state": "EMAIL_EXISTS",
+                        "message": "This email is already in use.",
+                        "details": {"email": normalized_email}
+                    }
                 phone_to_check = data.get('contact', {}).get('electronicAddress', {}).get('mobileNo')
                 if UserService.is_in_cooldown(email_to_check, phone_to_check):
                     return {
@@ -71,44 +107,29 @@ class UserService:
                         "message": "This account identifier is in cooldown period.",
                         "details": {"email": email_to_check}
                     }
-                email_owned_by_user = (
-                    db.session.query(User.id)
-                    .join(
-                        ContactInfo,
-                        (ContactInfo.parent_id == User.id) & (ContactInfo.parent_type == "user"),
-                    )
-                    .filter(func.lower(ContactInfo.email) == normalized_email)
-                    .scalar()
-                )
-                if email_owned_by_user:
-                    return {
-                        "status": "error",
-                        "state": "EMAIL_EXISTS",
-                        "message": "This email is already in use.",
-                        "details": {"email": email_to_check}
-                    }
                 # Clean stale/orphan contact rows that reference non-existent users so they do not
                 # cause perpetual EMAIL_EXISTS loops in signup flows.
-                stale_rows = (
-                    db.session.query(ContactInfo.id)
-                    .outerjoin(User, User.id == ContactInfo.parent_id)
-                    .filter(
-                        ContactInfo.parent_type == "user",
-                        func.lower(ContactInfo.email) == normalized_email,
-                        User.id.is_(None),
-                    )
-                    .all()
-                )
-                if stale_rows:
-                    stale_ids = [int(r[0]) for r in stale_rows if r and r[0] is not None]
-                    if stale_ids:
-                        db.session.query(ContactInfo).filter(ContactInfo.id.in_(stale_ids)).delete(synchronize_session=False)
-                        db.session.flush()
-                        current_app.logger.warning(
-                            "create_user cleaned stale user contact rows for email=%s count=%s",
-                            normalized_email,
-                            len(stale_ids),
+                if bool(current_app.config.get("USER_CREATE_CLEAN_STALE_CONTACTS", False)):
+                    stale_rows = (
+                        db.session.query(ContactInfo.id)
+                        .outerjoin(User, User.id == ContactInfo.parent_id)
+                        .filter(
+                            ContactInfo.parent_type == "user",
+                            func.lower(ContactInfo.email) == normalized_email,
+                            User.id.is_(None),
                         )
+                        .all()
+                    )
+                    if stale_rows:
+                        stale_ids = [int(r[0]) for r in stale_rows if r and r[0] is not None]
+                        if stale_ids:
+                            db.session.query(ContactInfo).filter(ContactInfo.id.in_(stale_ids)).delete(synchronize_session=False)
+                            db.session.flush()
+                            current_app.logger.warning(
+                                "create_user cleaned stale user contact rows for email=%s count=%s",
+                                normalized_email,
+                                len(stale_ids),
+                            )
             mark("email_check")
 
             # Check if username already exists
@@ -125,17 +146,6 @@ class UserService:
             referral_input = data.get('referral_code')
             mark("dob_parse")
 
-            # Generate a unique referral code
-            attempts = 0
-            while True:
-                attempts += 1
-                if attempts > 20:
-                    raise Exception("Unable to generate unique referral code")
-                code = generate_referral_code()
-                if not db.session.query(User.id).filter_by(referral_code=code).scalar():
-                    break
-            mark("referral_code_generation")
-
             # Create the User object
             user = User(
                 fid=data['fid'],
@@ -145,11 +155,14 @@ class UserService:
                 dob=dob,
                 game_username=data['gameUserName'],
                 parent_type="user",
-                referral_code=code
+                referral_code=None
             )
             # Add user to session first
             db.session.add(user)
             db.session.flush()  # Assigns user.id from DB without committing
+            code = UserService._referral_code_from_user_id(int(user.id))
+            user.referral_code = code
+            mark("referral_code_generation")
             mark("user_insert_flush")
 
             # Add related objects using the relationship (now user.id is available)
@@ -157,38 +170,26 @@ class UserService:
             UserService._add_contact_info(user, data.get('contact', {}).get('electronicAddress'))
             mark("contact_address_attach")
 
-            if referral_input:
-                referrer = User.query.filter_by(referral_code=referral_input).first()
-                if referrer and referrer.referral_code != code:  # Prevent self-referral
-                    user.referred_by = referral_input
-                    referrer.referral_rewards += 1
-                    
-                    # Flush again to ensure user.id is committed before creating referral tracking
-                    db.session.flush()
-                    
-                    referral_track = ReferralTracking(
-                        referrer_code=referrer.referral_code,
-                        referred_user_id=user.id
-                    )
-                    db.session.add(referral_track)
+            # Keep the hot signup request minimal: defer side effects (wallet/password/referral)
+            # to background finalization.
             mark("referral_link")
-
-            # Creation of Hash Wallet + PasswordManager in same transaction
-            wallet = HashWallet(user_id=user.id, balance=0)
-            db.session.add(wallet)
-
-            _, password = generate_credentials()
-            password_manager = PasswordManager(
-                userid=user.id,
-                password=password,
-                parent_id=user.id,
-                parent_type="user"
-            )
-            db.session.add(password_manager)
             mark("wallet_password_attach")
-
             db.session.commit()
             mark("commit")
+
+            if bool(current_app.config.get("USER_CREATE_ASYNC_FINALIZE_ENABLED", True)):
+                UserService.enqueue_post_create_finalize(
+                    user_id=int(user.id),
+                    own_referral_code=str(code),
+                    referral_input=referral_input,
+                    app_obj=current_app._get_current_object(),
+                )
+            else:
+                UserService.finalize_user_post_create(
+                    user_id=int(user.id),
+                    own_referral_code=str(code),
+                    referral_input=referral_input,
+                )
 
             if timing_enabled:
                 total_ms = (time.perf_counter() - t0) * 1000
@@ -239,6 +240,82 @@ class UserService:
             db.session.rollback()
             current_app.logger.error("Failed to create user: %s", str(e))
             raise Exception(f"An unexpected error occurred while creating the user: {str(e)}")
+
+    @staticmethod
+    def enqueue_post_create_finalize(user_id: int, own_referral_code: str, referral_input: str = None, app_obj=None):
+        app = app_obj
+        if app is None:
+            try:
+                app = current_app._get_current_object()
+            except Exception:
+                app = None
+        if app is None:
+            return
+
+        def _runner():
+            with app.app_context():
+                UserService.finalize_user_post_create(
+                    user_id=int(user_id),
+                    own_referral_code=str(own_referral_code or ""),
+                    referral_input=str(referral_input or "").strip() or None,
+                )
+
+        _USER_POST_CREATE_EXECUTOR.submit(_runner)
+
+    @staticmethod
+    def finalize_user_post_create(user_id: int, own_referral_code: str, referral_input: str = None):
+        """
+        Idempotent finalization for post-signup side effects.
+        Safe to run multiple times.
+        """
+        try:
+            user = User.query.filter_by(id=int(user_id)).with_for_update().first()
+            if not user:
+                return
+
+            # Ensure hash wallet exists.
+            wallet_exists = db.session.query(HashWallet.id).filter_by(user_id=int(user_id)).scalar()
+            if not wallet_exists:
+                db.session.add(HashWallet(user_id=int(user_id), balance=0))
+
+            # Ensure password manager exists.
+            pm_exists = db.session.query(PasswordManager.id).filter_by(userid=str(user_id)).scalar()
+            if not pm_exists:
+                _, password = generate_credentials()
+                db.session.add(
+                    PasswordManager(
+                        userid=str(user_id),
+                        password=password,
+                        parent_id=int(user_id),
+                        parent_type="user",
+                    )
+                )
+
+            # Apply referral linkage once.
+            referral_input_norm = str(referral_input or "").strip()
+            own_ref_norm = str(own_referral_code or "").strip()
+            if referral_input_norm and not user.referred_by and referral_input_norm != own_ref_norm:
+                referrer = User.query.filter_by(referral_code=referral_input_norm).with_for_update().first()
+                if referrer and referrer.referral_code != own_ref_norm:
+                    existing_track = db.session.query(ReferralTracking.id).filter_by(referred_user_id=int(user_id)).scalar()
+                    user.referred_by = referral_input_norm
+                    if not existing_track:
+                        referrer.referral_rewards = int(referrer.referral_rewards or 0) + 1
+                        db.session.add(
+                            ReferralTracking(
+                                referrer_code=referrer.referral_code,
+                                referred_user_id=int(user_id),
+                            )
+                        )
+
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.warning(
+                "finalize_user_post_create failed user_id=%s err=%s",
+                user_id,
+                exc,
+            )
 
     @staticmethod
     def _add_physical_address(user, physical_address_data):
