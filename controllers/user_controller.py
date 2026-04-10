@@ -608,6 +608,12 @@ def create_user():
                         existing_fid,
                         recover_err,
                     )
+                else:
+                    current_app.logger.warning(
+                        "Create user EMAIL_EXISTS but no user-owned contact row found for email=%s fid=%s",
+                        existing_email,
+                        data.get("fid"),
+                    )
             status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
