@@ -70,7 +70,10 @@ class UserService:
                         "message": "This account identifier is in cooldown period.",
                         "details": {"email": email_to_check}
                     }
-                if db.session.query(ContactInfo.id).filter_by(email=email_to_check).scalar():
+                if db.session.query(ContactInfo.id).filter(
+                    ContactInfo.email == email_to_check,
+                    ContactInfo.parent_type == "user",
+                ).scalar():
                     return {
                         "status": "error",
                         "state": "EMAIL_EXISTS",
