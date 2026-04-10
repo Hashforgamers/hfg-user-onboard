@@ -51,6 +51,8 @@ _USER_PHONE_CACHE = {}
 _USER_PHONE_CACHE_MAX_SIZE = 20000
 _USER_FID_AUTH_CACHE = {}
 _USER_FID_AUTH_CACHE_MAX_SIZE = 20000
+_USER_FID_MISS_CACHE = {}
+_USER_FID_MISS_CACHE_MAX_SIZE = 20000
 _USER_FID_CACHE_LOCK = Lock()
 _USER_FID_AUTH_CACHE_LOCK = Lock()
 _API_MICROCACHE = {}
@@ -92,6 +94,20 @@ def _invalidate_user_microcache(user_id, prefixes):
         ]
         for key in stale_keys:
             _API_MICROCACHE.pop(key, None)
+
+
+def _ensure_hash_wallet_row(user_id: int):
+    db.session.execute(
+        text(
+            """
+            INSERT INTO hash_wallets (user_id, balance)
+            VALUES (:user_id, 0)
+            ON CONFLICT (user_id) DO NOTHING
+            """
+        ),
+        {"user_id": int(user_id)},
+    )
+    db.session.commit()
 
 
 def _sanitize_signup_payload(data):
@@ -180,6 +196,7 @@ def _build_auth_response_for_fid(user_fid: str, user_payload: dict = None):
             "payload": user_payload,
             "expires_at": now_ts + cache_ttl_sec,
         }
+        _USER_FID_MISS_CACHE.pop(fid, None)
 
     token_ttl_hours = int(current_app.config.get("USER_FID_AUTH_TOKEN_TTL_HOURS", 2))
     token_ttl_hours = max(1, min(token_ttl_hours, 24))
@@ -233,6 +250,9 @@ def _invalidate_fid_caches(*fids):
     with _USER_FID_AUTH_CACHE_LOCK:
         for fid in keys:
             _USER_FID_AUTH_CACHE.pop(fid, None)
+    with _USER_FID_CACHE_LOCK:
+        for fid in keys:
+            _USER_FID_MISS_CACHE.pop(fid, None)
 
 
 def _find_existing_user_fid_by_email(email: str):
@@ -966,6 +986,12 @@ def get_user_by_fid_auth(user_fid):
             response.headers['Cache-Control'] = 'no-store'
             return response, 200
 
+        miss_cache_ttl_sec = int(current_app.config.get("USER_FID_MISS_CACHE_TTL_SEC", 45))
+        with _USER_FID_CACHE_LOCK:
+            cached_miss = _USER_FID_MISS_CACHE.get(user_fid)
+        if cached_miss and cached_miss["expires_at"] > now_ts:
+            return jsonify({'message': 'User not found'}), 404
+
         cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
         with _USER_FID_CACHE_LOCK:
             cached = _USER_FID_CACHE.get(user_fid)
@@ -974,6 +1000,12 @@ def get_user_by_fid_auth(user_fid):
         else:
             user_payload = UserService.get_user_auth_payload_by_fid(user_fid)
             if not user_payload:
+                with _USER_FID_CACHE_LOCK:
+                    if len(_USER_FID_MISS_CACHE) >= _USER_FID_MISS_CACHE_MAX_SIZE:
+                        _USER_FID_MISS_CACHE.pop(next(iter(_USER_FID_MISS_CACHE)))
+                    _USER_FID_MISS_CACHE[user_fid] = {
+                        "expires_at": now_ts + miss_cache_ttl_sec,
+                    }
                 return jsonify({'message': 'User not found'}), 404
             with _USER_FID_CACHE_LOCK:
                 if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
@@ -1304,7 +1336,8 @@ def get_wallet_balance_auth():
         LIMIT 1
     """), {"user_id": int(user_id)}).scalar()
     if balance is None:
-        return jsonify({"message": "Wallet not found"}), 404
+        _ensure_hash_wallet_row(int(user_id))
+        balance = 0
     payload = {"balance": int(balance or 0)}
     _microcache_set(
         cache_key,
@@ -1327,7 +1360,10 @@ def add_wallet_balance():
 
     wallet = HashWallet.query.filter_by(user_id=user_id).first()
     if not wallet:
-        return jsonify({"message": "Wallet not found"}), 404
+        _ensure_hash_wallet_row(int(user_id))
+        wallet = HashWallet.query.filter_by(user_id=user_id).first()
+        if not wallet:
+            return jsonify({"message": "Wallet not found"}), 404
 
     user = db.session.query(User).filter_by(id=user_id).with_for_update().first()
 
