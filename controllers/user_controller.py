@@ -1,5 +1,5 @@
 from flask import request, jsonify, Blueprint, current_app, g
-from sqlalchemy import text
+from sqlalchemy import text, func
 from services.user_service import UserService
 from models.userHashCoin import UserHashCoin
 from services.referral_service import create_voucher_if_eligible
@@ -337,6 +337,127 @@ def _relink_fid_for_existing_email(email: str, requested_fid: str):
         "new_fid": target_fid,
     }
 
+
+def _merge_existing_user_by_email(email: str, signup_payload: dict):
+    """
+    Merge signup payload into an existing user identified by email.
+    Also updates fid when safe (no collision).
+    """
+    normalized_email = str(email or "").strip().lower()
+    target_fid = str((signup_payload or {}).get("fid") or "").strip()
+    requested_game_username = str((signup_payload or {}).get("gameUserName") or "").strip()
+    if not normalized_email:
+        return {"status": "not_found"}
+
+    user_row = (
+        db.session.query(User)
+        .join(ContactInfo, (ContactInfo.parent_id == User.id) & (ContactInfo.parent_type == "user"))
+        .filter(func.lower(ContactInfo.email) == normalized_email)
+        .order_by(User.id.desc())
+        .first()
+    )
+    if not user_row:
+        return {"status": "not_found"}
+
+    old_fid = str(user_row.fid or "").strip()
+    old_game_username = str(user_row.game_username or "").strip()
+
+    if target_fid and target_fid != old_fid:
+        fid_collision = (
+            db.session.query(User.id)
+            .filter(User.fid == target_fid, User.id != user_row.id)
+            .first()
+        )
+        if fid_collision:
+            return {
+                "status": "conflict",
+                "reason": "requested_fid_already_in_use",
+                "user_id": int(user_row.id),
+                "old_fid": old_fid,
+                "new_fid": target_fid,
+            }
+        user_row.fid = target_fid
+
+    if requested_game_username and requested_game_username != old_game_username:
+        username_collision = (
+            db.session.query(User.id)
+            .filter(User.game_username == requested_game_username, User.id != user_row.id)
+            .first()
+        )
+        if not username_collision:
+            user_row.game_username = requested_game_username
+
+    new_name = str((signup_payload or {}).get("name") or "").strip()
+    if new_name:
+        user_row.name = new_name
+    new_gender = str((signup_payload or {}).get("gender") or "").strip().lower()
+    if new_gender:
+        user_row.gender = new_gender
+    new_avatar = str((signup_payload or {}).get("avatar_path") or "").strip()
+    if new_avatar:
+        user_row.avatar_path = new_avatar
+
+    dob_raw = (signup_payload or {}).get("dob")
+    if dob_raw:
+        try:
+            user_row.dob = datetime.strptime(str(dob_raw), "%d-%b-%Y").date()
+        except ValueError:
+            pass
+
+    contact = user_row.contact_info
+    if contact is None:
+        contact = ContactInfo(parent_id=user_row.id, parent_type="user", email=normalized_email, phone="")
+        db.session.add(contact)
+        user_row.contact_info = contact
+    electronic = ((signup_payload or {}).get("contact") or {}).get("electronicAddress") or {}
+    new_phone = str(electronic.get("mobileNo") or "").strip()
+    if new_phone:
+        contact.phone = new_phone
+    contact.email = normalized_email
+
+    physical_payload = ((signup_payload or {}).get("contact") or {}).get("physicalAddress") or {}
+    if physical_payload:
+        addr = user_row.physical_address
+        if addr is None:
+            addr = PhysicalAddress(
+                parent_id=user_row.id,
+                parent_type="user",
+                address_type="home",
+                addressLine1="N/A",
+                addressLine2="",
+                pincode="000000",
+                state="N/A",
+                country="N/A",
+                is_active=True,
+            )
+            db.session.add(addr)
+            user_row.physical_address = addr
+        addr.address_type = str(physical_payload.get("address_type") or addr.address_type or "home")
+        addr.addressLine1 = str(physical_payload.get("addressLine1") or addr.addressLine1 or "N/A")
+        addr.addressLine2 = str(physical_payload.get("addressLine2") or addr.addressLine2 or "")
+        addr.pincode = str(physical_payload.get("pincode") or addr.pincode or "000000")
+        addr.state = str(physical_payload.get("State") or addr.state or "N/A")
+        addr.country = str(physical_payload.get("Country") or addr.country or "N/A")
+        addr.is_active = bool(physical_payload.get("is_active", addr.is_active if addr.is_active is not None else True))
+
+    db.session.commit()
+
+    new_fid = str(user_row.fid or "").strip()
+    _invalidate_fid_caches(old_fid, new_fid)
+    _USER_CACHE.pop(int(user_row.id), None)
+    _USER_PHONE_CACHE.pop(int(user_row.id), None)
+    _invalidate_user_microcache(
+        int(user_row.id),
+        prefixes=("users-wallet|", "users-hash-coins|", "users-notifications|", "users-transactions|"),
+    )
+
+    return {
+        "status": "merged",
+        "user_id": int(user_row.id),
+        "old_fid": old_fid,
+        "new_fid": new_fid,
+    }
+
 @user_blueprint.route("/notify-user", methods=["POST"])
 def notify_user():
     token = request.json["token"]  # Lookup token in DB ideally
@@ -388,16 +509,43 @@ def create_user():
                     data.get("fid"),
                     recover_err,
                 )
-            elif (
-                state == "EMAIL_EXISTS"
-                and bool(current_app.config.get("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", False))
-            ):
+            elif state == "EMAIL_EXISTS":
                 existing_email = (
                     str((result.get("details") or {}).get("email") or "")
                     .strip()
                     .lower()
                 )
                 requested_fid = str(data.get("fid") or "").strip()
+                try:
+                    merged = _merge_existing_user_by_email(existing_email, data)
+                    if merged.get("status") == "merged":
+                        merged_fid = str(merged.get("new_fid") or requested_fid or "").strip()
+                        recovered_payload, recovered_token, recover_err = _build_auth_response_for_fid(merged_fid)
+                        if recovered_payload and recovered_token:
+                            response = jsonify({
+                                "message": "Existing account updated with latest details and linked to current FID.",
+                                "state": "EMAIL_EXISTS_MERGED",
+                                "recovered_by": "email_merge",
+                                "fid_linked": True,
+                                **recovered_payload,
+                            })
+                            response.headers['Authorization'] = f'Bearer {recovered_token}'
+                            response.headers['Cache-Control'] = 'no-store'
+                            return response, 200
+                        current_app.logger.warning(
+                            "Create user email merge recovery failed fid=%s merged_fid=%s err=%s",
+                            requested_fid,
+                            merged_fid,
+                            recover_err,
+                        )
+                except Exception as merge_err:
+                    db.session.rollback()
+                    current_app.logger.warning(
+                        "Create user email merge errored fid=%s email=%s err=%s",
+                        requested_fid,
+                        existing_email,
+                        merge_err,
+                    )
                 if bool(current_app.config.get("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", False)):
                     try:
                         relink = _relink_fid_for_existing_email(existing_email, requested_fid)
