@@ -688,6 +688,8 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id
     try:
+        cooldown_days = max(0, int(current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30) or 30))
+        cooldown_expires_at = datetime.utcnow() + timedelta(days=cooldown_days)
         user_row = db.session.execute(text("""
             SELECT u.id, u.referred_by, c.email, c.phone
             FROM users u
@@ -706,12 +708,13 @@ def delete_user_id():
                 COALESCE(:phone, ''),
                 :referred_by,
                 NOW(),
-                NOW() + INTERVAL '30 days'
+                :expires_at
             )
         """), {
             "email": user_row.get("email"),
             "phone": user_row.get("phone"),
             "referred_by": user_row.get("referred_by"),
+            "expires_at": cooldown_expires_at,
         })
 
         db.session.execute(text("""
