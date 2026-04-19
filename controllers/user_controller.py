@@ -688,7 +688,8 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id
     try:
-        cooldown_days = max(0, int(current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30) or 30))
+        cooldown_days_cfg = current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30)
+        cooldown_days = max(0, int(30 if cooldown_days_cfg is None else cooldown_days_cfg))
         cooldown_expires_at = datetime.utcnow() + timedelta(days=cooldown_days)
         user_row = db.session.execute(text("""
             SELECT u.id, u.referred_by, c.email, c.phone
@@ -701,21 +702,22 @@ def delete_user_id():
         if not user_row:
             return jsonify({"message": "User not found"}), 404
 
-        db.session.execute(text("""
-            INSERT INTO deleted_user_cooldown (email, phone, referred_by, created_at, expires_at)
-            VALUES (
-                COALESCE(:email, ''),
-                COALESCE(:phone, ''),
-                :referred_by,
-                NOW(),
-                :expires_at
-            )
-        """), {
-            "email": user_row.get("email"),
-            "phone": user_row.get("phone"),
-            "referred_by": user_row.get("referred_by"),
-            "expires_at": cooldown_expires_at,
-        })
+        if cooldown_days > 0:
+            db.session.execute(text("""
+                INSERT INTO deleted_user_cooldown (email, phone, referred_by, created_at, expires_at)
+                VALUES (
+                    COALESCE(:email, ''),
+                    COALESCE(:phone, ''),
+                    :referred_by,
+                    NOW(),
+                    :expires_at
+                )
+            """), {
+                "email": user_row.get("email"),
+                "phone": user_row.get("phone"),
+                "referred_by": user_row.get("referred_by"),
+                "expires_at": cooldown_expires_at,
+            })
 
         db.session.execute(text("""
             DELETE FROM monthly_credit_ledgers
