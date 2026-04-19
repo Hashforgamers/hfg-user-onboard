@@ -529,6 +529,10 @@ class UserService:
         """Check if email or phone is in cooldown period"""
         if not email and not phone:
             return False
+        cooldown_days_cfg = current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30)
+        cooldown_days = max(0, int(30 if cooldown_days_cfg is None else cooldown_days_cfg))
+        if cooldown_days <= 0:
+            return False
         now = datetime.utcnow()
         predicates = []
         if email:
