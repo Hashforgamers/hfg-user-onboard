@@ -3,7 +3,6 @@ import time
 import requests
 import logging
 import random
-import json
 import google.generativeai as genai
 from datetime import datetime, timedelta
 
@@ -21,13 +20,14 @@ logger = logging.getLogger(__name__)
 # Environment Variables
 # ----------------------------
 API_BASE = os.getenv("API_BASE", "https://hfg-user-onboard.onrender.com/api")
-API_KEY = os.getenv("API_KEY", "AIzaSyCMVuu_Ng2THRn4_YaM4-_HjWUlTeBCRv0") 
+API_KEY = os.getenv("API_KEY", "")
 NOTIFY_INTERVAL = int(os.getenv("NOTIFY_INTERVAL", "14400"))  # seconds
 
 # ----------------------------
 # Gemini Setup
 # ----------------------------
-genai.configure(api_key=API_KEY)
+if API_KEY:
+    genai.configure(api_key=API_KEY)
 HASH_AGENT_PROMPT = """
 You are HASH for Gamers, India's first gaming café booking platform.
 
@@ -140,39 +140,58 @@ def is_within_time_window():
     ist_hour = ist_now.hour
     return 6 <= ist_hour < 22  # 6AM to 10PM
 
+
+def run_notification_cycle(force=False):
+    if not force and not is_within_time_window():
+        current_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        logger.info(
+            "Skipping notifications (outside window 6AM-10PM IST, current IST time: %s)",
+            current_ist.strftime("%H:%M"),
+        )
+        return {"success": True, "skipped": True, "reason": "outside_notification_window"}
+
+    logger.info("Fetching FCM tokens...")
+    resp = requests.get(f"{API_BASE}/getAllFCMToken")
+    if resp.status_code != 200:
+        logger.error("Error fetching tokens: %s", resp.text)
+        return {"success": False, "error": resp.text, "status_code": resp.status_code}
+
+    data = resp.json().get("data", [])
+    if not data:
+        return {"success": True, "skipped": False, "tokens_found": 0, "sent": 0, "failed": 0}
+
+    logger.info("Found %s tokens to notify.", len(data))
+    notif = generate_notification()
+    sent = 0
+    failed = 0
+
+    for entry in data:
+        token = entry.get("token")
+        if not token:
+            failed += 1
+            continue
+        payload = {"token": token, "title": notif["title"], "message": notif["message"]}
+        r = requests.post(f"{API_BASE}/notify-user", json=payload)
+        if 200 <= r.status_code < 300:
+            sent += 1
+        else:
+            failed += 1
+        logger.info("Sent to %s... Status %s", token[:10], r.status_code)
+
+    return {
+        "success": True,
+        "skipped": False,
+        "tokens_found": len(data),
+        "sent": sent,
+        "failed": failed,
+        "notification": notif,
+    }
+
 def main():
-    start_time = datetime.now()
     logger.info("Starting daily notification job...")
 
     while True:
-        if is_within_time_window():
-            logger.info("Fetching FCM tokens (within notification window 6AM-10PM IST)...")
-            resp = requests.get(f"{API_BASE}/getAllFCMToken")
-            if resp.status_code != 200:
-                logger.error(f"Error fetching tokens: {resp.text}")
-                time.sleep(NOTIFY_INTERVAL)
-                continue
-        else:
-            current_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
-            logger.info(f"Skipping notifications (outside window 6AM-10PM IST, current IST time: {current_ist.strftime('%H:%M')})")
-            time.sleep(NOTIFY_INTERVAL)
-            continue
-
-        data = resp.json().get("data", [])
-        if data:  # Only generate notification if we have recipients
-            logger.info(f"Found {len(data)} tokens to notify.")
-            notif = generate_notification()
-
-            for entry in data:
-                token = entry["token"]
-                payload = {
-                    "token": token,
-                    "title": notif["title"],
-                    "message": notif["message"]
-                }
-                r = requests.post(f"{API_BASE}/notify-user", json=payload)
-                logger.info(f"Sent to {token[:10]}... Status {r.status_code}")
-
+        run_notification_cycle(force=False)
         logger.info(f"Sleeping {NOTIFY_INTERVAL} seconds...")
         time.sleep(NOTIFY_INTERVAL)
 
