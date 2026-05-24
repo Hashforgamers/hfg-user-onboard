@@ -39,6 +39,9 @@ import time
 import uuid
 import re
 from threading import Lock
+import os
+
+from job.daily_notifier import generate_notification, is_within_time_window
 
 user_blueprint = Blueprint('user', __name__)
 _USER_FID_CACHE = {}
@@ -485,6 +488,103 @@ def notify_user():
     message = request.json.get("message", "You have a new message!")
     send_notification(token, title, message)
     return jsonify({"status": "Notification sent"})
+
+
+def _is_valid_cron_request():
+    """
+    Optional shared-secret gate for cron endpoints.
+    If CRON_JOB_API_KEY is unset, requests are allowed.
+    """
+    configured_key = str(os.getenv("CRON_JOB_API_KEY", "") or "").strip()
+    if not configured_key:
+        return True
+
+    header_key = str(request.headers.get("X-Cron-Key", "") or "").strip()
+    auth_header = str(request.headers.get("Authorization", "") or "").strip()
+    bearer_key = ""
+    if auth_header.lower().startswith("bearer "):
+        bearer_key = auth_header[7:].strip()
+
+    return header_key == configured_key or bearer_key == configured_key
+
+
+@user_blueprint.route("/cron/notifications/daily", methods=["POST"])
+def cron_trigger_daily_notifications():
+    if not _is_valid_cron_request():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    force = bool(payload.get("force", False))
+    dry_run = bool(payload.get("dry_run", False))
+    custom_title = str(payload.get("title") or "").strip()
+    custom_message = str(payload.get("message") or "").strip()
+
+    if (custom_title and not custom_message) or (custom_message and not custom_title):
+        return jsonify({
+            "success": False,
+            "message": "Both title and message are required when overriding notification content",
+        }), 400
+
+    if not force and not is_within_time_window():
+        return jsonify({
+            "success": True,
+            "skipped": True,
+            "reason": "outside_notification_window",
+            "window_ist": "06:00-22:00",
+        }), 200
+
+    try:
+        tokens = (
+            db.session.query(FCMToken.token)
+            .filter(FCMToken.token.isnot(None))
+            .all()
+        )
+        token_list = [str(row[0]).strip() for row in tokens if str(row[0] or "").strip()]
+
+        if not token_list:
+            return jsonify({
+                "success": True,
+                "skipped": False,
+                "tokens_found": 0,
+                "sent": 0,
+                "failed": 0,
+            }), 200
+
+        notification = (
+            {"title": custom_title, "message": custom_message}
+            if custom_title and custom_message
+            else generate_notification()
+        )
+
+        if dry_run:
+            return jsonify({
+                "success": True,
+                "dry_run": True,
+                "tokens_found": len(token_list),
+                "notification": notification,
+            }), 200
+
+        sent = 0
+        failed = 0
+        for token in token_list:
+            try:
+                send_notification(token, notification["title"], notification["message"])
+                sent += 1
+            except Exception:
+                failed += 1
+                current_app.logger.exception("Failed to send scheduled notification to token prefix=%s", token[:10])
+
+        return jsonify({
+            "success": True,
+            "skipped": False,
+            "tokens_found": len(token_list),
+            "sent": sent,
+            "failed": failed,
+            "notification": notification,
+        }), 200
+    except Exception as exc:
+        current_app.logger.error("cron_trigger_daily_notifications failed: %s", str(exc), exc_info=True)
+        return jsonify({"success": False, "message": "Failed to trigger notifications", "error": str(exc)}), 500
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
