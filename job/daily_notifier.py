@@ -43,8 +43,12 @@ Task:
 - Generate a short push notification for gamers about booking slots at nearby gaming cafés.
 
 Guidelines:
-- Title: max 7 words, exciting, gaming-themed.
-- Message: 1 sentence, casual and fun, encourage immediate booking.
+- Style: modern app notification tone (like top food-delivery apps), punchy and high-conversion.
+- Audience: Gen-Z/young gamers.
+- Language: English, but in around 40% outputs include natural Hinglish words (e.g., "jaldi", "scene", "aaj", "bro", "squad").
+- Title: max 6 words, catchy.
+- Message: 1 short sentence, max 14 words, clear CTA to book now.
+- Keep it safe and friendly (no abuse, no misleading offers).
 - Do not return JSON, only plain text.
 - Format strictly as:
 Title: <your title>
@@ -55,55 +59,26 @@ Message: <your message>
 # Hardcoded Fallback Messages
 # ----------------------------
 FALLBACK_MESSAGES = [
-    {"title": "Game Night Awaits!", "message": "Book your café slot before it’s gone!"},
-    {"title": "Ready to Play?", "message": "Reserve your spot at your local café now!"},
-    {"title": "Squad Up!", "message": "Grab your friends and lock your slots today."},
-    {"title": "Level Up IRL", "message": "Play like a pro at your nearby gaming café."},
-    {"title": "Book & Play", "message": "Slots filling fast — secure yours today!"},
-    {"title": "Don’t Miss Out!", "message": "Your café seat is waiting for you."},
-    {"title": "Weekend Grind?", "message": "Reserve your slot before it’s fully booked."},
-    {"title": "Game Café Vibes", "message": "Feel the thrill of gaming with friends nearby."},
-    {"title": "XP Boost IRL", "message": "Book your café slot and game non-stop!"},
-    {"title": "Boss Fight IRL", "message": "Gather your squad and claim your café slot."},
-    {"title": "Casual or Ranked?", "message": "Whatever your style, book your café now."},
-    {"title": "Play Local, Play Big", "message": "Your gaming café is waiting."},
-    {"title": "Slots Running Low!", "message": "Hurry, book your café before it’s full."},
-    {"title": "Squad Assemble!", "message": "Lock your café slot today."},
-    {"title": "LAN Party Energy", "message": "Nothing beats café gaming with friends."},
-    {"title": "Game Café Buzz", "message": "Book a slot and join the fun!"},
-    {"title": "Gear Up!", "message": "Your café slot is just a tap away."},
-    {"title": "Gamers Unite!", "message": "Slots are filling — don’t wait too long."},
-    {"title": "Real Life Lobby", "message": "Your café spot is waiting to be claimed."},
-    {"title": "Grind Mode On", "message": "Book your café slot and keep the streak alive."},
-    {"title": "Café Gaming FTW", "message": "Secure your slot and game like never before."},
-    {"title": "Game Plan Ready?", "message": "Café slots are open now!"},    
-    {"title": "Weekend Warriors", "message": "Lock your gaming café slot today."},
-    {"title": "Book It, Play It", "message": "Your slot is one click away."},
-    {"title": "XP Party!", "message": "Book your café seat and level up IRL."},
-    {"title": "Café Mode: ON", "message": "Get your slot before it’s gone!"},
-    {"title": "Time to Respawn!", "message": "Your café is waiting, book now."},
-    {"title": "Casual Fun, Ranked Thrill", "message": "Reserve your slot today."},
-    {"title": "Multiplayer IRL", "message": "Book your café slot with friends."},
-    {"title": "Slot Rush!", "message": "Act fast — limited café slots available."},
-    {"title": "Next Match IRL", "message": "Book your café spot and join the fun."},
-    {"title": "Gaming Reloaded", "message": "Lock your café slot today!"},
-    {"title": "Book, Play, Repeat", "message": "Your café experience awaits."},
-    {"title": "Squad Goals IRL", "message": "Café slots open now — grab yours."},
-    {"title": "Weekend Café Buzz", "message": "Book a slot and feel the vibe."},
-    {"title": "Game IRL", "message": "Reserve your café slot now."},
-    {"title": "Let’s Play Together", "message": "Book your café seat today."},
-    {"title": "Slots Almost Full!", "message": "Don’t wait — secure your café spot."},
-    {"title": "Boss Raid IRL", "message": "Book a café slot for the full experience."},
-    {"title": "Gaming Café Magic", "message": "Lock your seat today."},
-    {"title": "Slot Confirmed!", "message": "Reserve and start your café journey."},
-    {"title": "Café Ready", "message": "Your gaming café slot is waiting."},
-    {"title": "Playtime IRL", "message": "Book your café slot before it’s late."},
-    {"title": "Level Up Fun", "message": "Reserve your café seat now."},
-    {"title": "XP Grind", "message": "Café slots are live — book now."},
-    {"title": "Time for GG", "message": "Secure your café spot today."},
-    {"title": "Play Hard, Chill Harder", "message": "Café slots open now."},
-    {"title": "Café Nights", "message": "Reserve your gaming slot tonight."},
-    {"title": "Let’s LAN!", "message": "Book your café slot and play together."}
+    {"title": "Bro, Slot Book Kiya?", "message": "Aaj ka gaming scene set karo, jaldi book now."},
+    {"title": "Squad Online, Seats Offline", "message": "Cafe slots fast fill ho rahe, lock yours now."},
+    {"title": "Rank Push Tonight?", "message": "Nearby cafe me setup ready, abhi slot book kar."},
+    {"title": "Aaj Ka Plan Sorted", "message": "Game, snacks, squad vibes, bas slot confirm karo."},
+    {"title": "Don’t Get Queue-Lagged", "message": "Late mat ho, peak time slots abhi grab karo."},
+    {"title": "GG Starts At Café", "message": "Console ready hai boss, jaldi se booking kar."},
+    {"title": "Weekend Grind Alert", "message": "High FPS, low wait, apna slot abhi reserve karo."},
+    {"title": "Lobby Full Hone Wali", "message": "Jaldi tap karo and your gaming seat secure karo."},
+    {"title": "Noob Move: Delay", "message": "Pro move: slot book now and squad ko ping."},
+    {"title": "Aaj Scene Banega", "message": "Nearby gaming cafe me apni seat abhi lock karo."},
+    {"title": "Your Setup Is Calling", "message": "Controller uthao, slot book karo, match shuru karo."},
+    {"title": "Night Grind Loading", "message": "Respawn mat karo, direct booking karke entry lo."},
+    {"title": "Low Ping, High Hype", "message": "Cafe ready hai, bas tumhari booking pending hai."},
+    {"title": "Last Seats, Fast Fingers", "message": "Jaldi karo bro, warna waitlist mode on ho jayega."},
+    {"title": "Play IRL Tonight", "message": "Squad ke saath cafe plan fix, abhi slot reserve karo."},
+    {"title": "Drop In, Dominate Out", "message": "Your next win starts with one quick booking tap."},
+    {"title": "Game Mood On", "message": "Aaj ka slot secure karo and full power grind karo."},
+    {"title": "Cafe Loot Live", "message": "Nearby seats open hain, before rush book now."},
+    {"title": "Boss Battle Tonight?", "message": "Apna battlestation pakka karo, booking abhi karo."},
+    {"title": "Tap. Book. Game.", "message": "Simple scene: slot book karo and GG le aao."}
 ]
 
 # ----------------------------

@@ -70,6 +70,8 @@ _NOTIFICATION_JOB_EXECUTOR = ThreadPoolExecutor(
     max_workers=int(os.getenv("NOTIFICATION_JOB_WORKERS", "2")),
     thread_name_prefix="notif-dispatch",
 )
+_NOTIF_TABLES_READY = False
+_NOTIF_TABLES_LOCK = Lock()
 
 
 def _microcache_get(cache_key):
@@ -515,8 +517,15 @@ def _is_valid_cron_request():
 
 
 def _ensure_notification_tracking_tables():
-    NotificationDispatchJob.__table__.create(bind=db.engine, checkfirst=True)
-    NotificationDispatchFailure.__table__.create(bind=db.engine, checkfirst=True)
+    global _NOTIF_TABLES_READY
+    if _NOTIF_TABLES_READY:
+        return
+    with _NOTIF_TABLES_LOCK:
+        if _NOTIF_TABLES_READY:
+            return
+        NotificationDispatchJob.__table__.create(bind=db.engine, checkfirst=True)
+        NotificationDispatchFailure.__table__.create(bind=db.engine, checkfirst=True)
+        _NOTIF_TABLES_READY = True
 
 
 def _upsert_notification_failure(token: str, job_id: int, exc: Exception):
@@ -553,6 +562,7 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
             job.status = "running"
             job.started_at = datetime.utcnow()
             db.session.commit()
+            current_app.logger.info("notification_job_started job_id=%s", job.id)
 
             if (not job.force) and (not is_within_time_window()):
                 job.status = "completed"
@@ -589,6 +599,7 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
                 job.status = "completed"
                 job.completed_at = datetime.utcnow()
                 db.session.commit()
+                current_app.logger.info("notification_job_completed job_id=%s dry_run=true", job.id)
                 return
 
             send_targets = [token for token in token_list if token not in blocked_tokens]
@@ -613,6 +624,14 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
             job.status = "completed"
             job.completed_at = datetime.utcnow()
             db.session.commit()
+            current_app.logger.info(
+                "notification_job_completed job_id=%s sent=%s failed=%s blocked=%s attempted=%s",
+                job.id,
+                sent,
+                failed,
+                job.tokens_blocked,
+                job.tokens_attempted,
+            )
         except Exception as exc:
             db.session.rollback()
             fail_job = NotificationDispatchJob.query.get(int(job_id))
@@ -665,6 +684,7 @@ def cron_trigger_daily_notifications():
 
         app_obj = current_app._get_current_object()
         _NOTIFICATION_JOB_EXECUTOR.submit(_run_notification_dispatch_job, app_obj, int(job.id))
+        current_app.logger.info("notification_job_queued job_id=%s", job.id)
 
         return jsonify({
             "success": True,
