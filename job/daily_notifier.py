@@ -3,8 +3,12 @@ import time
 import requests
 import logging
 import random
-import google.generativeai as genai
 from datetime import datetime, timedelta
+
+try:
+    from google import genai
+except Exception:  # pragma: no cover
+    genai = None
 
 # ----------------------------
 # Logging Configuration
@@ -26,8 +30,12 @@ NOTIFY_INTERVAL = int(os.getenv("NOTIFY_INTERVAL", "14400"))  # seconds
 # ----------------------------
 # Gemini Setup
 # ----------------------------
-if API_KEY:
-    genai.configure(api_key=API_KEY)
+_GENAI_CLIENT = None
+if API_KEY and genai is not None:
+    try:
+        _GENAI_CLIENT = genai.Client(api_key=API_KEY)
+    except Exception:
+        _GENAI_CLIENT = None
 HASH_AGENT_PROMPT = """
 You are HASH for Gamers, India's first gaming café booking platform.
 
@@ -102,17 +110,23 @@ FALLBACK_MESSAGES = [
 # Gemini Agent Helper
 # ----------------------------
 def gemini_agent():
-    return genai.GenerativeModel("gemini-2.5-flash")
+    return _GENAI_CLIENT
 
 def generate_notification():
     logger = logging.getLogger(__name__)
-    model = gemini_agent()
+    client = gemini_agent()
 
     logger.info("Generating notification with HASH agent...")
 
     try:
-        response = model.generate_content(HASH_AGENT_PROMPT)
-        raw_text = response.text.strip()
+        if client is None:
+            raise ValueError("Gemini client is not configured")
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=HASH_AGENT_PROMPT,
+        )
+        raw_text = str(getattr(response, "text", "") or "").strip()
         logger.info(f"Gemini raw response:\n{raw_text}")
 
         # Parse manually
