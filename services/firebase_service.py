@@ -27,6 +27,25 @@ def send_notification(token, title, body, data=None):
         # Log the failure but don’t raise it up
         print(f"⚠️ Failed to send notification to token={token}: {e}")
 
+
+def send_notification_with_result(token, title, body, data=None):
+    """
+    Send an FCM notification and return structured status for async workers.
+    """
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            token=token,
+            data=data or {},
+        )
+        response = messaging.send(message)
+        return True, response, None
+    except Exception as e:
+        return False, None, e
+
 def notify_user_all_tokens(user, title, message):
     """
     Send an FCM notification to all of a user's registered devices.

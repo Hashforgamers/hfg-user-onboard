@@ -9,7 +9,7 @@ from models.hashWallet import HashWallet
 from models.fcmToken import FCMToken
 from models.user import User
 from models.hashWalletTransaction import HashWalletTransaction
-from services.firebase_service import send_notification
+from services.firebase_service import send_notification, send_notification_with_result
 from models.vendor import Vendor
 from models.cafePass import CafePass
 from models.passType import PassType
@@ -27,6 +27,7 @@ from models.team import Team
 from models.teamMember import TeamMember
 from models.referralTracking import ReferralTracking
 from models.notification import Notification
+from models.notificationDispatch import NotificationDispatchJob, NotificationDispatchFailure
 
 from models.voucher import Voucher
 
@@ -39,6 +40,7 @@ import time
 import uuid
 import re
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor
 import os
 
 from job.daily_notifier import generate_notification, is_within_time_window
@@ -64,6 +66,10 @@ _API_MICROCACHE_LOCK = Lock()
 _GAME_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _FID_RE = re.compile(r"^[A-Za-z0-9:_\-]{6,255}$")
+_NOTIFICATION_JOB_EXECUTOR = ThreadPoolExecutor(
+    max_workers=int(os.getenv("NOTIFICATION_JOB_WORKERS", "2")),
+    thread_name_prefix="notif-dispatch",
+)
 
 
 def _microcache_get(cache_key):
@@ -508,6 +514,118 @@ def _is_valid_cron_request():
     return header_key == configured_key or bearer_key == configured_key
 
 
+def _ensure_notification_tracking_tables():
+    NotificationDispatchJob.__table__.create(bind=db.engine, checkfirst=True)
+    NotificationDispatchFailure.__table__.create(bind=db.engine, checkfirst=True)
+
+
+def _upsert_notification_failure(token: str, job_id: int, exc: Exception):
+    error_type = type(exc).__name__
+    error_message = str(exc)
+    row = NotificationDispatchFailure.query.filter_by(token=token).first()
+    if row:
+        row.failure_count = int(row.failure_count or 0) + 1
+        row.error_type = error_type
+        row.error_message = error_message
+        row.last_failed_at = datetime.utcnow()
+        row.last_job_id = int(job_id)
+        row.is_blocked = True
+    else:
+        row = NotificationDispatchFailure(
+            token=token,
+            error_type=error_type,
+            error_message=error_message,
+            failure_count=1,
+            is_blocked=True,
+            last_job_id=int(job_id),
+        )
+        db.session.add(row)
+
+
+def _run_notification_dispatch_job(app_obj, job_id: int):
+    with app_obj.app_context():
+        try:
+            _ensure_notification_tracking_tables()
+            job = NotificationDispatchJob.query.get(int(job_id))
+            if not job:
+                return
+
+            job.status = "running"
+            job.started_at = datetime.utcnow()
+            db.session.commit()
+
+            if (not job.force) and (not is_within_time_window()):
+                job.status = "completed"
+                job.completed_at = datetime.utcnow()
+                job.error_message = "Skipped outside IST window (06:00-22:00)"
+                db.session.commit()
+                return
+
+            tokens_rows = (
+                db.session.query(FCMToken.token)
+                .filter(FCMToken.token.isnot(None))
+                .all()
+            )
+            token_list = [str(row[0]).strip() for row in tokens_rows if str(row[0] or "").strip()]
+            job.tokens_found = len(token_list)
+
+            blocked_tokens = set()
+            if not job.retry_failed:
+                blocked_rows = (
+                    db.session.query(NotificationDispatchFailure.token)
+                    .filter(NotificationDispatchFailure.is_blocked.is_(True))
+                    .all()
+                )
+                blocked_tokens = {str(row[0]).strip() for row in blocked_rows if str(row[0] or "").strip()}
+            job.tokens_blocked = len([t for t in token_list if t in blocked_tokens])
+
+            if not job.notification_title or not job.notification_message:
+                generated = generate_notification()
+                job.notification_title = generated.get("title")
+                job.notification_message = generated.get("message")
+                db.session.commit()
+
+            if job.dry_run:
+                job.status = "completed"
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+                return
+
+            send_targets = [token for token in token_list if token not in blocked_tokens]
+            job.tokens_attempted = len(send_targets)
+
+            sent = 0
+            failed = 0
+            for token in send_targets:
+                ok, _, err = send_notification_with_result(
+                    token,
+                    job.notification_title or "Notification",
+                    job.notification_message or "You have a new message!",
+                )
+                if ok:
+                    sent += 1
+                else:
+                    failed += 1
+                    _upsert_notification_failure(token, int(job.id), err or Exception("Unknown send error"))
+
+            job.sent = sent
+            job.failed = failed
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            fail_job = NotificationDispatchJob.query.get(int(job_id))
+            if fail_job:
+                fail_job.status = "failed"
+                fail_job.error_message = str(exc)
+                fail_job.completed_at = datetime.utcnow()
+                db.session.commit()
+            current_app.logger.error("Notification dispatch job %s failed: %s", job_id, str(exc), exc_info=True)
+        finally:
+            db.session.remove()
+
+
 @user_blueprint.route("/cron/notifications/daily", methods=["POST"])
 def cron_trigger_daily_notifications():
     if not _is_valid_cron_request():
@@ -516,6 +634,7 @@ def cron_trigger_daily_notifications():
     payload = request.get_json(silent=True) or {}
     force = bool(payload.get("force", False))
     dry_run = bool(payload.get("dry_run", False))
+    retry_failed = bool(payload.get("retry_failed", False))
     custom_title = str(payload.get("title") or "").strip()
     custom_message = str(payload.get("message") or "").strip()
 
@@ -525,66 +644,114 @@ def cron_trigger_daily_notifications():
             "message": "Both title and message are required when overriding notification content",
         }), 400
 
-    if not force and not is_within_time_window():
-        return jsonify({
-            "success": True,
-            "skipped": True,
-            "reason": "outside_notification_window",
-            "window_ist": "06:00-22:00",
-        }), 200
-
     try:
-        tokens = (
-            db.session.query(FCMToken.token)
-            .filter(FCMToken.token.isnot(None))
-            .all()
-        )
-        token_list = [str(row[0]).strip() for row in tokens if str(row[0] or "").strip()]
-
-        if not token_list:
-            return jsonify({
-                "success": True,
-                "skipped": False,
-                "tokens_found": 0,
-                "sent": 0,
-                "failed": 0,
-            }), 200
-
+        _ensure_notification_tracking_tables()
         notification = (
             {"title": custom_title, "message": custom_message}
             if custom_title and custom_message
-            else generate_notification()
+            else {"title": None, "message": None}
         )
 
-        if dry_run:
-            return jsonify({
-                "success": True,
-                "dry_run": True,
-                "tokens_found": len(token_list),
-                "notification": notification,
-            }), 200
+        job = NotificationDispatchJob(
+            status="queued",
+            force=force,
+            dry_run=dry_run,
+            retry_failed=retry_failed,
+            notification_title=notification.get("title"),
+            notification_message=notification.get("message"),
+        )
+        db.session.add(job)
+        db.session.commit()
 
-        sent = 0
-        failed = 0
-        for token in token_list:
-            try:
-                send_notification(token, notification["title"], notification["message"])
-                sent += 1
-            except Exception:
-                failed += 1
-                current_app.logger.exception("Failed to send scheduled notification to token prefix=%s", token[:10])
+        app_obj = current_app._get_current_object()
+        _NOTIFICATION_JOB_EXECUTOR.submit(_run_notification_dispatch_job, app_obj, int(job.id))
 
         return jsonify({
             "success": True,
-            "skipped": False,
-            "tokens_found": len(token_list),
-            "sent": sent,
-            "failed": failed,
+            "queued": True,
+            "message": "Notification dispatch queued",
+            "job_id": int(job.id),
+            "status_url": f"/api/cron/notifications/jobs/{int(job.id)}",
             "notification": notification,
-        }), 200
+        }), 202
     except Exception as exc:
-        current_app.logger.error("cron_trigger_daily_notifications failed: %s", str(exc), exc_info=True)
-        return jsonify({"success": False, "message": "Failed to trigger notifications", "error": str(exc)}), 500
+        db.session.rollback()
+        current_app.logger.error("cron_trigger_daily_notifications queue failed: %s", str(exc), exc_info=True)
+        return jsonify({"success": False, "message": "Failed to queue notifications", "error": str(exc)}), 500
+
+
+@user_blueprint.route("/cron/notifications/jobs/<int:job_id>", methods=["GET"])
+def get_notification_dispatch_job(job_id):
+    if not _is_valid_cron_request():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    _ensure_notification_tracking_tables()
+    job = NotificationDispatchJob.query.get(int(job_id))
+    if not job:
+        return jsonify({"success": False, "message": "Job not found"}), 404
+    return jsonify({"success": True, "job": job.to_dict()}), 200
+
+
+@user_blueprint.route("/cron/notifications/failures", methods=["GET"])
+def list_notification_dispatch_failures():
+    if not _is_valid_cron_request():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    _ensure_notification_tracking_tables()
+    limit = min(max(int(request.args.get("limit", 50) or 50), 1), 500)
+    rows = (
+        NotificationDispatchFailure.query
+        .order_by(NotificationDispatchFailure.last_failed_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify({
+        "success": True,
+        "count": len(rows),
+        "failures": [row.to_dict() for row in rows],
+    }), 200
+
+
+@user_blueprint.route("/cron/notifications/failures/summary", methods=["GET"])
+def notification_dispatch_failures_summary():
+    if not _is_valid_cron_request():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    _ensure_notification_tracking_tables()
+    grouped = (
+        db.session.query(
+            NotificationDispatchFailure.error_type,
+            func.count(NotificationDispatchFailure.id),
+            func.sum(NotificationDispatchFailure.failure_count),
+        )
+        .group_by(NotificationDispatchFailure.error_type)
+        .all()
+    )
+    return jsonify({
+        "success": True,
+        "summary": [
+            {
+                "error_type": row[0] or "UnknownError",
+                "tokens": int(row[1] or 0),
+                "total_failures": int(row[2] or 0),
+            }
+            for row in grouped
+        ],
+    }), 200
+
+
+@user_blueprint.route("/cron/notifications/failures/<int:failure_id>/unblock", methods=["PATCH"])
+def unblock_notification_dispatch_failure(failure_id):
+    if not _is_valid_cron_request():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    _ensure_notification_tracking_tables()
+    row = NotificationDispatchFailure.query.get(int(failure_id))
+    if not row:
+        return jsonify({"success": False, "message": "Failure record not found"}), 404
+    row.is_blocked = False
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "message": "Failure token unblocked",
+        "failure": row.to_dict(),
+    }), 200
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
