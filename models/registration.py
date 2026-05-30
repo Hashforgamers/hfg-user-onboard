@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -16,6 +16,8 @@ class Registration(db.Model):
     waiver_signed = Column(Boolean, default=False, nullable=False)
     payment_status = Column(String(24), default='pending', nullable=False)
     status = Column(String(24), default='pending', nullable=False)
+    checked_in_at = Column(DateTime(timezone=True))
+    seed_number = Column(Integer)
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

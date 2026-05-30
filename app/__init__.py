@@ -4,6 +4,7 @@ from controllers.user_controller import user_blueprint
 from controllers.review_controller import review_blueprint
 from controllers.event_public_controller import event_public_bp
 from controllers.event_participation_controller import event_participation_bp
+from controllers.tournament_engine_controller import tournament_engine_bp
 from db.extensions import db, migrate, mail
 from .config import Config
 from services.firebase_service import init_firebase
@@ -34,6 +35,7 @@ def create_app():
     app.register_blueprint(review_blueprint, url_prefix='/api')
     app.register_blueprint(event_public_bp)
     app.register_blueprint(event_participation_bp)
+    app.register_blueprint(tournament_engine_bp)
 
     def _is_public_cacheable_path(path: str) -> bool:
         return (
