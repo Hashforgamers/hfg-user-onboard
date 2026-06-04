@@ -38,6 +38,20 @@ def verify_webhook(payload: bytes, signature: str) -> Tuple[bool, str, str]:
     else:
         return _mock_verify_webhook(payload, signature)
 
+
+def verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
+    """
+    Verifies a client-side payment success callback.
+    Returns (ok, registration_id, status), where status is "succeeded" | "failed".
+    """
+    if PROVIDER == "razorpay":
+        return _rzp_verify_payment_success(data)
+    elif PROVIDER == "stripe":
+        return False, None, "failed"
+    else:
+        reg_id = str(data.get("registration_id") or "")
+        return bool(reg_id), reg_id, "succeeded" if reg_id else "failed"
+
 # ---------------------------
 # Mock provider (for dev/test)
 # ---------------------------
@@ -122,9 +136,17 @@ def _rzp_verify_webhook(payload: bytes, signature: str) -> Tuple[bool, str, str]
 
     # Map event types -> registration_id, status
     # Expect registration_id in notes/metadata
-    entity = event.get("payload", {}).get("payment", {}).get("entity", {}) or event.get("payload", {}).get("order", {}).get("entity", {})
+    payload_data = event.get("payload", {})
+    payment_entity = payload_data.get("payment", {}).get("entity", {}) or {}
+    order_entity = payload_data.get("order", {}).get("entity", {}) or {}
+    entity = payment_entity or order_entity
     notes = entity.get("notes", {}) if isinstance(entity, dict) else {}
-    reg_id = notes.get("registration_id")
+    reg_id = (
+        notes.get("registration_id")
+        or order_entity.get("notes", {}).get("registration_id")
+        or order_entity.get("receipt")
+        or entity.get("receipt")
+    )
 
     # Infer status
     event_type = event.get("event")
@@ -136,6 +158,47 @@ def _rzp_verify_webhook(payload: bytes, signature: str) -> Tuple[bool, str, str]
         status = "failed"
 
     return True, reg_id, status
+
+
+def _rzp_verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+    if not key_secret:
+        return False, None, "failed"
+
+    order_id = data.get("razorpay_order_id") or data.get("order_id")
+    payment_id = data.get("razorpay_payment_id") or data.get("payment_id")
+    signature = data.get("razorpay_signature") or data.get("signature")
+    registration_id = str(data.get("registration_id") or "")
+    if not order_id or not payment_id or not signature or not registration_id:
+        return False, None, "failed"
+
+    message = f"{order_id}|{payment_id}".encode("utf-8")
+    expected = hmac.new(
+        key=key_secret.encode("utf-8"),
+        msg=message,
+        digestmod=hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return False, None, "failed"
+
+    try:
+        import requests
+        key_id = os.getenv("RAZORPAY_KEY_ID")
+        if key_id:
+            resp = requests.get(
+                f"https://api.razorpay.com/v1/orders/{order_id}",
+                auth=(key_id, key_secret),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            order = resp.json()
+            notes = order.get("notes") or {}
+            if str(order.get("receipt") or notes.get("registration_id") or "") != registration_id:
+                return False, None, "failed"
+    except Exception:
+        return False, None, "failed"
+
+    return True, registration_id, "succeeded"
 
 # ---------------------------
 # Stripe (outline)

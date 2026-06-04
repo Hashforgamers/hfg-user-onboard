@@ -15,7 +15,7 @@ from models.registration import Registration
 from models.notification import Notification
 from models.fcmToken import FCMToken
 from models.user import User
-from services.payment_service import create_payment_intent, verify_webhook
+from services.payment_service import create_payment_intent, verify_payment_success, verify_webhook
 from services.firebase_service import send_notification
 
 
@@ -24,6 +24,13 @@ IST = ZoneInfo("Asia/Kolkata")
 _PUSH_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("FCM_PUSH_WORKERS", "16")))
 _EVENT_PARTICIPATION_CACHE = {}
 _EVENT_PARTICIPATION_CACHE_MAX_SIZE = 5000
+
+
+def _mark_registration_payment(reg, status):
+    reg.payment_status = "paid" if status == "succeeded" else "failed"
+    reg.status = "confirmed" if status == "succeeded" else "pending"
+    _invalidate_participation_cache(event_id=reg.event_id, team_id=reg.team_id)
+    db.session.commit()
 
 
 def _event_flag(start_at, end_at):
@@ -559,7 +566,7 @@ def make_payment_intent():
 @event_participation_bp.post("/payments/webhook")
 def payment_webhook():
     payload = request.get_data()
-    sig = request.headers.get("X-Signature", "")
+    sig = request.headers.get("X-Razorpay-Signature") or request.headers.get("X-Signature", "")
     ok, reg_id, status = verify_webhook(payload, sig)
 
     if not ok:
@@ -569,12 +576,28 @@ def payment_webhook():
     if not reg:
         return jsonify({"error": "registration not found"}), 404
 
-    reg.payment_status = "paid" if status == "succeeded" else "failed"
-    reg.status = "confirmed" if status == "succeeded" else "pending"
+    _mark_registration_payment(reg, status)
 
-    db.session.commit()
+    return jsonify({"ok": True, "registration_id": str(reg.id), "payment_status": reg.payment_status, "status": reg.status}), 200
 
-    return jsonify({"ok": True}), 200
+@event_participation_bp.post("/payments/verify")
+def verify_payment():
+    body = _body()
+    ok, reg_id, status = verify_payment_success(body)
+    if not ok:
+        return jsonify({"error": "payment verification failed"}), 400
+
+    reg = Registration.query.filter_by(id=reg_id).first()
+    if not reg:
+        return jsonify({"error": "registration not found"}), 404
+
+    _mark_registration_payment(reg, status)
+    return jsonify({
+        "ok": True,
+        "registration_id": str(reg.id),
+        "payment_status": reg.payment_status,
+        "status": reg.status,
+    }), 200
 
 @event_participation_bp.get("/events/<uuid:event_id>/teams/<uuid:team_id>/members")
 def get_team_members(event_id, team_id):
