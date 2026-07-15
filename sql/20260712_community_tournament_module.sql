@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS community_host_verifications (
     upi_id varchar(120) NOT NULL,
     address text NOT NULL,
     verification_status varchar(32) NOT NULL DEFAULT 'pending',
+    host_tier varchar(32) NOT NULL DEFAULT 'bronze',
+    average_rating numeric(3, 2) NOT NULL DEFAULT 0,
+    dispute_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    completion_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    on_time_payout_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    policy_violation_count integer NOT NULL DEFAULT 0,
     rejection_reason text NULL,
     reviewed_by_admin_id bigint NULL,
     reviewed_at timestamptz NULL,
@@ -43,6 +49,7 @@ CREATE INDEX IF NOT EXISTS ix_community_host_verifications_user_id ON community_
 CREATE INDEX IF NOT EXISTS ix_community_host_verifications_email ON community_host_verifications(email);
 CREATE INDEX IF NOT EXISTS ix_community_host_verifications_phone ON community_host_verifications(phone);
 CREATE INDEX IF NOT EXISTS ix_community_host_verifications_status ON community_host_verifications(verification_status);
+CREATE INDEX IF NOT EXISTS ix_community_host_verifications_host_tier ON community_host_verifications(host_tier);
 
 CREATE TABLE IF NOT EXISTS community_tournaments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -72,6 +79,9 @@ CREATE TABLE IF NOT EXISTS community_tournaments (
     status varchar(32) NOT NULL DEFAULT 'draft',
     total_collection numeric(12, 2) NOT NULL DEFAULT 0,
     platform_fee_amount numeric(12, 2) NOT NULL DEFAULT 0,
+    host_tier varchar(32) NOT NULL DEFAULT 'bronze',
+    organizer_commission_rate numeric(5, 2) NOT NULL DEFAULT 8,
+    organizer_commission_amount numeric(12, 2) NOT NULL DEFAULT 0,
     prize_pool numeric(12, 2) NOT NULL DEFAULT 0,
     registered_players_count integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -79,6 +89,7 @@ CREATE TABLE IF NOT EXISTS community_tournaments (
     CONSTRAINT ck_community_tournament_entry_fee_non_negative CHECK (entry_fee >= 0),
     CONSTRAINT ck_community_tournament_max_players_positive CHECK (max_players > 0),
     CONSTRAINT ck_community_tournament_registered_non_negative CHECK (registered_players_count >= 0),
+    CONSTRAINT ck_community_tournament_commission_rate CHECK (organizer_commission_rate >= 0 AND organizer_commission_rate <= 100),
     CONSTRAINT ck_community_tournament_registration_window CHECK (registration_end_at > registration_start_at),
     CONSTRAINT ck_community_tournament_starts_after_registration CHECK (tournament_start_at >= registration_end_at)
 );
@@ -96,11 +107,36 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE community_host_verifications
+    ADD COLUMN IF NOT EXISTS host_tier varchar(32) NOT NULL DEFAULT 'bronze',
+    ADD COLUMN IF NOT EXISTS average_rating numeric(3, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS dispute_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS completion_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS on_time_payout_rate numeric(5, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS policy_violation_count integer NOT NULL DEFAULT 0;
+
+ALTER TABLE community_tournaments
+    ADD COLUMN IF NOT EXISTS host_tier varchar(32) NOT NULL DEFAULT 'bronze',
+    ADD COLUMN IF NOT EXISTS organizer_commission_rate numeric(5, 2) NOT NULL DEFAULT 8,
+    ADD COLUMN IF NOT EXISTS organizer_commission_amount numeric(12, 2) NOT NULL DEFAULT 0;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'ck_community_tournament_commission_rate'
+    ) THEN
+        ALTER TABLE community_tournaments
+            ADD CONSTRAINT ck_community_tournament_commission_rate
+            CHECK (organizer_commission_rate >= 0 AND organizer_commission_rate <= 100);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_host_user_id ON community_tournaments(host_user_id);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_status ON community_tournaments(status);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_visibility ON community_tournaments(visibility);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_is_featured ON community_tournaments(is_featured);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_created_at ON community_tournaments(created_at);
+CREATE INDEX IF NOT EXISTS ix_community_tournaments_host_tier ON community_tournaments(host_tier);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_discovery ON community_tournaments(visibility, status, registration_start_at, tournament_start_at);
 CREATE INDEX IF NOT EXISTS ix_community_tournaments_host_status ON community_tournaments(host_user_id, status);
 

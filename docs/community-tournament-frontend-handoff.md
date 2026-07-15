@@ -38,6 +38,7 @@ Build these user-facing areas:
 - Winner submission flow for hosts.
 - Dispute submission flow.
 - File asset registration helper after upload.
+- Host performance levels and monthly verification fee display.
 
 ## Status Values
 
@@ -46,6 +47,12 @@ Host verification:
 - `verified`
 - `rejected`
 - `suspended`
+
+Host tiers:
+- `bronze`: 8% organizer commission
+- `silver`: 10% organizer commission
+- `gold`: 12% organizer commission
+- `platinum`: 15% organizer commission
 
 Tournament:
 - `draft`
@@ -112,8 +119,11 @@ Payout:
   "is_featured": false,
   "status": "registration_open",
   "total_collection": 500.0,
-  "platform_fee_amount": 50.0,
-  "prize_pool": 450.0,
+  "platform_fee_amount": 40.0,
+  "host_tier": "bronze",
+  "organizer_commission_rate": 8.0,
+  "organizer_commission_amount": 40.0,
+  "prize_pool": 460.0,
   "registered_players_count": 10,
   "created_at": "2026-07-14T10:00:00+00:00",
   "updated_at": "2026-07-14T10:00:00+00:00"
@@ -152,6 +162,12 @@ Payout:
   "upi_id": "host@upi",
   "address": "Full address",
   "verification_status": "pending",
+  "host_tier": "bronze",
+  "average_rating": 0.0,
+  "dispute_rate": 0.0,
+  "completion_rate": 0.0,
+  "on_time_payout_rate": 0.0,
+  "policy_violation_count": 0,
   "rejection_reason": null,
   "reviewed_by_admin_id": null,
   "reviewed_at": null,
@@ -189,6 +205,47 @@ Response:
   "ok": true,
   "module": "community_tournaments",
   "version": "v1"
+}
+```
+
+### Host Program Config
+- **Method**: `GET`
+- **Path**: `/hosts/program`
+- **Auth**: Not required.
+
+Use this to render host onboarding pricing and tier benefits. The verification fee is controlled by Docker/environment variable `COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE`; default is `199`. Included tournaments per week is controlled by `COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK`; default is `3`.
+
+Response:
+```json
+{
+  "verification_fee": {
+    "amount": 199.0,
+    "currency": "INR",
+    "billing_period": "monthly",
+    "included_tournaments_per_week": 3
+  },
+  "performance_levels": {
+    "bronze": {
+      "label": "Bronze Host",
+      "organizer_commission_rate": 8.0,
+      "requirements": ["Verified host account"]
+    },
+    "silver": {
+      "label": "Silver Host",
+      "organizer_commission_rate": 10.0,
+      "requirements": ["High ratings", "Low dispute rates", "Successful tournament completion"]
+    },
+    "gold": {
+      "label": "Gold Host",
+      "organizer_commission_rate": 12.0,
+      "requirements": ["High ratings", "Low dispute rates", "Successful tournament completion", "On-time payouts"]
+    },
+    "platinum": {
+      "label": "Platinum Host",
+      "organizer_commission_rate": 15.0,
+      "requirements": ["High ratings", "Low dispute rates", "Successful tournament completion", "On-time payouts", "No policy violations"]
+    }
+  }
 }
 ```
 
@@ -279,6 +336,7 @@ Response is a host verification object or `null`.
 Important UI rule:
 - Paid tournament creation is allowed only when `verification_status` is `verified`.
 - Free tournaments can be created without verified host status unless host status is `suspended`.
+- Show host tier and commission benefits from `GET /hosts/program`; do not hardcode the monthly verification fee.
 
 ### Create Tournament
 - **Method**: `POST`
@@ -321,9 +379,11 @@ Validation:
 - New tournament `status` can only be `draft` or `published`.
 
 Financial behavior:
-- Backend charges a 10% platform fee from total collection.
-- `prize_pool = total_collection - platform_fee_amount`.
-- `total_collection`, `platform_fee_amount`, and `prize_pool` are recalculated by backend.
+- Backend snapshots the host's current `host_tier` and `organizer_commission_rate` when the tournament is created.
+- Organizer commission is deducted from total collection before prize calculation.
+- `prize_pool = total_collection - organizer_commission_amount`.
+- `platform_fee_amount` currently mirrors `organizer_commission_amount` for backward compatibility with existing clients.
+- `total_collection`, `organizer_commission_amount`, `platform_fee_amount`, and `prize_pool` are recalculated by backend.
 
 ### Update Tournament
 - **Method**: `PATCH`
@@ -543,6 +603,12 @@ Request body:
 ```json
 {
   "status": "verified",
+  "host_tier": "silver",
+  "average_rating": 4.7,
+  "dispute_rate": 1.5,
+  "completion_rate": 98.0,
+  "on_time_payout_rate": 99.0,
+  "policy_violation_count": 0,
   "rejection_reason": null
 }
 ```
@@ -552,6 +618,12 @@ Allowed status:
 - `verified`
 - `rejected`
 - `suspended`
+
+Optional performance fields:
+- `host_tier`: `bronze`, `silver`, `gold`, or `platinum`.
+- `average_rating`: 0-5.
+- `dispute_rate`, `completion_rate`, `on_time_payout_rate`: 0-100 percentages.
+- `policy_violation_count`: non-negative integer.
 
 ### Review Dispute
 - **Method**: `PATCH`
@@ -593,11 +665,12 @@ CTA rules:
 4. Use `discord_link` and `whatsapp_link` as external links.
 
 ### Host Onboarding
-1. Call `GET /hosts/me/verification`.
-2. If `null` or `rejected`, show host verification form.
-3. If `pending`, show pending review state.
-4. If `verified`, allow paid tournament creation.
-5. If `suspended`, block hosting actions.
+1. Call `GET /hosts/program` to render monthly fee and tier benefits.
+2. Call `GET /hosts/me/verification`.
+3. If `null` or `rejected`, show host verification form.
+4. If `pending`, show pending review state.
+5. If `verified`, allow paid tournament creation and show current tier.
+6. If `suspended`, block hosting actions.
 
 ### Tournament Creation
 1. Upload banner externally.
@@ -620,7 +693,7 @@ CTA rules:
 - Prevent registration when `registered_players_count >= max_players`.
 - Hide room details unless present in API response.
 - Treat status values as backend-owned; backend recalculates by time windows.
-- Use server response values for prize pool and platform fee.
+- Use server response values for prize pool, organizer commission, and platform fee.
 
 ## Source Files
 

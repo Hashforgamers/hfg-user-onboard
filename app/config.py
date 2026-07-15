@@ -65,6 +65,10 @@ class Config:
     USER_SIGNUP_EMAIL_LINK_FID_ENABLED = os.getenv("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
     USER_DELETION_COOLDOWN_DAYS = int(os.getenv("USER_DELETION_COOLDOWN_DAYS", "30") or 30)
 
+    # Community tournament host program
+    COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE = float(os.getenv("COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE", "199") or 199)
+    COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK = int(os.getenv("COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK", "3") or 3)
+
     # Auth performance + logging controls
     AUTH_DEBUG_LOGS = os.getenv("AUTH_DEBUG_LOGS", "false").lower() in ("true", "1", "t", "yes", "y")
     AUTH_DECRYPT_CACHE_TTL_SEC = int(os.getenv("AUTH_DECRYPT_CACHE_TTL_SEC", "300") or 300)

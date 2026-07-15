@@ -13,6 +13,7 @@ from services.community_tournament_service import (
     create_file_asset,
     create_tournament,
     get_tournament,
+    host_program_config,
     list_tournaments,
     my_tournaments,
     register_for_tournament,
@@ -71,6 +72,11 @@ def _handle_service_error(exc):
 @community_tournament_bp.get("/health")
 def community_health():
     return jsonify({"ok": True, "module": "community_tournaments", "version": "v1"}), 200
+
+
+@community_tournament_bp.get("/hosts/program")
+def get_host_program():
+    return jsonify(host_program_config()), 200
 
 
 @community_tournament_bp.get("/tournaments")

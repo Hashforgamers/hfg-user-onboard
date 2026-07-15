@@ -25,6 +25,13 @@ class CommunityHostStatus:
     SUSPENDED = "suspended"
 
 
+class CommunityHostTier:
+    BRONZE = "bronze"
+    SILVER = "silver"
+    GOLD = "gold"
+    PLATINUM = "platinum"
+
+
 class CommunityTournamentStatus:
     DRAFT = "draft"
     PUBLISHED = "published"
@@ -55,6 +62,12 @@ class CommunityHostVerification(db.Model):
     upi_id = Column(String(120), nullable=False)
     address = Column(Text, nullable=False)
     verification_status = Column(String(32), nullable=False, default=CommunityHostStatus.PENDING, index=True)
+    host_tier = Column(String(32), nullable=False, default=CommunityHostTier.BRONZE, index=True)
+    average_rating = Column(Numeric(3, 2), nullable=False, default=0)
+    dispute_rate = Column(Numeric(5, 2), nullable=False, default=0)
+    completion_rate = Column(Numeric(5, 2), nullable=False, default=0)
+    on_time_payout_rate = Column(Numeric(5, 2), nullable=False, default=0)
+    policy_violation_count = Column(Integer, nullable=False, default=0)
     rejection_reason = Column(Text, nullable=True)
     reviewed_by_admin_id = Column(BigInteger, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
@@ -75,6 +88,12 @@ class CommunityHostVerification(db.Model):
             "upi_id": self.upi_id,
             "address": self.address,
             "verification_status": self.verification_status,
+            "host_tier": self.host_tier,
+            "average_rating": float(self.average_rating or 0),
+            "dispute_rate": float(self.dispute_rate or 0),
+            "completion_rate": float(self.completion_rate or 0),
+            "on_time_payout_rate": float(self.on_time_payout_rate or 0),
+            "policy_violation_count": int(self.policy_violation_count or 0),
             "rejection_reason": self.rejection_reason,
             "reviewed_by_admin_id": self.reviewed_by_admin_id,
             "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
@@ -113,6 +132,9 @@ class CommunityTournament(db.Model):
     status = Column(String(32), nullable=False, default=CommunityTournamentStatus.DRAFT, index=True)
     total_collection = Column(Numeric(12, 2), nullable=False, default=0)
     platform_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    host_tier = Column(String(32), nullable=False, default=CommunityHostTier.BRONZE, index=True)
+    organizer_commission_rate = Column(Numeric(5, 2), nullable=False, default=8)
+    organizer_commission_amount = Column(Numeric(12, 2), nullable=False, default=0)
     prize_pool = Column(Numeric(12, 2), nullable=False, default=0)
     registered_players_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
@@ -125,6 +147,7 @@ class CommunityTournament(db.Model):
         CheckConstraint("entry_fee >= 0", name="ck_community_tournament_entry_fee_non_negative"),
         CheckConstraint("max_players > 0", name="ck_community_tournament_max_players_positive"),
         CheckConstraint("registered_players_count >= 0", name="ck_community_tournament_registered_non_negative"),
+        CheckConstraint("organizer_commission_rate >= 0 AND organizer_commission_rate <= 100", name="ck_community_tournament_commission_rate"),
         Index("ix_community_tournaments_discovery", "visibility", "status", "registration_start_at", "tournament_start_at"),
         Index("ix_community_tournaments_host_status", "host_user_id", "status"),
     )
@@ -157,6 +180,9 @@ class CommunityTournament(db.Model):
             "status": self.status,
             "total_collection": float(self.total_collection or 0),
             "platform_fee_amount": float(self.platform_fee_amount or 0),
+            "host_tier": self.host_tier,
+            "organizer_commission_rate": float(self.organizer_commission_rate or 0),
+            "organizer_commission_amount": float(self.organizer_commission_amount or 0),
             "prize_pool": float(self.prize_pool or 0),
             "registered_players_count": int(self.registered_players_count or 0),
             "created_at": self.created_at.isoformat() if self.created_at else None,
