@@ -19,6 +19,8 @@ services:
       - FIREBASE_KEY=<secret key>
       - ENCRYPT_PRIVATE_KEY_PATH=<placeholder>
       - ENCRYPT_PUBLIC_KEY_PATH=<placeholder>
+      - COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE=199
+      - COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK=3
     volumes:
       - .:/app
     command: ["python", "app.py"]

@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import re
 import uuid
 
+from flask import current_app
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -10,6 +11,7 @@ from db.extensions import db
 from models.communityTournament import (
     CommunityFileAsset,
     CommunityHostStatus,
+    CommunityHostTier,
     CommunityHostVerification,
     CommunityTournament,
     CommunityTournamentRegistration,
@@ -38,6 +40,40 @@ PUBLIC_STATUSES = {
     CommunityTournamentStatus.REGISTRATION_CLOSED,
     CommunityTournamentStatus.LIVE,
     CommunityTournamentStatus.COMPLETED,
+}
+HOST_TIER_COMMISSION_RATES = {
+    CommunityHostTier.BRONZE: Decimal("8.00"),
+    CommunityHostTier.SILVER: Decimal("10.00"),
+    CommunityHostTier.GOLD: Decimal("12.00"),
+    CommunityHostTier.PLATINUM: Decimal("15.00"),
+}
+HOST_TIER_REQUIREMENTS = {
+    CommunityHostTier.BRONZE: {
+        "label": "Bronze Host",
+        "organizer_commission_rate": 8.0,
+        "requirements": ["Verified host account"],
+    },
+    CommunityHostTier.SILVER: {
+        "label": "Silver Host",
+        "organizer_commission_rate": 10.0,
+        "requirements": ["High ratings", "Low dispute rates", "Successful tournament completion"],
+    },
+    CommunityHostTier.GOLD: {
+        "label": "Gold Host",
+        "organizer_commission_rate": 12.0,
+        "requirements": ["High ratings", "Low dispute rates", "Successful tournament completion", "On-time payouts"],
+    },
+    CommunityHostTier.PLATINUM: {
+        "label": "Platinum Host",
+        "organizer_commission_rate": 15.0,
+        "requirements": [
+            "High ratings",
+            "Low dispute rates",
+            "Successful tournament completion",
+            "On-time payouts",
+            "No policy violations",
+        ],
+    },
 }
 TERMINAL_STATUSES = {
     CommunityTournamentStatus.COMPLETED,
@@ -86,8 +122,45 @@ def _money(value, field_name, allow_zero=True):
     return amount
 
 
-def _platform_fee_rate():
-    return Decimal("0.10")
+def _host_commission_rate(host_tier):
+    return HOST_TIER_COMMISSION_RATES.get(str(host_tier or CommunityHostTier.BRONZE).lower(), HOST_TIER_COMMISSION_RATES[CommunityHostTier.BRONZE])
+
+
+def _percent_metric(value, field_name):
+    try:
+        metric = Decimal(str(value if value is not None else 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception as exc:
+        raise CommunityValidationError(f"{field_name} must be a valid percentage") from exc
+    if metric < 0 or metric > 100:
+        raise CommunityValidationError(f"{field_name} must be between 0 and 100")
+    return metric
+
+
+def _rating_metric(value, field_name):
+    try:
+        metric = Decimal(str(value if value is not None else 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception as exc:
+        raise CommunityValidationError(f"{field_name} must be a valid rating") from exc
+    if metric < 0 or metric > 5:
+        raise CommunityValidationError(f"{field_name} must be between 0 and 5")
+    return metric
+
+
+def host_program_config():
+    monthly_fee = Decimal(str(current_app.config.get("COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE", 199))).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+    included_per_week = int(current_app.config.get("COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK", 3) or 3)
+    return {
+        "verification_fee": {
+            "amount": float(monthly_fee),
+            "currency": "INR",
+            "billing_period": "monthly",
+            "included_tournaments_per_week": included_per_week,
+        },
+        "performance_levels": HOST_TIER_REQUIREMENTS,
+    }
 
 
 def _audit(action, entity_type, entity_id, actor_user_id=None, actor_type="user", metadata=None):
@@ -145,10 +218,13 @@ def sync_tournament_status(tournament, now=None):
 
 def _recalculate_prize_pool(tournament):
     total = Decimal(str(tournament.entry_fee or 0)) * Decimal(int(tournament.registered_players_count or 0))
-    fee = (total * _platform_fee_rate()).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    commission_rate = Decimal(str(tournament.organizer_commission_rate or _host_commission_rate(tournament.host_tier)))
+    commission = (total * commission_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     tournament.total_collection = total
-    tournament.platform_fee_amount = fee
-    tournament.prize_pool = total - fee
+    tournament.organizer_commission_rate = commission_rate
+    tournament.organizer_commission_amount = commission
+    tournament.platform_fee_amount = commission
+    tournament.prize_pool = total - commission
 
 
 def _host_verification(user_id):
@@ -218,6 +294,26 @@ def review_host_verification(verification_id, payload, admin_id=None):
     if not verification:
         raise CommunityValidationError("verification request not found")
     verification.verification_status = status
+    if "host_tier" in payload or "tier" in payload:
+        host_tier = str(payload.get("host_tier") or payload.get("tier") or "").strip().lower()
+        if host_tier not in HOST_TIER_COMMISSION_RATES:
+            raise CommunityValidationError("host_tier must be bronze, silver, gold, or platinum")
+        verification.host_tier = host_tier
+    for field in ("average_rating", "dispute_rate", "completion_rate", "on_time_payout_rate"):
+        if field in payload:
+            setattr(
+                verification,
+                field,
+                _rating_metric(payload[field], field) if field == "average_rating" else _percent_metric(payload[field], field),
+            )
+    if "policy_violation_count" in payload:
+        try:
+            policy_violation_count = int(payload.get("policy_violation_count") or 0)
+        except (TypeError, ValueError) as exc:
+            raise CommunityValidationError("policy_violation_count must be a non-negative integer") from exc
+        if policy_violation_count < 0:
+            raise CommunityValidationError("policy_violation_count cannot be negative")
+        verification.policy_violation_count = policy_violation_count
     verification.rejection_reason = str(payload.get("rejection_reason") or "").strip() or None
     verification.reviewed_by_admin_id = int(admin_id) if admin_id else None
     verification.reviewed_at = _now()
@@ -235,7 +331,9 @@ def review_host_verification(verification_id, payload, admin_id=None):
 
 def create_tournament(host_user_id, payload):
     entry_fee = _money(payload.get("entry_fee", 0), "entry_fee")
-    _require_host_for_paid_tournament(host_user_id, entry_fee)
+    verification = _require_host_for_paid_tournament(host_user_id, entry_fee)
+    host_tier = verification.host_tier if verification else CommunityHostTier.BRONZE
+    organizer_commission_rate = _host_commission_rate(host_tier)
 
     title = str(payload.get("title") or "").strip()
     game = str(payload.get("game") or "").strip()
@@ -270,6 +368,8 @@ def create_tournament(host_user_id, payload):
         tournament_type=str(payload.get("tournament_type") or "single_elimination").strip(),
         team_mode=str(payload.get("team_mode") or "solo").strip(),
         entry_fee=entry_fee,
+        host_tier=host_tier,
+        organizer_commission_rate=organizer_commission_rate,
         currency=str(payload.get("currency") or "INR").strip().upper(),
         max_players=max_players,
         registration_start_at=registration_start_at,
