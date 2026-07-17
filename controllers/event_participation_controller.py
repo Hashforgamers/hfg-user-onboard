@@ -15,6 +15,16 @@ from models.registration import Registration
 from models.notification import Notification
 from models.fcmToken import FCMToken
 from models.user import User
+from models.communityTournament import (
+    CommunityTournament,
+    CommunityTournamentRegistration,
+    CommunityTournamentRegistrationStatus,
+)
+from services.community_tournament_service import (
+    CommunityConflictError,
+    CommunityValidationError,
+    register_for_tournament,
+)
 from services.payment_service import create_payment_intent, verify_payment_success, verify_webhook
 from services.firebase_service import send_notification
 
@@ -88,13 +98,78 @@ def _push_notification_for_user(user_id, title, message, data):
     tokens = [r[0] for r in db.session.query(FCMToken.token).filter(FCMToken.user_id == int(user_id)).all() if r and r[0]]
     _dispatch_push_async(tokens, title, message, data)
 
+
+def _legacy_community_registration_response(tournament_id, body):
+    """Keep legacy team/register clients working for community solo tournaments."""
+    tournament = CommunityTournament.query.filter_by(id=tournament_id, visibility=True).first()
+    if not tournament:
+        return None
+
+    user_id = body.get("user_id")
+    if user_id is None:
+        return jsonify({"error": "user_id required"}), 400
+    if tournament.team_mode != "solo":
+        return jsonify({
+            "error": "community_team_registration_required",
+            "message": "This community tournament must use the community registration flow.",
+            "source": "community",
+            "tournament_id": str(tournament.id),
+        }), 409
+
+    registration = CommunityTournamentRegistration.query.filter_by(
+        tournament_id=tournament.id,
+        user_id=int(user_id),
+    ).first()
+    if registration and registration.status not in {
+        CommunityTournamentRegistrationStatus.CANCELLED,
+        CommunityTournamentRegistrationStatus.REFUNDED,
+    }:
+        return jsonify({
+            "team_id": str(registration.id),
+            "name": body.get("name") or "Solo entry",
+            "source": "community",
+            "registration_id": str(registration.id),
+            "registration": registration.to_dict(),
+            "already_registered": True,
+        }), 200
+
+    try:
+        registration = register_for_tournament(
+            int(user_id),
+            tournament.id,
+            payment_reference=body.get("payment_reference"),
+        )
+    except (CommunityConflictError, CommunityValidationError) as exc:
+        return jsonify({
+            "error": "community_registration_unavailable",
+            "message": str(exc),
+            "source": "community",
+            "tournament_id": str(tournament.id),
+        }), 409
+
+    return jsonify({
+        "team_id": str(registration.id),
+        "name": body.get("name") or "Solo entry",
+        "source": "community",
+        "registration_id": str(registration.id),
+        "registration": registration.to_dict(),
+        "already_registered": False,
+    }), 201
+
 @event_participation_bp.post("/events/<uuid:event_id>/teams")
 def create_team(event_id):
     body = _body()
     uid = body.get("user_id")
     if uid is None:
         return jsonify({"error": "user_id required"}), 400
-    e = Event.query.filter_by(id=event_id, visibility=True, status="published").first_or_404()
+    e = Event.query.filter_by(id=event_id, visibility=True).first()
+    if not e:
+        community_response = _legacy_community_registration_response(event_id, body)
+        if community_response:
+            return community_response
+        return jsonify({"error": "event_not_found", "event_id": str(event_id)}), 404
+    if e.status != "published":
+        return jsonify({"error": "event_registration_not_open", "message": "Teams can only be created while the event is published."}), 409
     name = body.get("name")
     is_individual = bool(body.get("is_individual", False))
     if not name:
@@ -487,7 +562,14 @@ def register_team(event_id):
     if uid is None or not team_id:
         return jsonify({"error": "user_id and team_id required"}), 400
 
-    e = Event.query.filter_by(id=event_id, visibility=True, status="published").first_or_404()
+    e = Event.query.filter_by(id=event_id, visibility=True).first()
+    if not e:
+        community_response = _legacy_community_registration_response(event_id, body)
+        if community_response:
+            return community_response
+        return jsonify({"error": "event_not_found", "event_id": str(event_id)}), 404
+    if e.status != "published":
+        return jsonify({"error": "event_registration_not_open", "message": "Registration is no longer open for this event."}), 409
     t = Team.query.filter_by(id=team_id, event_id=e.id).with_for_update().first_or_404()
 
     is_member = TeamMember.query.filter_by(team_id=team_id, user_id=int(uid)).first() is not None
