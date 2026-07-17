@@ -59,10 +59,12 @@ def list_public_events():
     if cached and cached["expires_at"] > now_ts:
         return jsonify(cached["payload"]), 200
 
-    sql = """
+    cafe_sql = """
         SELECT
+            'cafe' AS source,
             e.id,
             e.vendor_id,
+            NULL::bigint AS host_user_id,
             e.title,
             e.description,
             e.start_at,
@@ -90,7 +92,7 @@ def list_public_events():
           AND (:vendor_id IS NULL OR e.vendor_id = :vendor_id)
     """
     if flag_filter:
-        sql += """
+        cafe_sql += """
           AND (
             CASE
                 WHEN now() < e.start_at THEN 'upcoming'
@@ -99,7 +101,66 @@ def list_public_events():
             END = :flag_filter
           )
         """
-    sql += " ORDER BY e.start_at ASC LIMIT :limit"
+
+    community_sql = """
+        SELECT
+            'community' AS source,
+            ct.id,
+            NULL::bigint AS vendor_id,
+            ct.host_user_id,
+            ct.title,
+            ct.description,
+            ct.tournament_start_at AS start_at,
+            COALESCE(ct.tournament_end_at, ct.tournament_start_at) AS end_at,
+            ct.entry_fee AS registration_fee,
+            ct.currency,
+            ct.game,
+            ct.tournament_type AS format,
+            ct.prize_pool,
+            CASE
+                WHEN ct.team_mode = 'solo' THEN 1
+                ELSE NULL
+            END AS team_size,
+            ct.rules AS match_rules,
+            NULL::varchar AS region,
+            NULL::varchar AS server,
+            '[]'::jsonb AS map_pool,
+            'none'::varchar AS veto_mode,
+            COALESCE(cfa.file_url, ct.banner_url) AS banner_image_url,
+            CASE
+                WHEN ct.status = 'completed' THEN 'completed'
+                WHEN now() < ct.tournament_start_at THEN 'upcoming'
+                WHEN now() BETWEEN ct.tournament_start_at AND COALESCE(ct.tournament_end_at, ct.tournament_start_at) THEN 'live'
+                ELSE 'completed'
+            END AS flag
+        FROM community_tournaments ct
+        LEFT JOIN community_file_assets cfa ON cfa.id = ct.banner_asset_id
+        WHERE ct.visibility = true
+          AND ct.status IN ('published', 'registration_open', 'registration_closed', 'live', 'completed')
+          AND :vendor_id IS NULL
+    """
+    if flag_filter:
+        community_sql += """
+          AND (
+            CASE
+                WHEN ct.status = 'completed' THEN 'completed'
+                WHEN now() < ct.tournament_start_at THEN 'upcoming'
+                WHEN now() BETWEEN ct.tournament_start_at AND COALESCE(ct.tournament_end_at, ct.tournament_start_at) THEN 'live'
+                ELSE 'completed'
+            END = :flag_filter
+          )
+        """
+
+    sql = f"""
+        SELECT *
+        FROM (
+            {cafe_sql}
+            UNION ALL
+            {community_sql}
+        ) public_events
+        ORDER BY start_at ASC
+        LIMIT :limit
+    """
 
     rows = db.session.execute(
         text(sql),
@@ -109,7 +170,9 @@ def list_public_events():
     payload = [
         {
             "id": str(r["id"]),
+            "source": r["source"],
             "vendor_id": r["vendor_id"],
+            "host_user_id": r["host_user_id"],
             "title": r["title"],
             "description": r["description"],
             "start_at": r["start_at"].isoformat() if r["start_at"] else None,
@@ -196,11 +259,68 @@ def get_event(event_id):
         LIMIT 1
     """), {"event_id": str(event_id)}).mappings().first()
     if not row:
-        return jsonify({"message": "Not Found"}), 404
+        community_row = db.session.execute(text("""
+            SELECT
+                ct.id,
+                NULL::bigint AS vendor_id,
+                ct.host_user_id,
+                ct.title,
+                ct.description,
+                ct.tournament_start_at AS start_at,
+                COALESCE(ct.tournament_end_at, ct.tournament_start_at) AS end_at,
+                ct.entry_fee AS registration_fee,
+                ct.currency,
+                ct.game,
+                ct.tournament_type AS format,
+                ct.prize_pool,
+                CASE
+                    WHEN ct.team_mode = 'solo' THEN 1
+                    ELSE NULL
+                END AS team_size,
+                ct.rules AS match_rules,
+                NULL::varchar AS region,
+                NULL::varchar AS server,
+                NULL::timestamptz AS check_in_starts_at,
+                NULL::timestamptz AS check_in_ends_at,
+                '[]'::jsonb AS map_pool,
+                'none'::varchar AS veto_mode,
+                NULL::integer AS capacity_team,
+                ct.max_players AS capacity_player,
+                1 AS min_team_size,
+                CASE
+                    WHEN ct.team_mode = 'solo' THEN 1
+                    ELSE NULL
+                END AS max_team_size,
+                ct.team_mode = 'solo' AS allow_solo,
+                ct.team_mode = 'solo' AS allow_individual,
+                ct.registration_end_at AS registration_deadline,
+                COALESCE(cfa.file_url, ct.banner_url) AS banner_image_url,
+                ct.registered_players_count AS team_count,
+                CASE
+                    WHEN ct.status = 'completed' THEN 'completed'
+                    WHEN now() < ct.tournament_start_at THEN 'upcoming'
+                    WHEN now() BETWEEN ct.tournament_start_at AND COALESCE(ct.tournament_end_at, ct.tournament_start_at) THEN 'live'
+                    ELSE 'completed'
+                END AS flag
+            FROM community_tournaments ct
+            LEFT JOIN community_file_assets cfa ON cfa.id = ct.banner_asset_id
+            WHERE ct.id = :event_id
+              AND ct.visibility = true
+              AND ct.status IN ('published', 'registration_open', 'registration_closed', 'live', 'completed')
+            LIMIT 1
+        """), {"event_id": str(event_id)}).mappings().first()
+        if not community_row:
+            return jsonify({"message": "Not Found"}), 404
+        row = community_row
+        source = "community"
+    else:
+        source = "cafe"
 
     payload = {
         "id": str(row["id"]),
+        "source": source,
         "vendor_id": row["vendor_id"],
+        "host_user_id": row.get("host_user_id"),
         "title": row["title"],
         "description": row["description"],
         "start_at": row["start_at"].isoformat() if row["start_at"] else None,
