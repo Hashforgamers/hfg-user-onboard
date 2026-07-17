@@ -249,6 +249,21 @@ Response:
 }
 ```
 
+### Shared Public Events Feed
+- **Method**: `GET`
+- **Path**: `/api/events/public`
+- **Auth**: Not required.
+
+This existing app-level feed now returns both cafe dashboard events and community tournaments in one list. Use `source` to distinguish records:
+- `source = "cafe"`: created from cafe/dashboard events, has `vendor_id`.
+- `source = "community"`: created from community tournament flow, has `host_user_id` and `vendor_id = null`.
+
+Notes:
+- `vendor_id` query param keeps the old cafe-only behavior and excludes community tournaments.
+- `flag=live|upcoming|completed` applies to both sources.
+- Shared fields are normalized as `registration_fee`, `format`, `prize_pool`, `banner_image_url`, `start_at`, and `end_at`.
+- `GET /api/events/<id>` also falls back to community tournament detail when the id is not a cafe event.
+
 ### List Tournaments
 - **Method**: `GET`
 - **Path**: `/tournaments`
@@ -709,3 +724,4 @@ Models:
 
 Migration:
 - `sql/20260712_community_tournament_module.sql`
+- `sql/20260717_community_host_performance_levels.sql`
