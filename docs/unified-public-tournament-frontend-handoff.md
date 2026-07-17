@@ -15,6 +15,12 @@ Every unified response includes `source`:
 - `cafe`: tournament/event created from the cafe dashboard `events` flow.
 - `community`: tournament created from the community host flow.
 
+Event feed and detail items also include `can_manage`:
+- Send the logged-in user's `Authorization: Bearer <token>` header when calling the public feed/detail endpoints.
+- `can_manage = true` only when the caller is the `host_user_id` of a community tournament.
+- `can_manage = false` for anonymous callers, other users, and cafe/dashboard events. Dashboard event ownership is currently vendor-based and is not linked to an app user ID.
+- Treat this as a UI hint for the **Manage tournament** action. Management endpoints still enforce authorization server-side.
+
 Use `source` to decide where to route user actions:
 - `source = "cafe"`: use existing cafe event registration/team flows.
 - `source = "community"`: use community registration/result/dispute flows under `/api/v1/community`.
@@ -37,6 +43,7 @@ Response item:
   "source": "community",
   "vendor_id": null,
   "host_user_id": 2482,
+  "can_manage": false,
   "title": "BGMI Friday Cup",
   "description": "Squad tournament",
   "start_at": "2026-07-21T10:00:00+00:00",
@@ -57,7 +64,7 @@ Response item:
 }
 ```
 
-Cafe events use the same shape with `source = "cafe"`, `vendor_id` populated, and `host_user_id = null`.
+Cafe events use the same shape with `source = "cafe"`, `vendor_id` populated, `host_user_id = null`, and `can_manage = false`.
 
 ## Gamer Profile
 
@@ -117,6 +124,7 @@ Response includes the feed fields plus detail fields:
   "source": "community",
   "vendor_id": null,
   "host_user_id": 2482,
+  "can_manage": true,
   "title": "BGMI Friday Cup",
   "description": "Squad tournament",
   "start_at": "2026-07-21T10:00:00+00:00",
@@ -255,6 +263,7 @@ Community responses include `user_id`, `user_name`, `game_username`, `score`, an
 ## Frontend Rules
 
 - Use `/events/public` for the main public tournament feed, regardless of source.
+- Show **Manage tournament** only when `can_manage` is `true`; send the same Bearer token to the community management APIs.
 - Use `source` to choose the correct CTA:
   - `cafe`: existing cafe event registration/team flow.
   - `community`: `POST /api/v1/community/tournaments/<id>/registrations`.
