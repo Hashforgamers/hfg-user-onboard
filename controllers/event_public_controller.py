@@ -1,10 +1,12 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
 from sqlalchemy import func, text
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from db.extensions import db
 from models.event import Event
 from models.team import Team
+from services.security import decode_user, extract_bearer_token
+import jwt
 import time
 
 
@@ -13,6 +15,28 @@ event_public_bp = Blueprint("event_public", __name__, url_prefix="/api")
 IST = ZoneInfo("Asia/Kolkata")
 _EVENT_PUBLIC_CACHE = {}
 _EVENT_PUBLIC_CACHE_MAX_SIZE = 5000
+
+
+def _optional_request_user_id():
+    """Return the authenticated app user when a valid Bearer token is supplied."""
+    token = extract_bearer_token()
+    if not token:
+        return None
+
+    try:
+        claims = jwt.decode(
+            token,
+            current_app.config["JWT_SECRET_KEY"],
+            algorithms=["HS256"],
+            options={"require": ["exp", "iat", "uuid"]},
+        )
+        user_id = decode_user(claims["uuid"], current_app.config["ENCRYPT_PRIVATE_KEY"])
+        return int(user_id)
+    except (KeyError, TypeError, ValueError, jwt.InvalidTokenError):
+        return None
+    except Exception:
+        current_app.logger.warning("Could not resolve optional public-event authentication")
+        return None
 
 
 def _event_flag(start_at, end_at):
@@ -52,8 +76,9 @@ def list_public_events():
     if flag_filter and flag_filter not in {"live", "upcoming", "completed"}:
         return jsonify({"error": "invalid flag. use live|upcoming|completed"}), 400
 
+    viewer_user_id = _optional_request_user_id()
     cache_ttl_sec = 60
-    cache_key = f"public:{vendor_id}:{flag_filter}:{limit}"
+    cache_key = f"public:{vendor_id}:{flag_filter}:{limit}:viewer:{viewer_user_id or 'anonymous'}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)
     if cached and cached["expires_at"] > now_ts:
@@ -173,6 +198,12 @@ def list_public_events():
             "source": r["source"],
             "vendor_id": r["vendor_id"],
             "host_user_id": r["host_user_id"],
+            "can_manage": bool(
+                viewer_user_id
+                and r["source"] == "community"
+                and r["host_user_id"] is not None
+                and int(r["host_user_id"]) == viewer_user_id
+            ),
             "title": r["title"],
             "description": r["description"],
             "start_at": r["start_at"].isoformat() if r["start_at"] else None,
@@ -281,8 +312,9 @@ def get_event(event_id):
     Single event detail — no auth required.
     Returns full event info including team count and flag.
     """
+    viewer_user_id = _optional_request_user_id()
     cache_ttl_sec = 60
-    cache_key = f"event:{event_id}"
+    cache_key = f"event:{event_id}:viewer:{viewer_user_id or 'anonymous'}"
     now_ts = time.time()
     cached = _EVENT_PUBLIC_CACHE.get(cache_key)
     if cached and cached["expires_at"] > now_ts:
@@ -395,6 +427,12 @@ def get_event(event_id):
         "source": source,
         "vendor_id": row["vendor_id"],
         "host_user_id": row.get("host_user_id"),
+        "can_manage": bool(
+            viewer_user_id
+            and source == "community"
+            and row.get("host_user_id") is not None
+            and int(row["host_user_id"]) == viewer_user_id
+        ),
         "title": row["title"],
         "description": row["description"],
         "start_at": row["start_at"].isoformat() if row["start_at"] else None,
