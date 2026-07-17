@@ -28,6 +28,7 @@ from models.communityTournamentOperations import (
     CommunityTournamentPayout,
 )
 from models.hashWalletTransaction import HashWalletTransaction
+from models.hashWallet import HashWallet
 from models.notification import Notification
 from models.user import User
 
@@ -188,6 +189,25 @@ def _notify(user_id, notification_type, title, message, reference_id=None):
                 is_read=False,
             )
         )
+
+
+def _apply_wallet_transaction(user_id, amount, transaction_type, reference_id):
+    """Keep the wallet balance and its immutable transaction ledger in sync."""
+    wallet = HashWallet.query.filter_by(user_id=int(user_id)).with_for_update().first()
+    if not wallet:
+        wallet = HashWallet(user_id=int(user_id), balance=0)
+        db.session.add(wallet)
+        db.session.flush()
+    wallet_amount = int(amount)
+    wallet.balance += wallet_amount
+    db.session.add(
+        HashWalletTransaction(
+            user_id=int(user_id),
+            amount=wallet_amount,
+            type=transaction_type,
+            reference_id=str(reference_id),
+        )
+    )
 
 
 def _derive_status(tournament, now=None):
@@ -403,15 +423,48 @@ def update_tournament(host_user_id, tournament_id, payload):
 
     editable = {
         "title", "description", "banner_url", "game", "tournament_type", "team_mode",
-        "rules", "prize_distribution", "discord_link", "whatsapp_link", "visibility",
-        "room_details", "status", "max_players",
+        "rules", "prize_distribution", "discord_link", "whatsapp_link", "room_details",
     }
     for field in editable:
         if field in payload:
-            setattr(tournament, field, payload[field])
-    for field in ("registration_start_at", "registration_end_at", "tournament_start_at", "tournament_end_at"):
-        if field in payload and payload[field]:
+            value = payload[field]
+            if field in {"title", "game"}:
+                value = str(value or "").strip()
+                if (field == "title" and not 3 <= len(value) <= 200) or (field == "game" and not value):
+                    raise CommunityValidationError(f"{field} is invalid")
+            elif field in {"description", "banner_url", "tournament_type", "team_mode", "rules", "discord_link", "whatsapp_link", "room_details"}:
+                value = str(value or "").strip() or None
+            setattr(tournament, field, value)
+
+    if "banner_asset_id" in payload:
+        tournament.banner_asset_id = uuid.UUID(str(payload["banner_asset_id"])) if payload["banner_asset_id"] else None
+    if "visibility" in payload:
+        if not isinstance(payload["visibility"], bool):
+            raise CommunityValidationError("visibility must be a boolean")
+        tournament.visibility = payload["visibility"]
+    if "max_players" in payload:
+        try:
+            max_players = int(payload["max_players"])
+        except (TypeError, ValueError) as exc:
+            raise CommunityValidationError("max_players must be an integer") from exc
+        if max_players <= 0 or max_players > 10000:
+            raise CommunityValidationError("max_players must be between 1 and 10000")
+        tournament.max_players = max_players
+    if "currency" in payload:
+        currency = str(payload["currency"] or "").strip().upper()
+        if not 3 <= len(currency) <= 8:
+            raise CommunityValidationError("currency must be 3-8 characters")
+        tournament.currency = currency
+    if "status" in payload:
+        status = str(payload["status"] or "").strip().lower()
+        if status not in {CommunityTournamentStatus.DRAFT, CommunityTournamentStatus.PUBLISHED}:
+            raise CommunityValidationError("status can only be draft or published; use the cancel endpoint to cancel")
+        tournament.status = status
+    for field in ("registration_start_at", "registration_end_at", "tournament_start_at"):
+        if field in payload:
             setattr(tournament, field, _parse_datetime(payload[field], field))
+    if "tournament_end_at" in payload:
+        tournament.tournament_end_at = _parse_datetime(payload["tournament_end_at"], "tournament_end_at") if payload["tournament_end_at"] else None
     if "entry_fee" in payload:
         new_fee = _money(payload["entry_fee"], "entry_fee")
         if tournament.registered_players_count > 0:
@@ -421,6 +474,12 @@ def update_tournament(host_user_id, tournament_id, payload):
 
     if tournament.max_players < tournament.registered_players_count:
         raise CommunityValidationError("max_players cannot be lower than current registrations")
+    if tournament.registration_end_at <= tournament.registration_start_at:
+        raise CommunityValidationError("registration_end_at must be after registration_start_at")
+    if tournament.tournament_start_at < tournament.registration_end_at:
+        raise CommunityValidationError("tournament_start_at must be after registration_end_at")
+    if tournament.tournament_end_at and tournament.tournament_end_at <= tournament.tournament_start_at:
+        raise CommunityValidationError("tournament_end_at must be after tournament_start_at")
     if tournament.room_details and not tournament.room_details_published_at:
         tournament.room_details_published_at = _now()
     sync_tournament_status(tournament)
@@ -443,7 +502,7 @@ def cancel_tournament(host_user_id, tournament_id, reason=None):
         reg.payment_status = "refunded"
         reg.cancelled_at = _now()
         if reg.amount_paid:
-            db.session.add(HashWalletTransaction(user_id=reg.user_id, amount=int(reg.amount_paid), type="community-tournament-refund", reference_id=str(tournament.id)))
+            _apply_wallet_transaction(reg.user_id, reg.amount_paid, "community-tournament-refund", tournament.id)
         _notify(reg.user_id, "community_tournament_cancelled", "Tournament cancelled", f"{tournament.title} was cancelled. Refund processing has started.", tournament.id)
     _audit("tournament_cancelled", "community_tournament", tournament.id, host_user_id, metadata={"reason": reason})
     db.session.commit()
@@ -546,7 +605,7 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None):
     if reg.status == CommunityTournamentRegistrationStatus.CONFIRMED:
         tournament.registered_players_count += 1
         if tournament.entry_fee > 0:
-            db.session.add(HashWalletTransaction(user_id=int(user_id), amount=-int(tournament.entry_fee), type="community-tournament-entry-fee", reference_id=str(tournament.id)))
+            _apply_wallet_transaction(user_id, -tournament.entry_fee, "community-tournament-entry-fee", tournament.id)
         _recalculate_prize_pool(tournament)
         if tournament.registered_players_count >= tournament.max_players:
             tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
@@ -571,7 +630,7 @@ def cancel_registration(user_id, tournament_id):
     if reg.payment_status == "paid" and reg.amount_paid:
         reg.payment_status = "refunded"
         reg.status = CommunityTournamentRegistrationStatus.REFUNDED
-        db.session.add(HashWalletTransaction(user_id=int(user_id), amount=int(reg.amount_paid), type="community-tournament-refund", reference_id=str(tournament.id)))
+        _apply_wallet_transaction(user_id, reg.amount_paid, "community-tournament-refund", tournament.id)
     tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
     _recalculate_prize_pool(tournament)
     sync_tournament_status(tournament)
@@ -593,6 +652,274 @@ def my_tournaments(user_id, role):
     return [{**t.to_dict(), "registration": r.to_dict()} for t, r in query.all()]
 
 
+def _owned_tournament(host_user_id, tournament_id, lock=False):
+    query = CommunityTournament.query.filter_by(id=tournament_id, host_user_id=int(host_user_id))
+    if lock:
+        query = query.with_for_update()
+    tournament = query.first()
+    if not tournament:
+        raise CommunityForbiddenError("You do not have permission to manage this tournament")
+    return tournament
+
+
+def _pagination(filters):
+    page = max(int(filters.get("page") or 1), 1)
+    per_page = min(max(int(filters.get("per_page") or filters.get("limit") or 50), 1), 100)
+    return page, per_page
+
+
+def _gamer_summaries(user_ids):
+    ids = {int(user_id) for user_id in user_ids if user_id is not None}
+    if not ids:
+        return {}
+    rows = User.query.with_entities(User.id, User.name, User.game_username, User.avatar_path).filter(User.id.in_(ids)).all()
+    return {
+        int(row.id): {
+            "id": int(row.id),
+            "display_name": row.name or "",
+            "game_username": row.game_username or "",
+            "avatar_url": row.avatar_path or None,
+        }
+        for row in rows
+    }
+
+
+def list_host_registrations(host_user_id, tournament_id, filters):
+    tournament = _owned_tournament(host_user_id, tournament_id)
+    page, per_page = _pagination(filters)
+    status = str(filters.get("status") or "").strip().lower()
+    valid_statuses = {
+        CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+        CommunityTournamentRegistrationStatus.CONFIRMED,
+        CommunityTournamentRegistrationStatus.CANCELLED,
+        CommunityTournamentRegistrationStatus.REFUNDED,
+    }
+    if status and status not in valid_statuses:
+        raise CommunityValidationError("invalid registration status")
+    query = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament.id)
+    if status:
+        query = query.filter_by(status=status)
+    total = query.count()
+    registrations = query.order_by(CommunityTournamentRegistration.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries(reg.user_id for reg in registrations)
+    return {
+        "items": [{**registration.to_dict(), "gamer": gamers.get(int(registration.user_id))} for registration in registrations],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def manage_registration(host_user_id, tournament_id, registration_id, payload):
+    tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
+    registration = CommunityTournamentRegistration.query.filter_by(id=registration_id, tournament_id=tournament.id).with_for_update().first()
+    if not registration:
+        raise CommunityValidationError("registration not found")
+    action = str(payload.get("action") or "").strip().lower()
+    if payload.get("payment_reference") is not None:
+        registration.payment_reference = str(payload.get("payment_reference") or "").strip() or None
+
+    sync_tournament_status(tournament)
+    if action == "confirm_payment":
+        if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+            raise CommunityConflictError("only pending-payment registrations can be confirmed")
+        if tournament.status not in {CommunityTournamentStatus.REGISTRATION_OPEN, CommunityTournamentStatus.REGISTRATION_CLOSED}:
+            raise CommunityConflictError("registration payment can no longer be confirmed")
+        if tournament.registered_players_count >= tournament.max_players:
+            raise CommunityConflictError("tournament is full")
+        if tournament.entry_fee > 0 and not registration.payment_reference:
+            raise CommunityValidationError("payment_reference is required to confirm a paid registration")
+        registration.status = CommunityTournamentRegistrationStatus.CONFIRMED
+        registration.payment_status = "paid"
+        tournament.registered_players_count += 1
+        if registration.amount_paid:
+            _apply_wallet_transaction(registration.user_id, -registration.amount_paid, "community-tournament-entry-fee", tournament.id)
+        _recalculate_prize_pool(tournament)
+        _notify(registration.user_id, "community_registration_confirmed", "Registration confirmed", f"Your registration for {tournament.title} is confirmed.", tournament.id)
+    elif action == "reject_payment":
+        if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+            raise CommunityConflictError("only pending-payment registrations can be rejected")
+        registration.status = CommunityTournamentRegistrationStatus.CANCELLED
+        registration.payment_status = "failed"
+        registration.cancelled_at = _now()
+        _notify(registration.user_id, "community_registration_rejected", "Registration payment rejected", f"Your registration for {tournament.title} could not be confirmed.", tournament.id)
+    elif action in {"check_in", "undo_check_in"}:
+        if registration.status != CommunityTournamentRegistrationStatus.CONFIRMED:
+            raise CommunityConflictError("only confirmed registrations can be checked in")
+        if tournament.status not in {CommunityTournamentStatus.REGISTRATION_CLOSED, CommunityTournamentStatus.LIVE}:
+            raise CommunityConflictError("check-in is not available yet")
+        registration.checked_in_at = _now() if action == "check_in" else None
+    elif action == "remove_participant":
+        if tournament.status in {CommunityTournamentStatus.LIVE, CommunityTournamentStatus.COMPLETED, CommunityTournamentStatus.CANCELLED}:
+            raise CommunityConflictError("participants cannot be removed after the tournament starts")
+        if registration.status not in {CommunityTournamentRegistrationStatus.PENDING_PAYMENT, CommunityTournamentRegistrationStatus.CONFIRMED}:
+            raise CommunityConflictError("registration is no longer active")
+        if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED:
+            tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
+        registration.cancelled_at = _now()
+        if registration.payment_status == "paid" and registration.amount_paid:
+            registration.status = CommunityTournamentRegistrationStatus.REFUNDED
+            registration.payment_status = "refunded"
+            _apply_wallet_transaction(registration.user_id, registration.amount_paid, "community-tournament-refund", tournament.id)
+        else:
+            registration.status = CommunityTournamentRegistrationStatus.CANCELLED
+        _recalculate_prize_pool(tournament)
+        _notify(registration.user_id, "community_registration_removed", "Registration cancelled", f"Your registration for {tournament.title} was cancelled by the host.", tournament.id)
+    else:
+        raise CommunityValidationError("action must be confirm_payment, reject_payment, check_in, undo_check_in, or remove_participant")
+
+    sync_tournament_status(tournament)
+    _audit("registration_managed", "community_tournament_registration", registration.id, host_user_id, metadata={"action": action})
+    db.session.commit()
+    return {**registration.to_dict(), "gamer": _gamer_summaries([registration.user_id]).get(int(registration.user_id))}
+
+
+def list_host_results(host_user_id, tournament_id, filters):
+    tournament = _owned_tournament(host_user_id, tournament_id)
+    page, per_page = _pagination(filters)
+    query = CommunityMatchResult.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityResultStatus.SUBMITTED, CommunityResultStatus.VERIFIED, CommunityResultStatus.REJECTED, CommunityResultStatus.ADMIN_OVERRIDDEN}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid result status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    results = query.order_by(CommunityMatchResult.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries([result.winner_user_id for result in results] + [result.submitted_by_user_id for result in results])
+    return {
+        "items": [
+            {
+                **result.to_dict(),
+                "winner": gamers.get(int(result.winner_user_id)) if result.winner_user_id else None,
+                "submitted_by": gamers.get(int(result.submitted_by_user_id)) if result.submitted_by_user_id else None,
+            }
+            for result in results
+        ],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_host_disputes(host_user_id, tournament_id, filters):
+    tournament = _owned_tournament(host_user_id, tournament_id)
+    page, per_page = _pagination(filters)
+    query = CommunityTournamentDispute.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityDisputeStatus.OPEN, CommunityDisputeStatus.UNDER_REVIEW, CommunityDisputeStatus.APPROVED, CommunityDisputeStatus.REJECTED, CommunityDisputeStatus.CLOSED}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid dispute status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    disputes = query.order_by(CommunityTournamentDispute.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries(dispute.reported_by_user_id for dispute in disputes)
+    return {
+        "items": [{**dispute.to_dict(), "reported_by": gamers.get(int(dispute.reported_by_user_id)) if dispute.reported_by_user_id else None} for dispute in disputes],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_host_payouts(host_user_id, tournament_id, filters):
+    tournament = _owned_tournament(host_user_id, tournament_id)
+    page, per_page = _pagination(filters)
+    query = CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityPayoutStatus.PENDING_ADMIN_APPROVAL, CommunityPayoutStatus.APPROVED, CommunityPayoutStatus.PAID, CommunityPayoutStatus.FAILED, CommunityPayoutStatus.CANCELLED}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid payout status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    payouts = query.order_by(CommunityTournamentPayout.rank.asc(), CommunityTournamentPayout.created_at.asc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries(payout.user_id for payout in payouts)
+    return {
+        "items": [{**payout.to_dict(), "gamer": gamers.get(int(payout.user_id))} for payout in payouts],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_admin_disputes(tournament_id, filters):
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    if not tournament:
+        raise CommunityValidationError("tournament not found")
+    page, per_page = _pagination(filters)
+    query = CommunityTournamentDispute.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityDisputeStatus.OPEN, CommunityDisputeStatus.UNDER_REVIEW, CommunityDisputeStatus.APPROVED, CommunityDisputeStatus.REJECTED, CommunityDisputeStatus.CLOSED}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid dispute status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    disputes = query.order_by(CommunityTournamentDispute.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries(dispute.reported_by_user_id for dispute in disputes)
+    return {
+        "items": [{**dispute.to_dict(), "reported_by": gamers.get(int(dispute.reported_by_user_id)) if dispute.reported_by_user_id else None} for dispute in disputes],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_admin_host_verifications(filters):
+    page, per_page = _pagination(filters)
+    query = CommunityHostVerification.query
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityHostStatus.PENDING, CommunityHostStatus.VERIFIED, CommunityHostStatus.REJECTED, CommunityHostStatus.SUSPENDED}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid host verification status")
+        query = query.filter_by(verification_status=status)
+    total = query.count()
+    verifications = query.order_by(CommunityHostVerification.created_at.asc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": [verification.to_dict() for verification in verifications],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_admin_payouts(tournament_id, filters):
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    if not tournament:
+        raise CommunityValidationError("tournament not found")
+    page, per_page = _pagination(filters)
+    query = CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    if status:
+        valid_statuses = {CommunityPayoutStatus.PENDING_ADMIN_APPROVAL, CommunityPayoutStatus.APPROVED, CommunityPayoutStatus.PAID, CommunityPayoutStatus.FAILED, CommunityPayoutStatus.CANCELLED}
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid payout status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    payouts = query.order_by(CommunityTournamentPayout.rank.asc(), CommunityTournamentPayout.created_at.asc()).offset((page - 1) * per_page).limit(per_page).all()
+    gamers = _gamer_summaries(payout.user_id for payout in payouts)
+    return {
+        "items": [{**payout.to_dict(), "gamer": gamers.get(int(payout.user_id))} for payout in payouts],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def review_payout(tournament_id, payout_id, payload, admin_id=None):
+    payout = CommunityTournamentPayout.query.filter_by(id=payout_id, tournament_id=tournament_id).with_for_update().first()
+    if not payout:
+        raise CommunityValidationError("payout not found")
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {CommunityPayoutStatus.APPROVED, CommunityPayoutStatus.PAID, CommunityPayoutStatus.FAILED, CommunityPayoutStatus.CANCELLED}:
+        raise CommunityValidationError("status must be approved, paid, failed, or cancelled")
+    if payout.status in {CommunityPayoutStatus.PAID, CommunityPayoutStatus.CANCELLED}:
+        raise CommunityConflictError("paid or cancelled payouts cannot be changed")
+    if status == CommunityPayoutStatus.PAID and payout.status != CommunityPayoutStatus.APPROVED:
+        raise CommunityConflictError("payout must be approved before it can be paid")
+
+    payout.status = status
+    if status == CommunityPayoutStatus.APPROVED:
+        payout.approved_by_admin_id = int(admin_id) if admin_id else None
+        payout.approved_at = _now()
+    elif status == CommunityPayoutStatus.PAID:
+        payout.paid_at = _now()
+        _apply_wallet_transaction(payout.user_id, payout.amount, "community-tournament-prize", payout.tournament_id)
+    _audit("payout_reviewed", "community_tournament_payout", payout.id, admin_id, "admin", {"status": status})
+    _notify(payout.user_id, "community_payout_updated", "Tournament payout updated", f"Your tournament payout is now {status}.", payout.tournament_id)
+    db.session.commit()
+    return payout
+
+
 def submit_match_result(user_id, tournament_id, payload):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
@@ -600,11 +927,24 @@ def submit_match_result(user_id, tournament_id, payload):
     registered = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament.id, user_id=int(user_id), status=CommunityTournamentRegistrationStatus.CONFIRMED).first()
     if int(tournament.host_user_id) != int(user_id) and not registered:
         raise CommunityForbiddenError("only host or registered players can submit results")
+    try:
+        winner_user_id = int(payload["winner_user_id"]) if payload.get("winner_user_id") else None
+        rank = int(payload["rank"]) if payload.get("rank") else None
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError("winner_user_id and rank must be integers") from exc
+    if winner_user_id and not CommunityTournamentRegistration.query.filter_by(
+        tournament_id=tournament.id,
+        user_id=winner_user_id,
+        status=CommunityTournamentRegistrationStatus.CONFIRMED,
+    ).first():
+        raise CommunityValidationError("winner_user_id must be a confirmed tournament participant")
+    if rank is not None and rank <= 0:
+        raise CommunityValidationError("rank must be positive")
     result = CommunityMatchResult(
         tournament_id=tournament.id,
         submitted_by_user_id=int(user_id),
-        winner_user_id=int(payload["winner_user_id"]) if payload.get("winner_user_id") else None,
-        rank=int(payload["rank"]) if payload.get("rank") else None,
+        winner_user_id=winner_user_id,
+        rank=rank,
         score=str(payload.get("score") or "").strip() or None,
         evidence_asset_ids=payload.get("evidence_asset_ids") or [],
         stream_url=str(payload.get("stream_url") or "").strip() or None,
@@ -683,6 +1023,9 @@ def submit_winners(host_user_id, tournament_id, winners):
     tournament = CommunityTournament.query.filter_by(id=tournament_id, host_user_id=int(host_user_id)).with_for_update().first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
+    sync_tournament_status(tournament)
+    if tournament.status not in {CommunityTournamentStatus.LIVE, CommunityTournamentStatus.COMPLETED}:
+        raise CommunityConflictError("winners can only be submitted after the tournament starts")
     if not isinstance(winners, list) or not winners:
         raise CommunityValidationError("winners must be a non-empty list")
     existing = CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).first()
@@ -690,21 +1033,48 @@ def submit_winners(host_user_id, tournament_id, winners):
         raise CommunityConflictError("winners already submitted")
 
     distribution = tournament.prize_distribution or []
+    payout_rows = []
+    winner_user_ids = set()
+    ranks = set()
+    total_payout = Decimal("0.00")
     for idx, winner in enumerate(winners):
-        rank = int(winner.get("rank") or idx + 1)
+        try:
+            winner_user_id = int(winner["user_id"])
+            rank = int(winner.get("rank") or idx + 1)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CommunityValidationError("each winner requires a valid user_id and rank") from exc
+        if rank <= 0 or rank in ranks:
+            raise CommunityValidationError("winner ranks must be unique positive integers")
+        if winner_user_id in winner_user_ids:
+            raise CommunityValidationError("a participant can only receive one payout")
+        confirmed_registration = CommunityTournamentRegistration.query.filter_by(
+            tournament_id=tournament.id,
+            user_id=winner_user_id,
+            status=CommunityTournamentRegistrationStatus.CONFIRMED,
+        ).first()
+        if not confirmed_registration:
+            raise CommunityValidationError("winners must be confirmed tournament participants")
         amount = _money(winner.get("amount", 0), "winner amount")
         if amount == 0 and rank <= len(distribution):
             share = Decimal(str(distribution[rank - 1].get("percent", 0))) / Decimal("100")
             amount = (Decimal(str(tournament.prize_pool or 0)) * share).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        payout = CommunityTournamentPayout(
-            tournament_id=tournament.id,
-            user_id=int(winner["user_id"]),
-            rank=rank,
-            amount=amount,
-            currency=tournament.currency,
-            status=CommunityPayoutStatus.PENDING_ADMIN_APPROVAL,
+        winner_user_ids.add(winner_user_id)
+        ranks.add(rank)
+        total_payout += amount
+        payout_rows.append((winner_user_id, rank, amount))
+    if total_payout > Decimal(str(tournament.prize_pool or 0)):
+        raise CommunityValidationError("winner payout total cannot exceed the tournament prize pool")
+    for winner_user_id, rank, amount in payout_rows:
+        db.session.add(
+            CommunityTournamentPayout(
+                tournament_id=tournament.id,
+                user_id=winner_user_id,
+                rank=rank,
+                amount=amount,
+                currency=tournament.currency,
+                status=CommunityPayoutStatus.PENDING_ADMIN_APPROVAL,
+            )
         )
-        db.session.add(payout)
     tournament.status = CommunityTournamentStatus.COMPLETED
     _audit("winners_submitted", "community_tournament", tournament.id, host_user_id, metadata={"winner_count": len(winners)})
     db.session.commit()
