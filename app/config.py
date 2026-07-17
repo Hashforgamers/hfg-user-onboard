@@ -68,6 +68,7 @@ class Config:
     # Community tournament host program
     COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE = float(os.getenv("COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE", "199") or 199)
     COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK = int(os.getenv("COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK", "3") or 3)
+    COMMUNITY_ADMIN_TOKEN = os.getenv("COMMUNITY_ADMIN_TOKEN", "dev")
 
     # Auth performance + logging controls
     AUTH_DEBUG_LOGS = os.getenv("AUTH_DEBUG_LOGS", "false").lower() in ("true", "1", "t", "yes", "y")
