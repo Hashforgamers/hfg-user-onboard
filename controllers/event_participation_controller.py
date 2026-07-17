@@ -19,6 +19,7 @@ from models.communityTournament import (
     CommunityTournament,
     CommunityTournamentRegistration,
     CommunityTournamentRegistrationStatus,
+    CommunityTournamentStatus,
 )
 from services.community_tournament_service import (
     CommunityConflictError,
@@ -155,6 +156,26 @@ def _legacy_community_registration_response(tournament_id, body):
         "registration": registration.to_dict(),
         "already_registered": False,
     }), 201
+
+
+def _legacy_community_registrations(user_id, event_id=None):
+    query = (
+        db.session.query(CommunityTournamentRegistration, CommunityTournament, User)
+        .join(CommunityTournament, CommunityTournament.id == CommunityTournamentRegistration.tournament_id)
+        .join(User, User.id == CommunityTournamentRegistration.user_id)
+        .filter(
+            CommunityTournamentRegistration.user_id == int(user_id),
+            CommunityTournamentRegistration.status.in_({
+                CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+                CommunityTournamentRegistrationStatus.CONFIRMED,
+            }),
+            CommunityTournament.visibility.is_(True),
+            CommunityTournament.status != CommunityTournamentStatus.CANCELLED,
+        )
+    )
+    if event_id:
+        query = query.filter(CommunityTournament.id == event_id)
+    return query.order_by(CommunityTournament.tournament_start_at.asc(), CommunityTournamentRegistration.created_at.asc()).all()
 
 @event_participation_bp.post("/events/<uuid:event_id>/teams")
 def create_team(event_id):
@@ -753,12 +774,6 @@ def get_user_teams(user_id):
     """
     event_id = request.args.get("event_id")
 
-    cache_key = f"user-teams:{int(user_id)}:{event_id or ''}"
-    now_ts = time.time()
-    cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
-    if cached and cached["expires_at"] > now_ts:
-        return jsonify(cached["payload"]), 200
-
     params = {"user_id": int(user_id), "event_id": str(event_id) if event_id else None}
     rows = db.session.execute(text("""
         SELECT
@@ -781,10 +796,6 @@ def get_user_teams(user_id):
         ORDER BY tm.joined_at DESC
     """), params).mappings().all()
 
-    if not rows:
-        _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": [], "expires_at": now_ts + 30}
-        return jsonify([]), 200
-
     result = []
     for row in rows:
         result.append({
@@ -795,20 +806,30 @@ def get_user_teams(user_id):
             "role":           row["role"],
             "joined_at":      row["joined_at"].isoformat() if row["joined_at"] else None,
             "member_count":   int(row["member_count"] or 0),
+            "source": "cafe",
         })
 
-    _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": result, "expires_at": now_ts + 30}
+    for registration, tournament, user in _legacy_community_registrations(user_id, event_id):
+        result.append({
+            "team_id": str(registration.id),
+            "team_name": user.game_username or user.name or "Solo entry",
+            "event_id": str(tournament.id),
+            "is_individual": tournament.team_mode == "solo",
+            "role": "player",
+            "joined_at": registration.created_at.isoformat() if registration.created_at else None,
+            "member_count": 1,
+            "source": "community",
+            "registration_id": str(registration.id),
+            "registration_status": registration.status,
+            "payment_status": registration.payment_status,
+        })
+
+    result.sort(key=lambda item: item.get("joined_at") or "", reverse=True)
     return jsonify(result), 200
 
 
 @event_participation_bp.get("/users/<int:user_id>/tournaments/joined")
 def get_user_joined_tournaments(user_id):
-    cache_key = f"user-tournaments:{int(user_id)}"
-    now_ts = time.time()
-    cached = _EVENT_PARTICIPATION_CACHE.get(cache_key)
-    if cached and cached["expires_at"] > now_ts:
-        return jsonify(cached["payload"]), 200
-
     rows = (
         db.session.query(TeamMember, Team, Event)
         .join(Team, Team.id == TeamMember.team_id)
@@ -822,16 +843,15 @@ def get_user_joined_tournaments(user_id):
     )
 
     grouped = {"live": [], "upcoming": [], "completed": []}
-    if not rows:
-        return jsonify(grouped), 200
-
     team_ids = [team.id for _, team, _ in rows]
-    reg_rows = (
-        Registration.query
-        .filter(Registration.team_id.in_(team_ids))
-        .order_by(Registration.created_at.desc())
-        .all()
-    )
+    reg_rows = []
+    if team_ids:
+        reg_rows = (
+            Registration.query
+            .filter(Registration.team_id.in_(team_ids))
+            .order_by(Registration.created_at.desc())
+            .all()
+        )
 
     latest_reg_by_team = {}
     for reg in reg_rows:
@@ -847,6 +867,7 @@ def get_user_joined_tournaments(user_id):
         if event_key not in grouped_map[flag]:
             grouped_map[flag][event_key] = {
                 "id": str(event.id),
+                "source": "cafe",
                 "vendor_id": event.vendor_id,
                 "title": event.title,
                 "description": event.description,
@@ -880,9 +901,49 @@ def get_user_joined_tournaments(user_id):
             "registered_at": reg.created_at.isoformat() if reg and reg.created_at else None
         })
 
+    for registration, tournament, user in _legacy_community_registrations(user_id):
+        end_at = tournament.tournament_end_at or tournament.tournament_start_at
+        flag = "completed" if tournament.status == CommunityTournamentStatus.COMPLETED else _event_flag(tournament.tournament_start_at, end_at)
+        event_key = str(tournament.id)
+        if event_key not in grouped_map[flag]:
+            grouped_map[flag][event_key] = {
+                "id": str(tournament.id),
+                "source": "community",
+                "vendor_id": None,
+                "host_user_id": int(tournament.host_user_id),
+                "title": tournament.title,
+                "description": tournament.description,
+                "start_at": tournament.tournament_start_at.isoformat() if tournament.tournament_start_at else None,
+                "end_at": end_at.isoformat() if end_at else None,
+                "registration_fee": float(tournament.entry_fee or 0),
+                "currency": tournament.currency,
+                "game": tournament.game,
+                "format": tournament.tournament_type,
+                "prize_pool": float(tournament.prize_pool or 0),
+                "team_size": 1 if tournament.team_mode == "solo" else None,
+                "match_rules": tournament.rules,
+                "region": None,
+                "server": None,
+                "map_pool": [],
+                "veto_mode": "none",
+                "banner_image_url": tournament.banner_url,
+                "flag": flag,
+                "teams": [],
+            }
+        grouped_map[flag][event_key]["teams"].append({
+            "team_id": str(registration.id),
+            "team_name": user.game_username or user.name or "Solo entry",
+            "is_individual": tournament.team_mode == "solo",
+            "role": "player",
+            "joined_at": registration.created_at.isoformat() if registration.created_at else None,
+            "registration_id": str(registration.id),
+            "registration_status": registration.status,
+            "payment_status": registration.payment_status,
+            "registered_at": registration.created_at.isoformat() if registration.created_at else None,
+        })
+
     grouped["live"] = list(grouped_map["live"].values())
     grouped["upcoming"] = list(grouped_map["upcoming"].values())
     grouped["completed"] = list(grouped_map["completed"].values())
 
-    _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": grouped, "expires_at": now_ts + 30}
     return jsonify(grouped), 200

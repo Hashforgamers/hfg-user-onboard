@@ -27,6 +27,7 @@ Use `source` to decide where to route user actions:
 
 Legacy compatibility:
 - Existing app clients that still call `POST /api/events/<id>/teams` and then `POST /api/events/<id>/register` are bridged for community `team_mode = "solo"` tournaments. The backend creates or reuses the community registration and returns its UUID as a temporary `team_id` alias.
+- Existing app clients using `GET /api/users/<user_id>/tournaments/joined` or `GET /api/users/<user_id>/teams` now receive community registrations in the legacy response shape as well. Check `source = "community"`; the temporary `team_id` is the community registration ID.
 - New frontend work must use `POST /api/v1/community/tournaments/<id>/registrations` for community tournaments. Team routes remain the cafe contract and cannot support community team-mode tournaments.
 
 ## Public Feed
