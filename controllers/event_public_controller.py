@@ -201,6 +201,80 @@ def list_public_events():
     return jsonify(payload), 200
 
 
+@event_public_bp.get("/gamers/<int:user_id>/profile")
+def get_public_gamer_profile(user_id):
+    """Public, display-safe gamer profile for tournament screens."""
+    row = db.session.execute(text("""
+        SELECT
+            u.id,
+            u.name AS display_name,
+            u.game_username,
+            u.avatar_path AS avatar_url,
+            u.created_at AS member_since,
+            COALESCE(registrations.tournaments_joined, 0)::int AS tournaments_joined,
+            COALESCE(hosted.tournaments_hosted, 0)::int AS tournaments_hosted,
+            COALESCE(hosted.tournaments_completed, 0)::int AS tournaments_completed,
+            COALESCE(results.wins, 0)::int AS wins,
+            COALESCE(results.podium_finishes, 0)::int AS podium_finishes,
+            CASE WHEN hv.verification_status = 'verified' THEN true ELSE false END AS is_verified_host,
+            CASE WHEN hv.verification_status = 'verified' THEN hv.host_tier ELSE NULL END AS host_tier,
+            CASE WHEN hv.verification_status = 'verified' THEN hv.average_rating ELSE NULL END AS average_rating,
+            CASE WHEN hv.verification_status = 'verified' THEN hv.completion_rate ELSE NULL END AS completion_rate,
+            CASE WHEN hv.verification_status = 'verified' THEN hv.on_time_payout_rate ELSE NULL END AS on_time_payout_rate
+        FROM users u
+        LEFT JOIN community_host_verifications hv ON hv.user_id = u.id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS tournaments_joined
+            FROM community_tournament_registrations ctr
+            WHERE ctr.user_id = u.id
+              AND ctr.status = 'confirmed'
+        ) registrations ON true
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) AS tournaments_hosted,
+                COUNT(*) FILTER (WHERE ct.status = 'completed') AS tournaments_completed
+            FROM community_tournaments ct
+            WHERE ct.host_user_id = u.id
+        ) hosted ON true
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) FILTER (WHERE ctp.rank = 1) AS wins,
+                COUNT(*) FILTER (WHERE ctp.rank BETWEEN 1 AND 3) AS podium_finishes
+            FROM community_tournament_payouts ctp
+            WHERE ctp.user_id = u.id
+              AND ctp.status NOT IN ('cancelled', 'failed')
+        ) results ON true
+        WHERE u.id = :user_id
+          AND u.parent_type = 'user'
+        LIMIT 1
+    """), {"user_id": user_id}).mappings().first()
+
+    if not row:
+        return jsonify({"message": "Gamer not found"}), 404
+
+    return jsonify({
+        "id": int(row["id"]),
+        "display_name": row["display_name"] or "",
+        "game_username": row["game_username"] or "",
+        "avatar_url": row["avatar_url"] or None,
+        "member_since": row["member_since"].isoformat() if row["member_since"] else None,
+        "tournament_stats": {
+            "tournaments_joined": int(row["tournaments_joined"]),
+            "tournaments_hosted": int(row["tournaments_hosted"]),
+            "tournaments_completed": int(row["tournaments_completed"]),
+            "wins": int(row["wins"]),
+            "podium_finishes": int(row["podium_finishes"]),
+        },
+        "host": {
+            "is_verified": bool(row["is_verified_host"]),
+            "tier": row["host_tier"],
+            "average_rating": float(row["average_rating"]) if row["average_rating"] is not None else None,
+            "completion_rate": float(row["completion_rate"]) if row["completion_rate"] is not None else None,
+            "on_time_payout_rate": float(row["on_time_payout_rate"]) if row["on_time_payout_rate"] is not None else None,
+        },
+    }), 200
+
+
 @event_public_bp.get("/events/<uuid:event_id>")
 def get_event(event_id):
     """
@@ -376,7 +450,134 @@ def get_event_leaderboard(event_id):
     if cached and cached["expires_at"] > now_ts:
         return jsonify(cached["payload"]), 200
 
-    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+    e = Event.query.filter_by(id=event_id, visibility=True).first()
+    if not e:
+        community_tournament = db.session.execute(
+            text("""
+                SELECT id, title
+                FROM community_tournaments
+                WHERE id = :event_id
+                  AND visibility = true
+                  AND status IN ('published', 'registration_open', 'registration_closed', 'live', 'completed')
+                LIMIT 1
+            """),
+            {"event_id": str(event_id)},
+        ).mappings().first()
+        if not community_tournament:
+            payload = {
+                "event_id": str(event_id),
+                "event_title": None,
+                "source": None,
+                "stage": "provisional" if stage == "auto" else stage,
+                "availability": "not_available_yet",
+                "leaderboard": [],
+            }
+            if len(_EVENT_PUBLIC_CACHE) >= _EVENT_PUBLIC_CACHE_MAX_SIZE:
+                _EVENT_PUBLIC_CACHE.pop(next(iter(_EVENT_PUBLIC_CACHE)))
+            _EVENT_PUBLIC_CACHE[cache_key] = {"payload": payload, "expires_at": now_ts + cache_ttl_sec}
+            return jsonify(payload), 200
+
+        def _fetch_community_winners():
+            return db.session.execute(
+                text("""
+                    SELECT
+                        p.user_id,
+                        u.name AS user_name,
+                        u.game_username,
+                        p.rank,
+                        p.amount,
+                        p.currency,
+                        p.status,
+                        p.created_at
+                    FROM community_tournament_payouts p
+                    LEFT JOIN users u ON u.id = p.user_id
+                    WHERE p.tournament_id = :event_id
+                      AND p.status NOT IN ('cancelled', 'failed')
+                    ORDER BY p.rank ASC NULLS LAST, p.amount DESC, u.name ASC
+                """),
+                {"event_id": str(event_id)},
+            ).mappings().all()
+
+        def _fetch_community_provisional():
+            return db.session.execute(
+                text("""
+                    SELECT DISTINCT ON (COALESCE(r.rank, 2147483647), r.winner_user_id, r.id)
+                        r.id AS result_id,
+                        r.winner_user_id AS user_id,
+                        u.name AS user_name,
+                        u.game_username,
+                        r.rank,
+                        r.score,
+                        r.status,
+                        r.verified_at,
+                        r.created_at
+                    FROM community_match_results r
+                    LEFT JOIN users u ON u.id = r.winner_user_id
+                    WHERE r.tournament_id = :event_id
+                      AND r.status IN ('verified', 'admin_overridden')
+                      AND (r.rank IS NOT NULL OR r.winner_user_id IS NOT NULL)
+                    ORDER BY COALESCE(r.rank, 2147483647), r.winner_user_id, r.id, r.verified_at DESC NULLS LAST
+                """),
+                {"event_id": str(event_id)},
+            ).mappings().all()
+
+        selected_stage = stage
+        rows = []
+        if stage == "auto":
+            rows = _fetch_community_winners()
+            if rows:
+                selected_stage = "winners"
+            else:
+                rows = _fetch_community_provisional()
+                selected_stage = "provisional"
+        elif stage == "winners":
+            rows = _fetch_community_winners()
+        else:
+            rows = _fetch_community_provisional()
+
+        if selected_stage == "winners":
+            leaderboard = [
+                {
+                    "team_id": None,
+                    "team_name": r["game_username"] or r["user_name"] or f"User {r['user_id']}",
+                    "user_id": int(r["user_id"]),
+                    "user_name": r["user_name"],
+                    "game_username": r["game_username"],
+                    "rank": int(r["rank"]) if r["rank"] is not None else None,
+                    "amount": float(r["amount"] or 0),
+                    "currency": r["currency"],
+                    "payout_status": r["status"],
+                }
+                for r in rows
+            ]
+        else:
+            leaderboard = [
+                {
+                    "team_id": None,
+                    "team_name": r["game_username"] or r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else "Unassigned"),
+                    "user_id": int(r["user_id"]) if r["user_id"] else None,
+                    "user_name": r["user_name"],
+                    "game_username": r["game_username"],
+                    "rank": int(r["rank"]) if r["rank"] is not None else None,
+                    "score": r["score"],
+                    "result_id": str(r["result_id"]),
+                    "result_status": r["status"],
+                }
+                for r in rows
+            ]
+
+        payload = {
+            "event_id": str(community_tournament["id"]),
+            "event_title": community_tournament["title"],
+            "source": "community",
+            "stage": selected_stage,
+            "availability": "available" if leaderboard else "not_available_yet",
+            "leaderboard": leaderboard,
+        }
+        if len(_EVENT_PUBLIC_CACHE) >= _EVENT_PUBLIC_CACHE_MAX_SIZE:
+            _EVENT_PUBLIC_CACHE.pop(next(iter(_EVENT_PUBLIC_CACHE)))
+        _EVENT_PUBLIC_CACHE[cache_key] = {"payload": payload, "expires_at": now_ts + cache_ttl_sec}
+        return jsonify(payload), 200
 
     def _fetch_rows(table_name, rank_column):
         sql = text(f"""
@@ -409,11 +610,14 @@ def get_event_leaderboard(event_id):
     payload = {
         "event_id": str(e.id),
         "event_title": e.title,
+        "source": "cafe",
         "stage": selected_stage,
+        "availability": "available" if rows else "not_available_yet",
         "leaderboard": [
             {
                 "team_id": str(r["team_id"]),
                 "team_name": r["team_name"],
+                "user_id": None,
                 "rank": int(r["rank"])
             }
             for r in rows
@@ -438,7 +642,73 @@ def get_event_provisional_results(event_id):
     if cached and cached["expires_at"] > now_ts:
         return jsonify(cached["payload"]), 200
 
-    e = Event.query.filter_by(id=event_id, visibility=True).first_or_404()
+    e = Event.query.filter_by(id=event_id, visibility=True).first()
+    if not e:
+        community_tournament = db.session.execute(
+            text("""
+                SELECT id, title
+                FROM community_tournaments
+                WHERE id = :event_id
+                  AND visibility = true
+                  AND status IN ('published', 'registration_open', 'registration_closed', 'live', 'completed')
+                LIMIT 1
+            """),
+            {"event_id": str(event_id)},
+        ).mappings().first()
+        if not community_tournament:
+            return jsonify({"message": "Not Found"}), 404
+
+        rows = db.session.execute(
+            text("""
+                SELECT
+                    r.id,
+                    r.tournament_id AS event_id,
+                    r.winner_user_id AS user_id,
+                    u.name AS user_name,
+                    u.game_username,
+                    r.rank AS proposed_rank,
+                    r.submitted_by_user_id,
+                    r.score,
+                    r.status,
+                    COALESCE(r.verified_at, r.created_at) AS published_at
+                FROM community_match_results r
+                LEFT JOIN users u ON u.id = r.winner_user_id
+                WHERE r.tournament_id = :event_id
+                  AND r.status IN ('verified', 'admin_overridden')
+                  AND (r.rank IS NOT NULL OR r.winner_user_id IS NOT NULL)
+                ORDER BY COALESCE(r.rank, 2147483647), u.name ASC, r.created_at ASC
+            """),
+            {"event_id": str(event_id)}
+        ).mappings().all()
+
+        payload = {
+            "event_id": str(community_tournament["id"]),
+            "event_title": community_tournament["title"],
+            "source": "community",
+            "result_type": "provisional",
+            "results": [
+                {
+                    "id": str(r["id"]),
+                    "event_id": str(r["event_id"]),
+                    "team_id": None,
+                    "team_name": r["game_username"] or r["user_name"] or (f"User {r['user_id']}" if r["user_id"] else "Unassigned"),
+                    "user_id": int(r["user_id"]) if r["user_id"] else None,
+                    "user_name": r["user_name"],
+                    "game_username": r["game_username"],
+                    "proposed_rank": int(r["proposed_rank"]) if r["proposed_rank"] is not None else None,
+                    "submitted_by_vendor": None,
+                    "submitted_by_user_id": int(r["submitted_by_user_id"]) if r["submitted_by_user_id"] else None,
+                    "score": r["score"],
+                    "status": r["status"],
+                    "published_at": r["published_at"].isoformat() if r["published_at"] else None
+                }
+                for r in rows
+            ]
+        }
+        if len(_EVENT_PUBLIC_CACHE) >= _EVENT_PUBLIC_CACHE_MAX_SIZE:
+            _EVENT_PUBLIC_CACHE.pop(next(iter(_EVENT_PUBLIC_CACHE)))
+        _EVENT_PUBLIC_CACHE[cache_key] = {"payload": payload, "expires_at": now_ts + cache_ttl_sec}
+        return jsonify(payload), 200
 
     rows = db.session.execute(
         text("""
@@ -461,6 +731,7 @@ def get_event_provisional_results(event_id):
     payload = {
         "event_id": str(e.id),
         "event_title": e.title,
+        "source": "cafe",
         "result_type": "provisional",
         "results": [
             {
