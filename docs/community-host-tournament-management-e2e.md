@@ -128,7 +128,7 @@ Send only changed fields. Editable fields are:
 - `title`, `description`, `banner_url`, `banner_asset_id`, `game`, `tournament_type`, `team_mode`
 - `entry_fee`, `currency`, `max_players`, `visibility`
 - `registration_start_at`, `registration_end_at`, `tournament_start_at`, `tournament_end_at`
-- `rules`, `prize_distribution`, `discord_link`, `whatsapp_link`, `room_details`
+- `rules`, `prize_distribution`, `discord_link`, `whatsapp_link`, `room_details`, `room_details_data`
 - `status`: only `draft` or `published`
 
 ```json
@@ -136,6 +136,11 @@ Send only changed fields. Editable fields are:
   "banner_asset_id": "asset-uuid",
   "discord_link": "https://discord.gg/example",
   "room_details": "Room ID: 12345, password: 6789",
+  "room_details_data": {
+    "schema_version": 1,
+    "join": {"method": "in_game", "lobby_id": "12345", "access_code": "6789", "server_region": "Mumbai"},
+    "custom_fields": [{"label": "Map", "value": "Erangel"}]
+  },
   "status": "published"
 }
 ```

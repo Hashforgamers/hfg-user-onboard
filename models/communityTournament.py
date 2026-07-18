@@ -126,6 +126,7 @@ class CommunityTournament(db.Model):
     discord_link = Column(Text, nullable=True)
     whatsapp_link = Column(Text, nullable=True)
     room_details = Column(Text, nullable=True)
+    room_details_data = Column(JSONB, nullable=True)
     room_details_published_at = Column(DateTime(timezone=True), nullable=True)
     visibility = Column(Boolean, nullable=False, default=True, index=True)
     is_featured = Column(Boolean, nullable=False, default=False, index=True)
@@ -190,6 +191,7 @@ class CommunityTournament(db.Model):
         }
         if include_room_details:
             payload["room_details"] = self.room_details
+            payload["room_details_data"] = self.room_details_data
         return payload
 
 

@@ -130,7 +130,29 @@ Payout:
 }
 ```
 
-`room_details` is returned only when the requester is the host or has a confirmed registration. Public detail/list responses do not include it.
+`room_details` and `room_details_data` are returned only when the requester is the host or has a confirmed registration. Public detail/list responses do not include either field.
+
+`room_details_data` is a game-neutral object. Use the shared keys when present, but preserve and render unknown keys rather than assuming a particular game:
+
+```json
+{
+  "schema_version": 1,
+  "join": {
+    "method": "in_game",
+    "lobby_id": "12345",
+    "access_code": "6789",
+    "join_url": null,
+    "server_region": "Mumbai",
+    "instructions": "Join 10 minutes before start."
+  },
+  "schedule": {
+    "opens_at": "2026-07-25T09:50:00Z",
+    "check_in_at": "2026-07-25T09:55:00Z"
+  },
+  "contacts": [{"channel": "Discord", "value": "https://discord.gg/example"}],
+  "custom_fields": [{"label": "Tournament code", "value": "ABCD"}]
+}
+```
 
 ### Registration
 ```json
