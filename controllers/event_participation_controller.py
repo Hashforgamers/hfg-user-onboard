@@ -24,6 +24,7 @@ from models.communityTournament import (
 from services.community_tournament_service import (
     CommunityConflictError,
     CommunityValidationError,
+    record_community_registration_payment,
     register_for_tournament,
 )
 from services.payment_service import create_payment_intent, verify_payment_success, verify_webhook
@@ -42,6 +43,15 @@ def _mark_registration_payment(reg, status):
     reg.status = "confirmed" if status == "succeeded" else "pending"
     _invalidate_participation_cache(event_id=reg.event_id, team_id=reg.team_id)
     db.session.commit()
+
+
+def _payment_reference(body):
+    return (
+        body.get("payment_reference")
+        or body.get("razorpay_payment_id")
+        or body.get("payment_id")
+        or body.get("transaction_id")
+    )
 
 
 def _event_flag(start_at, end_at):
@@ -676,12 +686,24 @@ def payment_webhook():
         return jsonify({"error": "invalid signature"}), 400
 
     reg = Registration.query.filter_by(id=reg_id).first()
-    if not reg:
-        return jsonify({"error": "registration not found"}), 404
-
-    _mark_registration_payment(reg, status)
-
-    return jsonify({"ok": True, "registration_id": str(reg.id), "payment_status": reg.payment_status, "status": reg.status}), 200
+    if reg:
+        _mark_registration_payment(reg, status)
+        return jsonify({"ok": True, "registration_id": str(reg.id), "payment_status": reg.payment_status, "status": reg.status, "source": "cafe"}), 200
+    try:
+        community_registration = record_community_registration_payment(reg_id, status)
+    except CommunityValidationError as exc:
+        if str(exc) == "community registration not found":
+            return jsonify({"error": "registration not found"}), 404
+        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 400
+    except CommunityConflictError as exc:
+        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 409
+    return jsonify({
+        "ok": True,
+        "registration_id": str(community_registration.id),
+        "payment_status": community_registration.payment_status,
+        "status": community_registration.status,
+        "source": "community",
+    }), 200
 
 @event_participation_bp.post("/payments/verify")
 def verify_payment():
@@ -691,15 +713,29 @@ def verify_payment():
         return jsonify({"error": "payment verification failed"}), 400
 
     reg = Registration.query.filter_by(id=reg_id).first()
-    if not reg:
-        return jsonify({"error": "registration not found"}), 404
-
-    _mark_registration_payment(reg, status)
+    if reg:
+        _mark_registration_payment(reg, status)
+        return jsonify({
+            "ok": True,
+            "registration_id": str(reg.id),
+            "payment_status": reg.payment_status,
+            "status": reg.status,
+            "source": "cafe",
+        }), 200
+    try:
+        community_registration = record_community_registration_payment(reg_id, status, _payment_reference(body))
+    except CommunityValidationError as exc:
+        if str(exc) == "community registration not found":
+            return jsonify({"error": "registration not found"}), 404
+        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 400
+    except CommunityConflictError as exc:
+        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 409
     return jsonify({
         "ok": True,
-        "registration_id": str(reg.id),
-        "payment_status": reg.payment_status,
-        "status": reg.status,
+        "registration_id": str(community_registration.id),
+        "payment_status": community_registration.payment_status,
+        "status": community_registration.status,
+        "source": "community",
     }), 200
 
 @event_participation_bp.get("/events/<uuid:event_id>/teams/<uuid:team_id>/members")
