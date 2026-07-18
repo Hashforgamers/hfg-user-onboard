@@ -181,7 +181,7 @@ The authenticated detail response includes `room_details` for the host.
 }
 ```
 
-Free registrations are immediately `confirmed`. Paid registrations with no payment reference are `pending_payment`; a paid registration with a payment reference is confirmed immediately by the current flow.
+Free registrations are immediately `confirmed`. Paid registrations with no payment reference are `pending_payment` until the existing payment callback confirms them. The app must call `POST /api/payments/verify` after provider success (or rely on `POST /api/payments/webhook`); both endpoints now settle cafe and community registration IDs. A paid registration with a payment reference remains supported for the existing direct-confirmation flow.
 
 ### Host Roster
 

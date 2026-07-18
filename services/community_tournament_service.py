@@ -615,6 +615,52 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None):
     return reg
 
 
+def record_community_registration_payment(registration_id, status, payment_reference=None):
+    """Apply a verified payment-provider result exactly once to a community registration."""
+    registration = CommunityTournamentRegistration.query.filter_by(id=registration_id).with_for_update().first()
+    if not registration:
+        raise CommunityValidationError("community registration not found")
+    if registration.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
+        raise CommunityConflictError("payment cannot be applied to a cancelled registration")
+
+    if payment_reference:
+        registration.payment_reference = str(payment_reference).strip()[:120] or registration.payment_reference
+    if status != "succeeded":
+        if registration.status == CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+            registration.payment_status = "failed"
+            _audit("registration_payment_failed", "community_tournament_registration", registration.id, registration.user_id)
+            db.session.commit()
+        return registration
+
+    if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED and registration.payment_status == "paid":
+        return registration
+    if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+        raise CommunityConflictError("registration cannot be confirmed from its current state")
+
+    tournament = CommunityTournament.query.filter_by(id=registration.tournament_id).with_for_update().first()
+    if not tournament:
+        raise CommunityValidationError("tournament not found")
+    sync_tournament_status(tournament)
+    if tournament.status not in {CommunityTournamentStatus.REGISTRATION_OPEN, CommunityTournamentStatus.REGISTRATION_CLOSED}:
+        raise CommunityConflictError("registration is not open")
+    if tournament.registered_players_count >= tournament.max_players:
+        tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
+        raise CommunityConflictError("tournament is full")
+
+    registration.status = CommunityTournamentRegistrationStatus.CONFIRMED
+    registration.payment_status = "paid"
+    tournament.registered_players_count += 1
+    if registration.amount_paid:
+        _apply_wallet_transaction(registration.user_id, -registration.amount_paid, "community-tournament-entry-fee", tournament.id)
+    _recalculate_prize_pool(tournament)
+    if tournament.registered_players_count >= tournament.max_players:
+        tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
+    _audit("registration_payment_confirmed", "community_tournament_registration", registration.id, registration.user_id)
+    _notify(registration.user_id, "community_registration_confirmed", "Registration confirmed", f"Your registration for {tournament.title} is confirmed.", tournament.id)
+    db.session.commit()
+    return registration
+
+
 def cancel_registration(user_id, tournament_id):
     reg = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament_id, user_id=int(user_id)).with_for_update().first()
     if not reg or reg.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
