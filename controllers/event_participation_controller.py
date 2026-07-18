@@ -54,6 +54,66 @@ def _payment_reference(body):
     )
 
 
+def _iso(value):
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def _legacy_community_tournament_payload(tournament):
+    end_at = tournament.tournament_end_at or tournament.tournament_start_at
+    return {
+        "id": str(tournament.id),
+        "source": "community",
+        "host_user_id": int(tournament.host_user_id),
+        "title": tournament.title,
+        "description": tournament.description,
+        "status": tournament.status,
+        "flag": "completed" if tournament.status == CommunityTournamentStatus.COMPLETED else _event_flag(tournament.tournament_start_at, end_at),
+        "start_at": _iso(tournament.tournament_start_at),
+        "end_at": _iso(end_at),
+        "registration_deadline": _iso(tournament.registration_end_at),
+        "registration_fee": float(tournament.entry_fee or 0),
+        "currency": tournament.currency,
+        "game": tournament.game,
+        "format": tournament.tournament_type,
+        "team_mode": tournament.team_mode,
+        "team_size": 1 if tournament.team_mode == "solo" else None,
+        "prize_pool": float(tournament.prize_pool or 0),
+        "match_rules": tournament.rules,
+        "banner_image_url": tournament.banner_url,
+        "capacity_player": int(tournament.max_players or 0),
+        "registered_players_count": int(tournament.registered_players_count or 0),
+    }
+
+
+def _legacy_cafe_tournament_payload(row):
+    return {
+        "id": str(row["event_id"]),
+        "source": "cafe",
+        "vendor_id": row["vendor_id"],
+        "title": row["event_title"],
+        "description": row["event_description"],
+        "status": row["event_status"],
+        "flag": _event_flag(row["start_at"], row["end_at"]),
+        "start_at": _iso(row["start_at"]),
+        "end_at": _iso(row["end_at"]),
+        "registration_deadline": _iso(row["registration_deadline"]),
+        "registration_fee": float(row["registration_fee"] or 0),
+        "currency": row["currency"],
+        "game": row["game"],
+        "format": row["format"],
+        "team_size": row["team_size"],
+        "prize_pool": float(row["prize_pool"] or 0),
+        "match_rules": row["match_rules"],
+        "region": row["region"],
+        "server": row["server"],
+        "map_pool": row["map_pool"] or [],
+        "veto_mode": row["veto_mode"],
+        "banner_image_url": row["banner_image_url"],
+        "capacity_team": row["capacity_team"],
+        "capacity_player": row["capacity_player"],
+    }
+
+
 def _event_flag(start_at, end_at):
     now = datetime.now(IST)
     start = start_at.astimezone(IST) if start_at.tzinfo else start_at.replace(tzinfo=IST)
@@ -752,6 +812,28 @@ def get_team_members(event_id, team_id):
             t.id,
             t.team_name,
             t.is_individual,
+            e.id AS event_id,
+            e.vendor_id,
+            e.title AS event_title,
+            e.description AS event_description,
+            e.status AS event_status,
+            e.start_at,
+            e.end_at,
+            e.registration_deadline,
+            e.registration_fee,
+            e.currency,
+            e.game,
+            e.format,
+            e.team_size,
+            e.prize_pool,
+            e.match_rules,
+            e.region,
+            e.server,
+            e.map_pool,
+            e.veto_mode,
+            e.banner_image_url,
+            e.capacity_team,
+            e.capacity_player,
             COALESCE(
                 json_agg(
                     json_build_object(
@@ -773,7 +855,13 @@ def get_team_members(event_id, team_id):
         WHERE e.id = :event_id
           AND e.visibility = true
           AND t.id = :team_id
-        GROUP BY t.id, t.team_name, t.is_individual
+        GROUP BY
+            t.id, t.team_name, t.is_individual,
+            e.id, e.vendor_id, e.title, e.description, e.status,
+            e.start_at, e.end_at, e.registration_deadline, e.registration_fee,
+            e.currency, e.game, e.format, e.team_size, e.prize_pool,
+            e.match_rules, e.region, e.server, e.map_pool, e.veto_mode,
+            e.banner_image_url, e.capacity_team, e.capacity_player
         LIMIT 1
     """), {"event_id": str(event_id), "team_id": str(team_id)}).mappings().first()
     if not row:
@@ -796,11 +884,13 @@ def get_team_members(event_id, team_id):
         if not community_row:
             return jsonify({"message": "Not Found"}), 404
         registration, tournament, user = community_row
-        return jsonify({
+        payload = {
+            "event_id": str(tournament.id),
             "team_id": str(registration.id),
             "team_name": user.game_username or user.name or "Solo entry",
             "is_individual": tournament.team_mode == "solo",
             "source": "community",
+            "tournament": _legacy_community_tournament_payload(tournament),
             "members": [{
                 "id": int(user.id),
                 "user_id": int(user.id),
@@ -809,13 +899,19 @@ def get_team_members(event_id, team_id):
                 "role": "captain",
                 "joined_at": registration.created_at.isoformat() if registration.created_at else None,
             }],
-        }), 200
+        }
+        if len(_EVENT_PARTICIPATION_CACHE) >= _EVENT_PARTICIPATION_CACHE_MAX_SIZE:
+            _EVENT_PARTICIPATION_CACHE.pop(next(iter(_EVENT_PARTICIPATION_CACHE)))
+        _EVENT_PARTICIPATION_CACHE[cache_key] = {"payload": payload, "expires_at": now_ts + cache_ttl_sec}
+        return jsonify(payload), 200
 
     payload = {
+        "event_id": str(row["event_id"]),
         "team_id": str(row["id"]),
         "team_name": row["team_name"],
         "is_individual": row["is_individual"],
         "source": "cafe",
+        "tournament": _legacy_cafe_tournament_payload(row),
         "members": [
             {
                 **m,

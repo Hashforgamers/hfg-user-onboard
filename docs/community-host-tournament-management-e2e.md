@@ -183,6 +183,8 @@ The authenticated detail response includes `room_details` for the host.
 
 Free registrations are immediately `confirmed`. Paid registrations with no payment reference are `pending_payment` until the existing payment callback confirms them. The app must call `POST /api/payments/verify` after provider success (or rely on `POST /api/payments/webhook`); both endpoints now settle cafe and community registration IDs. A paid registration with a payment reference remains supported for the existing direct-confirmation flow.
 
+For Razorpay deployments, set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` on `hfg-user-onboard`, then configure Razorpay to send `payment.captured`, `payment.failed`, and `order.paid` webhooks to `POST /api/payments/webhook`. Without a verified callback, a paid registration correctly remains `pending`/`pending_payment` because the backend has no trusted proof of payment.
+
 ### Host Roster
 
 `GET /tournaments/<tournament_id>/registrations?status=pending_payment&page=1&per_page=50`

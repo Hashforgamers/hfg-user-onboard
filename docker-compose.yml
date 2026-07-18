@@ -22,6 +22,13 @@ services:
       - COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE=199
       - COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK=3
       - COMMUNITY_ADMIN_TOKEN=dev
+      # Payment confirmation must be enabled in the deployment that receives
+      # player registrations. Razorpay sends its signed webhook to this service.
+      - PAYMENT_PROVIDER=${PAYMENT_PROVIDER:-mock}
+      - PAYMENT_CURRENCY=${PAYMENT_CURRENCY:-INR}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-}
     volumes:
       - .:/app
     command: ["python", "app.py"]
