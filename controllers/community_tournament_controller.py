@@ -17,6 +17,7 @@ from services.community_tournament_service import (
     list_admin_disputes,
     list_admin_host_verifications,
     list_admin_payouts,
+    list_pending_community_payments,
     list_host_disputes,
     list_host_payouts,
     list_host_registrations,
@@ -25,6 +26,7 @@ from services.community_tournament_service import (
     manage_registration,
     my_tournaments,
     register_for_tournament,
+    process_pending_community_payments,
     review_dispute,
     review_host_verification,
     review_payout,
@@ -60,6 +62,17 @@ def _admin_required(fn):
             g.admin_id = int(request.headers.get("X-Admin-Id") or 0) or None
         except ValueError:
             g.admin_id = None
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def _payment_cron_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        configured = current_app.config.get("COMMUNITY_PAYMENT_CRON_TOKEN")
+        provided = request.headers.get("X-Community-Payment-Cron-Token")
+        if not configured or provided != configured:
+            return _error("Payment cron authorization required", 403, "forbidden")
         return fn(*args, **kwargs)
     return wrapper
 
@@ -195,10 +208,12 @@ def list_my_community_tournaments():
 @auth_required_self(decrypt_user=True)
 def register_community_tournament(tournament_id):
     try:
+        body = _body()
         registration = register_for_tournament(
             g.auth_user_id,
             tournament_id,
-            payment_reference=(_body()).get("payment_reference"),
+            payment_reference=body.get("payment_reference") or body.get("razorpay_payment_id"),
+            payment_order_id=body.get("razorpay_order_id") or body.get("payment_order_id"),
         )
         return jsonify(registration.to_dict()), 201
     except Exception as exc:
@@ -220,6 +235,24 @@ def cancel_my_community_registration(tournament_id):
 def list_managed_community_registrations(tournament_id):
     try:
         return jsonify(list_host_registrations(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/admin/payments/pending")
+@_admin_required
+def admin_list_pending_community_payments():
+    try:
+        return jsonify(list_pending_community_payments(request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/internal/payments/process-pending")
+@_payment_cron_required
+def process_pending_community_payment_queue():
+    try:
+        return jsonify(process_pending_community_payments((_body()).get("limit", 50))), 200
     except Exception as exc:
         return _handle_service_error(exc)
 

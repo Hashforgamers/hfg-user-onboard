@@ -26,8 +26,15 @@ from services.community_tournament_service import (
     CommunityValidationError,
     record_community_registration_payment,
     register_for_tournament,
+    settle_community_registration_payment,
 )
-from services.payment_service import create_payment_intent, verify_payment_success, verify_webhook
+from services.payment_service import (
+    create_payment_intent,
+    verified_webhook_payment_details,
+    verify_payment_success,
+    verify_tournament_payment,
+    verify_webhook,
+)
 from services.firebase_service import send_notification
 
 
@@ -745,12 +752,40 @@ def payment_webhook():
     if not ok:
         return jsonify({"error": "invalid signature"}), 400
 
-    reg = Registration.query.filter_by(id=reg_id).first()
+    webhook_details = None
+    try:
+        webhook_details = verified_webhook_payment_details(payload, sig)
+    except ValueError:
+        webhook_details = None
+
+    reg = Registration.query.filter_by(id=reg_id).first() if reg_id else None
     if reg:
         _mark_registration_payment(reg, status)
         return jsonify({"ok": True, "registration_id": str(reg.id), "payment_status": reg.payment_status, "status": reg.status, "source": "cafe"}), 200
+    community_registration = None
+    if reg_id:
+        community_registration = CommunityTournamentRegistration.query.filter_by(id=reg_id).first()
+    if not community_registration and webhook_details and webhook_details.get("payment_id"):
+        payment_id = webhook_details["payment_id"]
+        community_registration = CommunityTournamentRegistration.query.filter(
+            (CommunityTournamentRegistration.razorpay_payment_id == payment_id)
+            | (CommunityTournamentRegistration.payment_reference == payment_id)
+        ).first()
+    if not community_registration:
+        return jsonify({"ok": True, "queued": True, "message": "Webhook received before its community registration mapping"}), 202
     try:
-        community_registration = record_community_registration_payment(reg_id, status)
+        tournament = CommunityTournament.query.filter_by(id=community_registration.tournament_id).first()
+        if not tournament:
+            return jsonify({"error": "tournament not found"}), 404
+        if not webhook_details or webhook_details.get("status") != "captured":
+            community_registration = record_community_registration_payment(community_registration.id, status)
+        else:
+            if (
+                webhook_details.get("currency") != str(tournament.currency or "INR").upper()
+                or float(webhook_details.get("amount") or 0) != float(tournament.entry_fee or 0)
+            ):
+                return jsonify({"error": "webhook payment does not match tournament entry fee"}), 400
+            community_registration = settle_community_registration_payment(community_registration.id, webhook_details)
     except CommunityValidationError as exc:
         if str(exc) == "community registration not found":
             return jsonify({"error": "registration not found"}), 404
@@ -768,6 +803,41 @@ def payment_webhook():
 @event_participation_bp.post("/payments/verify")
 def verify_payment():
     body = _body()
+    # Community registrations use registration_id. team_id is only a legacy
+    # alias for old app clients, so never let it override registration_id.
+    community_registration_id = body.get("registration_id") or body.get("team_id")
+    community_registration = None
+    if community_registration_id:
+        try:
+            community_registration = CommunityTournamentRegistration.query.filter_by(id=community_registration_id).first()
+        except Exception:
+            community_registration = None
+    if community_registration:
+        if body.get("tournament_id") and str(community_registration.tournament_id) != str(body.get("tournament_id")):
+            return jsonify({"error": "tournament_id does not match registration"}), 400
+        tournament = CommunityTournament.query.filter_by(id=community_registration.tournament_id).first()
+        if not tournament:
+            return jsonify({"error": "tournament not found"}), 404
+        try:
+            payment_details = verify_tournament_payment(body, tournament.entry_fee, tournament.currency)
+            community_registration = settle_community_registration_payment(community_registration.id, payment_details)
+        except (CommunityValidationError, CommunityConflictError, ValueError) as exc:
+            return jsonify({"error": "payment verification failed", "message": str(exc)}), 400
+        except Exception:
+            return jsonify({"error": "payment verification unavailable"}), 503
+        return jsonify({
+            "success": True,
+            "ok": True,
+            "registration_id": str(community_registration.id),
+            "tournament_id": str(community_registration.tournament_id),
+            "status": community_registration.status,
+            "payment_status": community_registration.payment_status,
+            "payment_reference": community_registration.payment_reference,
+            "amount_paid": float(community_registration.amount_paid or 0),
+            "source": "community",
+            "data": community_registration.to_dict(),
+        }), 200
+
     ok, reg_id, status = verify_payment_success(body)
     if not ok:
         return jsonify({"error": "payment verification failed"}), 400
@@ -776,6 +846,7 @@ def verify_payment():
     if reg:
         _mark_registration_payment(reg, status)
         return jsonify({
+            "success": True,
             "ok": True,
             "registration_id": str(reg.id),
             "payment_status": reg.payment_status,

@@ -35,7 +35,7 @@ Use `GET /api/events/<tournament_id>` with the logged-in user's Bearer token bef
 1. Host reads `/hosts/program`, submits verification, and waits for platform approval.
 2. Host optionally creates a banner file asset, then creates a draft tournament.
 3. Host edits the draft and sets `status: "published"` when ready. Time-based statuses then progress automatically.
-4. Players register. Paid registrations can be confirmed or rejected by the host.
+4. Players register. Razorpay verification or a webhook confirms paid registrations; the host never approves provider payments.
 5. Host publishes room details, runs check-in, and verifies submitted results.
 6. Host submits winners once. The tournament becomes `completed` and payouts enter `pending_admin_approval`.
 7. Platform admin reviews disputes and approves/settles payouts.
@@ -177,13 +177,15 @@ The authenticated detail response includes `room_details` for the host.
 
 ```json
 {
-  "payment_reference": "upi-reference-123"
+  "payment_reference": "pay_xxx"
 }
 ```
 
-Free registrations are immediately `confirmed`. Paid registrations with no payment reference are `pending_payment` until the existing payment callback confirms them. The app must call `POST /api/payments/verify` after provider success (or rely on `POST /api/payments/webhook`); both endpoints now settle cafe and community registration IDs. A paid registration with a payment reference remains supported for the existing direct-confirmation flow.
+Free registrations are immediately `confirmed` with `payment_status: "not_required"`. A paid registration is always created as `pending_payment` with `payment_status: "unpaid"`, even when `payment_reference` is supplied. The reference queues a server-side retry; it is never proof of payment by itself.
 
-For Razorpay deployments, set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` on `hfg-user-onboard`, then configure Razorpay to send `payment.captured`, `payment.failed`, and `order.paid` webhooks to `POST /api/payments/webhook`. Without a verified callback, a paid registration correctly remains `pending`/`pending_payment` because the backend has no trusted proof of payment.
+After Razorpay success, call `POST /api/payments/verify` with `razorpay_payment_id`, `razorpay_order_id`, `razorpay_signature`, and the community `registration_id` (the legacy `team_id` alias is accepted). The backend verifies the signature, fetched payment/order, captured status, currency, and entry-fee amount before returning the persisted `confirmed`/`paid` registration. Retrying the same valid request is safe.
+
+For Razorpay deployments, set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and `COMMUNITY_PAYMENT_CRON_TOKEN` on `hfg-user-onboard`, then configure Razorpay to send `payment.captured`, `payment.failed`, and `order.paid` webhooks to `POST /api/payments/webhook`. The booking service and `hfg-user-onboard` must use the same Razorpay account and mode. Without a verified callback, a paid registration correctly remains `pending_payment`/`unpaid` because the backend has no trusted proof of payment.
 
 ### Host Roster
 
@@ -213,16 +215,6 @@ Each item includes the registration fields plus a display-safe gamer object:
 
 `PATCH /tournaments/<tournament_id>/registrations/<registration_id>`
 
-Use exactly one action per request:
-
-```json
-{"action": "confirm_payment", "payment_reference": "upi-reference-123"}
-```
-
-```json
-{"action": "reject_payment"}
-```
-
 ```json
 {"action": "check_in"}
 ```
@@ -237,10 +229,15 @@ Use exactly one action per request:
 
 Action rules:
 
-- `confirm_payment`: only pending paid registrations, only before the tournament starts, requires a payment reference, increments confirmed-player count.
-- `reject_payment`: only pending registrations; marks payment as failed.
+- Provider payment confirmation and failure are deliberately unavailable to hosts. Use `/api/payments/verify`, Razorpay webhooks, or the retry queue.
 - `check_in` and `undo_check_in`: only confirmed registrations after registration is closed or while the tournament is live.
 - `remove_participant`: before the tournament starts only; paid confirmed registrations are refunded.
+
+### Payment Retry Queue
+
+`GET /admin/payments/pending?status=pending&page=1&per_page=50` lists durable community payment settlement jobs for platform admins (`X-Admin-Token`).
+
+`POST /internal/payments/process-pending` runs the cron batch and requires `X-Community-Payment-Cron-Token`. Optional body: `{ "limit": 50 }`. Schedule it every 1-2 minutes. The worker fetches each Razorpay payment, confirms that it is captured and matches the tournament amount/currency, then settles the same registration transaction used by `/api/payments/verify`.
 
 ## 4. Results and Disputes
 

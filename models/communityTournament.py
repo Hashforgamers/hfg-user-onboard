@@ -200,9 +200,15 @@ class CommunityTournamentRegistration(db.Model):
     tournament_id = Column(UUID(as_uuid=True), ForeignKey("community_tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     status = Column(String(32), nullable=False, default=CommunityTournamentRegistrationStatus.PENDING_PAYMENT, index=True)
-    payment_status = Column(String(32), nullable=False, default="pending", index=True)
+    payment_status = Column(String(32), nullable=False, default="unpaid", index=True)
     amount_paid = Column(Numeric(12, 2), nullable=False, default=0)
     payment_reference = Column(String(120), nullable=True, index=True)
+    payment_provider = Column(String(32), nullable=True, index=True)
+    razorpay_payment_id = Column(String(120), nullable=True, index=True)
+    razorpay_order_id = Column(String(120), nullable=True, index=True)
+    payment_verified_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
     checked_in_at = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -229,6 +235,12 @@ class CommunityTournamentRegistration(db.Model):
             "payment_status": self.payment_status,
             "amount_paid": float(self.amount_paid or 0),
             "payment_reference": self.payment_reference,
+            "payment_provider": self.payment_provider,
+            "razorpay_payment_id": self.razorpay_payment_id,
+            "razorpay_order_id": self.razorpay_order_id,
+            "payment_verified_at": self.payment_verified_at.isoformat() if self.payment_verified_at else None,
+            "confirmed_at": self.confirmed_at.isoformat() if self.confirmed_at else None,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "checked_in_at": self.checked_in_at.isoformat() if self.checked_in_at else None,
             "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

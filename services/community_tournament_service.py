@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import re
 import uuid
@@ -26,6 +26,8 @@ from models.communityTournamentOperations import (
     CommunityResultStatus,
     CommunityTournamentDispute,
     CommunityTournamentPayout,
+    CommunityPaymentSettlementJob,
+    CommunityPaymentSettlementStatus,
 )
 from models.hashWalletTransaction import HashWalletTransaction
 from models.hashWallet import HashWallet
@@ -568,7 +570,39 @@ def get_tournament(tournament_id, requester_user_id=None):
     return tournament.to_dict(include_room_details=include_room)
 
 
-def register_for_tournament(user_id, tournament_id, payment_reference=None):
+def _queue_payment_settlement(registration, payment_id=None, order_id=None, payload=None):
+    """Create or refresh one retry job without confirming the registration."""
+    job = CommunityPaymentSettlementJob.query.filter_by(registration_id=registration.id).with_for_update().first()
+    if not job:
+        job = CommunityPaymentSettlementJob(
+            registration_id=registration.id,
+            tournament_id=registration.tournament_id,
+            provider="razorpay",
+            status=CommunityPaymentSettlementStatus.PENDING,
+        )
+        db.session.add(job)
+    payment_id = str(payment_id or "").strip() or None
+    order_id = str(order_id or "").strip() or None
+    if payment_id:
+        job.payment_id = payment_id
+    if order_id:
+        job.order_id = order_id
+    if payload:
+        job.payload = {
+            **(job.payload or {}),
+            **{
+                key: float(value) if isinstance(value, Decimal) else value
+                for key, value in payload.items()
+            },
+        }
+    if job.status != CommunityPaymentSettlementStatus.SETTLED:
+        job.status = CommunityPaymentSettlementStatus.PENDING
+        job.next_attempt_at = _now()
+        job.last_error = None
+    return job
+
+
+def register_for_tournament(user_id, tournament_id, payment_reference=None, payment_order_id=None):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
@@ -584,17 +618,35 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None):
     if not user_exists:
         raise CommunityValidationError("user not found")
 
+    existing = CommunityTournamentRegistration.query.filter_by(
+        tournament_id=tournament.id,
+        user_id=int(user_id),
+    ).filter(
+        CommunityTournamentRegistration.status.notin_({
+            CommunityTournamentRegistrationStatus.CANCELLED,
+            CommunityTournamentRegistrationStatus.REFUNDED,
+        })
+    ).with_for_update().first()
+    if existing:
+        if existing.status == CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+            if payment_reference and not existing.payment_reference:
+                existing.payment_reference = str(payment_reference).strip()[:120] or None
+            _queue_payment_settlement(existing, payment_reference, payment_order_id)
+            db.session.commit()
+        return existing
+
     reg = CommunityTournamentRegistration(
         tournament_id=tournament.id,
         user_id=int(user_id),
         status=CommunityTournamentRegistrationStatus.CONFIRMED if tournament.entry_fee == 0 else CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
-        payment_status="paid" if tournament.entry_fee == 0 else "pending",
-        amount_paid=Decimal("0.00") if tournament.entry_fee == 0 else tournament.entry_fee,
+        payment_status="not_required" if tournament.entry_fee == 0 else "unpaid",
+        amount_paid=Decimal("0.00"),
         payment_reference=payment_reference,
+        payment_provider="razorpay" if tournament.entry_fee > 0 else None,
+        razorpay_payment_id=str(payment_reference).strip()[:120] if payment_reference else None,
+        razorpay_order_id=str(payment_order_id).strip()[:120] if payment_order_id else None,
+        confirmed_at=_now() if tournament.entry_fee == 0 else None,
     )
-    if tournament.entry_fee > 0 and payment_reference:
-        reg.status = CommunityTournamentRegistrationStatus.CONFIRMED
-        reg.payment_status = "paid"
     db.session.add(reg)
     try:
         db.session.flush()
@@ -604,18 +656,18 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None):
 
     if reg.status == CommunityTournamentRegistrationStatus.CONFIRMED:
         tournament.registered_players_count += 1
-        if tournament.entry_fee > 0:
-            _apply_wallet_transaction(user_id, -tournament.entry_fee, "community-tournament-entry-fee", tournament.id)
         _recalculate_prize_pool(tournament)
         if tournament.registered_players_count >= tournament.max_players:
             tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
+    if tournament.entry_fee > 0:
+        _queue_payment_settlement(reg, payment_reference, payment_order_id)
     _audit("registration_created", "community_tournament_registration", reg.id, user_id, metadata={"tournament_id": str(tournament.id)})
     _notify(user_id, "community_registration_success", "Registration received", f"You registered for {tournament.title}.", tournament.id)
     db.session.commit()
     return reg
 
 
-def record_community_registration_payment(registration_id, status, payment_reference=None):
+def record_community_registration_payment(registration_id, status, payment_reference=None, payment_details=None):
     """Apply a verified payment-provider result exactly once to a community registration."""
     registration = CommunityTournamentRegistration.query.filter_by(id=registration_id).with_for_update().first()
     if not registration:
@@ -623,16 +675,52 @@ def record_community_registration_payment(registration_id, status, payment_refer
     if registration.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
         raise CommunityConflictError("payment cannot be applied to a cancelled registration")
 
-    if payment_reference:
-        registration.payment_reference = str(payment_reference).strip()[:120] or registration.payment_reference
+    payment_details = payment_details or {}
+    payment_id = str(payment_details.get("payment_id") or payment_reference or "").strip() or None
+    order_id = str(payment_details.get("order_id") or "").strip() or None
+    provider = str(payment_details.get("provider") or registration.payment_provider or "razorpay").strip().lower()
+    if (
+        registration.status == CommunityTournamentRegistrationStatus.CONFIRMED
+        and registration.payment_status == "paid"
+        and payment_id
+        and registration.razorpay_payment_id
+        and registration.razorpay_payment_id != payment_id
+    ):
+        raise CommunityConflictError("registration is already settled with a different payment")
+    if payment_id:
+        duplicate = CommunityTournamentRegistration.query.filter(
+            or_(
+                CommunityTournamentRegistration.razorpay_payment_id == payment_id,
+                CommunityTournamentRegistration.payment_reference == payment_id,
+            ),
+            CommunityTournamentRegistration.id != registration.id,
+        ).first()
+        if duplicate:
+            raise CommunityConflictError("payment is already settled against another registration")
+        registration.payment_reference = payment_id
+        registration.razorpay_payment_id = payment_id
+    if order_id:
+        registration.razorpay_order_id = order_id
+    registration.payment_provider = provider
     if status != "succeeded":
         if registration.status == CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
             registration.payment_status = "failed"
+            job = CommunityPaymentSettlementJob.query.filter_by(registration_id=registration.id).first()
+            if job:
+                job.status = CommunityPaymentSettlementStatus.FAILED
+                job.last_error = "provider reported payment failure"
+                job.next_attempt_at = None
             _audit("registration_payment_failed", "community_tournament_registration", registration.id, registration.user_id)
             db.session.commit()
         return registration
 
     if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED and registration.payment_status == "paid":
+        _queue_payment_settlement(registration, payment_id, order_id)
+        job = CommunityPaymentSettlementJob.query.filter_by(registration_id=registration.id).first()
+        if job:
+            job.status = CommunityPaymentSettlementStatus.SETTLED
+            job.settled_at = job.settled_at or _now()
+        db.session.commit()
         return registration
     if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
         raise CommunityConflictError("registration cannot be confirmed from its current state")
@@ -649,16 +737,123 @@ def record_community_registration_payment(registration_id, status, payment_refer
 
     registration.status = CommunityTournamentRegistrationStatus.CONFIRMED
     registration.payment_status = "paid"
+    registration.amount_paid = tournament.entry_fee
+    registration.payment_verified_at = _now()
+    registration.confirmed_at = registration.confirmed_at or _now()
+    registration.paid_at = registration.paid_at or _now()
     tournament.registered_players_count += 1
-    if registration.amount_paid:
-        _apply_wallet_transaction(registration.user_id, -registration.amount_paid, "community-tournament-entry-fee", tournament.id)
     _recalculate_prize_pool(tournament)
     if tournament.registered_players_count >= tournament.max_players:
         tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
     _audit("registration_payment_confirmed", "community_tournament_registration", registration.id, registration.user_id)
     _notify(registration.user_id, "community_registration_confirmed", "Registration confirmed", f"Your registration for {tournament.title} is confirmed.", tournament.id)
+    job = _queue_payment_settlement(registration, payment_id, order_id, payment_details)
+    job.status = CommunityPaymentSettlementStatus.SETTLED
+    job.settled_at = _now()
+    job.next_attempt_at = None
     db.session.commit()
     return registration
+
+
+def settle_community_registration_payment(registration_id, payment_details):
+    """Settle a provider-verified community payment exactly once."""
+    if str(payment_details.get("status") or "").lower() != "captured":
+        raise CommunityConflictError("payment is not captured")
+    return record_community_registration_payment(
+        registration_id,
+        "succeeded",
+        payment_reference=payment_details.get("payment_id"),
+        payment_details=payment_details,
+    )
+
+
+def process_pending_community_payments(limit=50):
+    """Cron worker: fetch pending Razorpay payments and settle captured ones."""
+    from services.payment_service import fetch_tournament_payment
+
+    limit = min(max(int(limit or 50), 1), 100)
+    now = _now()
+    jobs = (
+        CommunityPaymentSettlementJob.query
+        .filter(
+            CommunityPaymentSettlementJob.status.in_({
+                CommunityPaymentSettlementStatus.PENDING,
+                CommunityPaymentSettlementStatus.RETRY,
+            }),
+            or_(
+                CommunityPaymentSettlementJob.next_attempt_at.is_(None),
+                CommunityPaymentSettlementJob.next_attempt_at <= now,
+            ),
+        )
+        .order_by(CommunityPaymentSettlementJob.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+    summary = {"processed": 0, "settled": 0, "retried": 0, "failed": 0, "items": []}
+    for job in jobs:
+        summary["processed"] += 1
+        job.attempts += 1
+        registration = CommunityTournamentRegistration.query.filter_by(id=job.registration_id).first()
+        tournament = CommunityTournament.query.filter_by(id=job.tournament_id).first()
+        if not registration or not tournament or registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+            job.status = CommunityPaymentSettlementStatus.FAILED
+            job.last_error = "registration is no longer pending payment"
+            db.session.commit()
+            summary["failed"] += 1
+            summary["items"].append(job.to_dict())
+            continue
+        if not job.payment_id:
+            job.status = CommunityPaymentSettlementStatus.RETRY
+            job.last_error = "Razorpay payment ID is not available yet"
+        else:
+            try:
+                payment_details = fetch_tournament_payment(job.payment_id, tournament.entry_fee, tournament.currency, job.order_id)
+                settle_community_registration_payment(registration.id, payment_details)
+                summary["settled"] += 1
+                summary["items"].append({"registration_id": str(registration.id), "status": "settled"})
+                continue
+            except Exception as exc:
+                error_text = str(exc)[:500]
+                if "status: failed" in error_text.lower():
+                    record_community_registration_payment(registration.id, "failed", payment_reference=job.payment_id)
+                    job.status = CommunityPaymentSettlementStatus.FAILED
+                    job.last_error = error_text
+                    job.next_attempt_at = None
+                    db.session.commit()
+                    summary["failed"] += 1
+                    summary["items"].append(job.to_dict())
+                    continue
+                job.status = CommunityPaymentSettlementStatus.RETRY
+                job.last_error = error_text
+        delay_minutes = min(60, max(1, 2 ** min(job.attempts, 6)))
+        job.next_attempt_at = _now() + timedelta(minutes=delay_minutes)
+        db.session.commit()
+        summary["retried"] += 1
+        summary["items"].append(job.to_dict())
+    return summary
+
+
+def list_pending_community_payments(filters):
+    page, per_page = _pagination(filters)
+    status = str(filters.get("status") or "").strip().lower()
+    query = CommunityPaymentSettlementJob.query
+    if status:
+        valid = {
+            CommunityPaymentSettlementStatus.PENDING,
+            CommunityPaymentSettlementStatus.RETRY,
+            CommunityPaymentSettlementStatus.PROCESSING,
+            CommunityPaymentSettlementStatus.SETTLED,
+            CommunityPaymentSettlementStatus.FAILED,
+        }
+        if status not in valid:
+            raise CommunityValidationError("invalid payment queue status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    jobs = query.order_by(CommunityPaymentSettlementJob.created_at.asc()).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": [job.to_dict() for job in jobs],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
 
 
 def cancel_registration(user_id, tournament_id):
@@ -673,7 +868,7 @@ def cancel_registration(user_id, tournament_id):
         raise CommunityConflictError("registration cannot be cancelled after tournament starts")
     reg.status = CommunityTournamentRegistrationStatus.CANCELLED
     reg.cancelled_at = _now()
-    if reg.payment_status == "paid" and reg.amount_paid:
+    if reg.payment_status == "paid" and reg.amount_paid and reg.payment_provider == "wallet":
         reg.payment_status = "refunded"
         reg.status = CommunityTournamentRegistrationStatus.REFUNDED
         _apply_wallet_transaction(user_id, reg.amount_paid, "community-tournament-refund", tournament.id)
@@ -764,29 +959,8 @@ def manage_registration(host_user_id, tournament_id, registration_id, payload):
         registration.payment_reference = str(payload.get("payment_reference") or "").strip() or None
 
     sync_tournament_status(tournament)
-    if action == "confirm_payment":
-        if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
-            raise CommunityConflictError("only pending-payment registrations can be confirmed")
-        if tournament.status not in {CommunityTournamentStatus.REGISTRATION_OPEN, CommunityTournamentStatus.REGISTRATION_CLOSED}:
-            raise CommunityConflictError("registration payment can no longer be confirmed")
-        if tournament.registered_players_count >= tournament.max_players:
-            raise CommunityConflictError("tournament is full")
-        if tournament.entry_fee > 0 and not registration.payment_reference:
-            raise CommunityValidationError("payment_reference is required to confirm a paid registration")
-        registration.status = CommunityTournamentRegistrationStatus.CONFIRMED
-        registration.payment_status = "paid"
-        tournament.registered_players_count += 1
-        if registration.amount_paid:
-            _apply_wallet_transaction(registration.user_id, -registration.amount_paid, "community-tournament-entry-fee", tournament.id)
-        _recalculate_prize_pool(tournament)
-        _notify(registration.user_id, "community_registration_confirmed", "Registration confirmed", f"Your registration for {tournament.title} is confirmed.", tournament.id)
-    elif action == "reject_payment":
-        if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
-            raise CommunityConflictError("only pending-payment registrations can be rejected")
-        registration.status = CommunityTournamentRegistrationStatus.CANCELLED
-        registration.payment_status = "failed"
-        registration.cancelled_at = _now()
-        _notify(registration.user_id, "community_registration_rejected", "Registration payment rejected", f"Your registration for {tournament.title} could not be confirmed.", tournament.id)
+    if action in {"confirm_payment", "reject_payment"}:
+        raise CommunityConflictError("provider payments are managed only by payment verification or webhook")
     elif action in {"check_in", "undo_check_in"}:
         if registration.status != CommunityTournamentRegistrationStatus.CONFIRMED:
             raise CommunityConflictError("only confirmed registrations can be checked in")
@@ -801,7 +975,7 @@ def manage_registration(host_user_id, tournament_id, registration_id, payload):
         if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED:
             tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
         registration.cancelled_at = _now()
-        if registration.payment_status == "paid" and registration.amount_paid:
+        if registration.payment_status == "paid" and registration.amount_paid and registration.payment_provider == "wallet":
             registration.status = CommunityTournamentRegistrationStatus.REFUNDED
             registration.payment_status = "refunded"
             _apply_wallet_transaction(registration.user_id, registration.amount_paid, "community-tournament-refund", tournament.id)
@@ -810,7 +984,7 @@ def manage_registration(host_user_id, tournament_id, registration_id, payload):
         _recalculate_prize_pool(tournament)
         _notify(registration.user_id, "community_registration_removed", "Registration cancelled", f"Your registration for {tournament.title} was cancelled by the host.", tournament.id)
     else:
-        raise CommunityValidationError("action must be confirm_payment, reject_payment, check_in, undo_check_in, or remove_participant")
+        raise CommunityValidationError("action must be check_in, undo_check_in, or remove_participant")
 
     sync_tournament_status(tournament)
     _audit("registration_managed", "community_tournament_registration", registration.id, host_user_id, metadata={"action": action})

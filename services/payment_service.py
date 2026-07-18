@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import json
 import time
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Tuple, Dict, Any
 
 PROVIDER = os.getenv("PAYMENT_PROVIDER", "mock").lower()    # "mock" | "razorpay" | "stripe"
@@ -39,6 +40,28 @@ def verify_webhook(payload: bytes, signature: str) -> Tuple[bool, str, str]:
         return _mock_verify_webhook(payload, signature)
 
 
+def verified_webhook_payment_details(payload: bytes, signature: str) -> Dict[str, Any]:
+    """Parse a provider-authenticated webhook into settlement details."""
+    ok, registration_id, status = verify_webhook(payload, signature)
+    if not ok:
+        raise ValueError("invalid payment webhook signature")
+    if PROVIDER != "razorpay":
+        return {"registration_id": registration_id, "status": "captured" if status == "succeeded" else "failed"}
+    event = json.loads(payload.decode("utf-8"))
+    payload_data = event.get("payload", {})
+    payment = payload_data.get("payment", {}).get("entity", {}) or {}
+    order = payload_data.get("order", {}).get("entity", {}) or {}
+    return {
+        "registration_id": registration_id,
+        "provider": "razorpay",
+        "payment_id": str(payment.get("id") or "") or None,
+        "order_id": str(payment.get("order_id") or order.get("id") or "") or None,
+        "amount": Decimal(str(payment.get("amount") or 0)) / Decimal("100"),
+        "currency": str(payment.get("currency") or order.get("currency") or "").upper(),
+        "status": "captured" if status == "succeeded" else "failed",
+    }
+
+
 def verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
     """
     Verifies a client-side payment success callback.
@@ -49,8 +72,38 @@ def verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
     elif PROVIDER == "stripe":
         return False, None, "failed"
     else:
-        reg_id = str(data.get("registration_id") or "")
+        reg_id = str(data.get("registration_id") or data.get("team_id") or "")
         return bool(reg_id), reg_id, "succeeded" if reg_id else "failed"
+
+
+def verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_currency: str) -> Dict[str, Any]:
+    """Return provider-verified payment details for one tournament registration.
+
+    This validates the client callback and then verifies the provider-side payment
+    record. It intentionally does not mutate database state; settlement remains
+    the responsibility of the community tournament transaction.
+    """
+    if PROVIDER == "razorpay":
+        return _rzp_verify_tournament_payment(data, expected_amount, expected_currency)
+    if PROVIDER == "mock":
+        payment_id = str(data.get("razorpay_payment_id") or data.get("payment_id") or data.get("payment_reference") or "mock-payment")
+        order_id = str(data.get("razorpay_order_id") or data.get("order_id") or "mock-order")
+        return {
+            "provider": "mock",
+            "payment_id": payment_id,
+            "order_id": order_id,
+            "amount": Decimal(str(expected_amount)).quantize(Decimal("0.01")),
+            "currency": str(expected_currency).upper(),
+            "status": "captured",
+        }
+    raise ValueError("tournament payment verification is not configured for this provider")
+
+
+def fetch_tournament_payment(payment_id: str, expected_amount, expected_currency: str, order_id: str = None) -> Dict[str, Any]:
+    """Fetch an already-created provider payment for cron/webhook settlement."""
+    if PROVIDER != "razorpay":
+        raise ValueError("payment queue requires PAYMENT_PROVIDER=razorpay")
+    return _rzp_fetch_tournament_payment(payment_id, expected_amount, expected_currency, order_id)
 
 # ---------------------------
 # Mock provider (for dev/test)
@@ -168,7 +221,7 @@ def _rzp_verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
     order_id = data.get("razorpay_order_id") or data.get("order_id")
     payment_id = data.get("razorpay_payment_id") or data.get("payment_id")
     signature = data.get("razorpay_signature") or data.get("signature")
-    registration_id = str(data.get("registration_id") or "")
+    registration_id = str(data.get("registration_id") or data.get("team_id") or "")
     if not order_id or not payment_id or not signature or not registration_id:
         return False, None, "failed"
 
@@ -199,6 +252,87 @@ def _rzp_verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
         return False, None, "failed"
 
     return True, registration_id, "succeeded"
+
+
+def _razorpay_credentials():
+    key_id = os.getenv("RAZORPAY_KEY_ID")
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+    if not key_id or not key_secret:
+        raise ValueError("Razorpay keys not configured")
+    return key_id, key_secret
+
+
+def _amount_in_paise(amount) -> int:
+    return int((Decimal(str(amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _rzp_verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_currency: str) -> Dict[str, Any]:
+    order_id = str(data.get("razorpay_order_id") or data.get("order_id") or "").strip()
+    payment_id = str(data.get("razorpay_payment_id") or data.get("payment_id") or "").strip()
+    signature = str(data.get("razorpay_signature") or data.get("signature") or "").strip()
+    if not order_id or not payment_id or not signature:
+        raise ValueError("razorpay_order_id, razorpay_payment_id, and razorpay_signature are required")
+
+    _, key_secret = _razorpay_credentials()
+    expected_signature = hmac.new(
+        key=key_secret.encode("utf-8"),
+        msg=f"{order_id}|{payment_id}".encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_signature, signature):
+        raise ValueError("Razorpay signature verification failed")
+    return _rzp_fetch_tournament_payment(payment_id, expected_amount, expected_currency, order_id)
+
+
+def _rzp_fetch_tournament_payment(payment_id: str, expected_amount, expected_currency: str, order_id: str = None) -> Dict[str, Any]:
+    import requests
+
+    key_id, key_secret = _razorpay_credentials()
+    payment_response = requests.get(
+        f"https://api.razorpay.com/v1/payments/{payment_id}",
+        auth=(key_id, key_secret),
+        timeout=10,
+    )
+    payment_response.raise_for_status()
+    payment = payment_response.json()
+    actual_order_id = str(payment.get("order_id") or "")
+    if order_id and actual_order_id != str(order_id):
+        raise ValueError("payment does not belong to the supplied Razorpay order")
+    if not actual_order_id:
+        raise ValueError("Razorpay payment has no order")
+
+    order_response = requests.get(
+        f"https://api.razorpay.com/v1/orders/{actual_order_id}",
+        auth=(key_id, key_secret),
+        timeout=10,
+    )
+    order_response.raise_for_status()
+    order = order_response.json()
+    expected_paise = _amount_in_paise(expected_amount)
+    expected_currency = str(expected_currency or "INR").upper()
+    if payment.get("status") == "authorized" and os.getenv("RAZORPAY_AUTO_CAPTURE_AUTHORIZED", "false").lower() in {"1", "true", "yes"}:
+        capture_response = requests.post(
+            f"https://api.razorpay.com/v1/payments/{payment_id}/capture",
+            auth=(key_id, key_secret),
+            json={"amount": expected_paise, "currency": expected_currency},
+            timeout=10,
+        )
+        capture_response.raise_for_status()
+        payment = capture_response.json()
+    if payment.get("status") != "captured":
+        raise ValueError(f"Razorpay payment is not captured (status: {payment.get('status') or 'unknown'})")
+    if int(payment.get("amount") or 0) != expected_paise or int(order.get("amount") or 0) != expected_paise:
+        raise ValueError("Razorpay payment amount does not match the tournament entry fee")
+    if str(payment.get("currency") or "").upper() != expected_currency or str(order.get("currency") or "").upper() != expected_currency:
+        raise ValueError("Razorpay payment currency does not match the tournament currency")
+    return {
+        "provider": "razorpay",
+        "payment_id": str(payment.get("id") or payment_id),
+        "order_id": actual_order_id,
+        "amount": Decimal(expected_paise) / Decimal("100"),
+        "currency": expected_currency,
+        "status": "captured",
+    }
 
 # ---------------------------
 # Stripe (outline)

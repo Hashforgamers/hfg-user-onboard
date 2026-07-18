@@ -138,10 +138,16 @@ Payout:
   "id": "uuid",
   "tournament_id": "uuid",
   "user_id": 128,
-  "status": "confirmed",
-  "payment_status": "paid",
-  "amount_paid": 50.0,
+  "status": "pending_payment",
+  "payment_status": "unpaid",
+  "amount_paid": 0,
   "payment_reference": "pay_123",
+  "payment_provider": "razorpay",
+  "razorpay_payment_id": "pay_123",
+  "razorpay_order_id": null,
+  "payment_verified_at": null,
+  "confirmed_at": null,
+  "paid_at": null,
   "checked_in_at": null,
   "cancelled_at": null,
   "created_at": "2026-07-14T10:00:00+00:00",
@@ -479,15 +485,14 @@ Request body:
 ```
 
 Behavior:
-- Free tournament: registration becomes `confirmed`, payment status `paid`, amount `0`.
-- Paid tournament without `payment_reference`: registration becomes `pending_payment`.
-- Paid tournament with `payment_reference`: registration becomes `confirmed`, payment status `paid`.
+- Free tournament: registration becomes `confirmed`, payment status `not_required`, amount `0`.
+- Paid tournament: registration always becomes `pending_payment` with payment status `unpaid`; a payment reference only starts the backend retry queue.
 - Host cannot register for their own tournament.
 - Registration only works when tournament status is `registration_open`.
 
 Frontend recommendation:
-- For paid tournaments, complete payment first, then call this API with `payment_reference`.
-- If payment is not integrated yet, show `pending_payment` clearly and avoid showing room details until confirmed.
+- For paid tournaments, create the registration with `payment_reference: pay_xxx`, then immediately call `/api/payments/verify` with the Razorpay order ID, payment ID, signature, and returned `registration_id`.
+- Treat the persisted verification response as the source of truth. Until it returns `confirmed` and `paid`, show the payment-pending state and hide room details.
 
 ### Cancel My Registration
 - **Method**: `DELETE`
@@ -694,9 +699,10 @@ CTA rules:
 4. Use `draft` for saved drafts and `published` for live/public creation.
 
 ### Paid Registration
-1. Start payment in app payment flow.
-2. On payment success, call registration API with `payment_reference`.
-3. Refresh authenticated detail to get room details if confirmed.
+1. Complete the Razorpay checkout and retain `razorpay_order_id`, `razorpay_payment_id`, and `razorpay_signature`.
+2. Call registration API with `payment_reference: razorpay_payment_id`.
+3. Call `POST /api/payments/verify` with those three Razorpay fields plus `registration_id` and `tournament_id`.
+4. Use the verification response; it must be `status: "confirmed"`, `payment_status: "paid"`, and `amount_paid` equal to the entry fee before showing confirmed-only content.
 
 ## Frontend Validation Checklist
 
