@@ -741,12 +741,45 @@ def get_team_members(event_id, team_id):
         LIMIT 1
     """), {"event_id": str(event_id), "team_id": str(team_id)}).mappings().first()
     if not row:
-        return jsonify({"message": "Not Found"}), 404
+        community_row = (
+            db.session.query(CommunityTournamentRegistration, CommunityTournament, User)
+            .join(CommunityTournament, CommunityTournament.id == CommunityTournamentRegistration.tournament_id)
+            .join(User, User.id == CommunityTournamentRegistration.user_id)
+            .filter(
+                CommunityTournamentRegistration.id == team_id,
+                CommunityTournamentRegistration.tournament_id == event_id,
+                CommunityTournamentRegistration.status.in_({
+                    CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+                    CommunityTournamentRegistrationStatus.CONFIRMED,
+                }),
+                CommunityTournament.visibility.is_(True),
+                CommunityTournament.status != CommunityTournamentStatus.CANCELLED,
+            )
+            .first()
+        )
+        if not community_row:
+            return jsonify({"message": "Not Found"}), 404
+        registration, tournament, user = community_row
+        return jsonify({
+            "team_id": str(registration.id),
+            "team_name": user.game_username or user.name or "Solo entry",
+            "is_individual": tournament.team_mode == "solo",
+            "source": "community",
+            "members": [{
+                "id": int(user.id),
+                "user_id": int(user.id),
+                "name": user.name or "",
+                "gameUserName": user.game_username or "",
+                "role": "captain",
+                "joined_at": registration.created_at.isoformat() if registration.created_at else None,
+            }],
+        }), 200
 
     payload = {
         "team_id": str(row["id"]),
         "team_name": row["team_name"],
         "is_individual": row["is_individual"],
+        "source": "cafe",
         "members": [
             {
                 **m,
