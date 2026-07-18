@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import json
 import re
 import uuid
 
@@ -123,6 +124,21 @@ def _money(value, field_name, allow_zero=True):
     if amount < 0 or (amount == 0 and not allow_zero):
         raise CommunityValidationError(f"{field_name} must be positive")
     return amount
+
+
+def _room_details_data(value):
+    """Accept a game-neutral room/lobby payload without imposing game-specific keys."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise CommunityValidationError("room_details_data must be an object")
+    try:
+        encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError("room_details_data must contain JSON-compatible values") from exc
+    if len(encoded) > 12000:
+        raise CommunityValidationError("room_details_data must not exceed 12 KB")
+    return value
 
 
 def _host_commission_rate(host_tier):
@@ -402,11 +418,15 @@ def create_tournament(host_user_id, payload):
         prize_distribution=payload.get("prize_distribution") or [],
         discord_link=str(payload.get("discord_link") or "").strip() or None,
         whatsapp_link=str(payload.get("whatsapp_link") or "").strip() or None,
+        room_details=str(payload.get("room_details") or "").strip() or None,
+        room_details_data=_room_details_data(payload.get("room_details_data")),
         visibility=bool(payload.get("visibility", True)),
         status=str(payload.get("status") or CommunityTournamentStatus.DRAFT).strip().lower(),
     )
     if tournament.status not in {CommunityTournamentStatus.DRAFT, CommunityTournamentStatus.PUBLISHED}:
         raise CommunityValidationError("new tournament status must be draft or published")
+    if tournament.room_details or tournament.room_details_data:
+        tournament.room_details_published_at = _now()
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
     db.session.add(tournament)
@@ -425,11 +445,14 @@ def update_tournament(host_user_id, tournament_id, payload):
 
     editable = {
         "title", "description", "banner_url", "game", "tournament_type", "team_mode",
-        "rules", "prize_distribution", "discord_link", "whatsapp_link", "room_details",
+        "rules", "prize_distribution", "discord_link", "whatsapp_link", "room_details", "room_details_data",
     }
     for field in editable:
         if field in payload:
             value = payload[field]
+            if field == "room_details_data":
+                setattr(tournament, field, _room_details_data(value))
+                continue
             if field in {"title", "game"}:
                 value = str(value or "").strip()
                 if (field == "title" and not 3 <= len(value) <= 200) or (field == "game" and not value):
@@ -482,7 +505,7 @@ def update_tournament(host_user_id, tournament_id, payload):
         raise CommunityValidationError("tournament_start_at must be after registration_end_at")
     if tournament.tournament_end_at and tournament.tournament_end_at <= tournament.tournament_start_at:
         raise CommunityValidationError("tournament_end_at must be after tournament_start_at")
-    if tournament.room_details and not tournament.room_details_published_at:
+    if (tournament.room_details or tournament.room_details_data) and not tournament.room_details_published_at:
         tournament.room_details_published_at = _now()
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
