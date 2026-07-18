@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS community_tournament_registrations (
     tournament_id uuid NOT NULL REFERENCES community_tournaments(id) ON DELETE CASCADE,
     user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status varchar(32) NOT NULL DEFAULT 'pending_payment',
-    payment_status varchar(32) NOT NULL DEFAULT 'pending',
+    payment_status varchar(32) NOT NULL DEFAULT 'unpaid',
     amount_paid numeric(12, 2) NOT NULL DEFAULT 0,
     payment_reference varchar(120) NULL,
     checked_in_at timestamptz NULL,
