@@ -68,6 +68,7 @@ Registration:
 - `confirmed`
 - `cancelled`
 - `refunded`
+- `refund_pending`
 
 Result:
 - `submitted`
@@ -523,7 +524,9 @@ Frontend recommendation:
 
 Behavior:
 - Cannot cancel after tournament is `live` or `completed`.
-- Paid confirmed registrations are moved to `refunded`.
+- Paid confirmed registrations are moved to `refund_pending` while Razorpay processes the refund, then to `refunded`.
+- A repeated cancellation request reconciles the existing Razorpay refund and never creates a duplicate refund.
+- If Razorpay cannot accept the refund request, cancellation returns a conflict and the registration remains active.
 - Registration count and prize pool are recalculated.
 
 ### Submit Match Result

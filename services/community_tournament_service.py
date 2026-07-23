@@ -853,6 +853,137 @@ def process_pending_community_payments(limit=50):
         db.session.commit()
         summary["retried"] += 1
         summary["items"].append(job.to_dict())
+    summary["refunds"] = process_pending_community_refunds(limit)
+    return summary
+
+
+def _apply_provider_refund(registration, refund):
+    status = str(refund.get("status") or "").lower()
+    if status not in {"pending", "processed"}:
+        raise CommunityConflictError("payment provider did not accept the refund")
+    registration.razorpay_refund_id = str(refund.get("refund_id") or "") or registration.razorpay_refund_id
+    registration.refund_amount = _money(refund.get("amount"), "refund_amount")
+    registration.refund_status = status
+    registration.refund_requested_at = registration.refund_requested_at or _now()
+    registration.refund_error = None
+    if status == "processed":
+        registration.status = CommunityTournamentRegistrationStatus.REFUNDED
+        registration.payment_status = "refunded"
+        registration.refunded_at = registration.refunded_at or _now()
+    else:
+        registration.status = CommunityTournamentRegistrationStatus.REFUND_PENDING
+        registration.payment_status = "refund_pending"
+
+
+def _refund_or_cancel_registration(registration, tournament):
+    from services.payment_service import refund_tournament_payment
+
+    was_confirmed = registration.status == CommunityTournamentRegistrationStatus.CONFIRMED
+    is_paid = registration.payment_status in {"paid", "refund_pending"} and Decimal(registration.amount_paid or 0) > 0
+    if is_paid:
+        provider = str(registration.payment_provider or "").lower()
+        if provider == "wallet":
+            if registration.status != CommunityTournamentRegistrationStatus.REFUND_PENDING:
+                _apply_wallet_transaction(
+                    registration.user_id,
+                    registration.amount_paid,
+                    "community-tournament-refund",
+                    tournament.id,
+                )
+            registration.refund_amount = registration.amount_paid
+            registration.refund_status = "processed"
+            registration.refund_requested_at = registration.refund_requested_at or _now()
+            registration.refunded_at = registration.refunded_at or _now()
+            registration.payment_status = "refunded"
+            registration.status = CommunityTournamentRegistrationStatus.REFUNDED
+        elif provider in {"razorpay", "mock"}:
+            if not registration.razorpay_payment_id:
+                raise CommunityConflictError("paid registration is missing its provider payment ID")
+            try:
+                receipt = f"ctr_{str(registration.id).replace('-', '')}"
+                refund = refund_tournament_payment(
+                    registration.razorpay_payment_id,
+                    registration.amount_paid,
+                    tournament.currency,
+                    receipt,
+                    existing_refund_id=registration.razorpay_refund_id,
+                    provider=provider,
+                )
+            except CommunityConflictError:
+                raise
+            except Exception as exc:
+                raise CommunityConflictError(
+                    "refund could not be initiated; registration remains active"
+                ) from exc
+            _apply_provider_refund(registration, refund)
+        else:
+            raise CommunityConflictError("paid registration has no supported refund provider")
+    else:
+        registration.status = CommunityTournamentRegistrationStatus.CANCELLED
+
+    registration.cancelled_at = registration.cancelled_at or _now()
+    if was_confirmed:
+        tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
+    _recalculate_prize_pool(tournament)
+    return registration
+
+
+def process_pending_community_refunds(limit=50):
+    """Reconcile provider refunds accepted but not yet processed."""
+    from services.payment_service import refund_tournament_payment
+
+    registrations = (
+        CommunityTournamentRegistration.query
+        .filter_by(status=CommunityTournamentRegistrationStatus.REFUND_PENDING)
+        .order_by(CommunityTournamentRegistration.refund_requested_at.asc())
+        .limit(min(max(int(limit or 50), 1), 100))
+        .all()
+    )
+    summary = {"processed": 0, "refunded": 0, "pending": 0, "failed": 0, "items": []}
+    for registration in registrations:
+        summary["processed"] += 1
+        registration_id = registration.id
+        tournament = CommunityTournament.query.filter_by(id=registration.tournament_id).first()
+        try:
+            if not tournament or not registration.razorpay_payment_id:
+                raise CommunityConflictError("refund registration is missing payment data")
+            receipt = f"ctr_{str(registration.id).replace('-', '')}"
+            refund = refund_tournament_payment(
+                registration.razorpay_payment_id,
+                registration.amount_paid,
+                tournament.currency,
+                receipt,
+                existing_refund_id=registration.razorpay_refund_id,
+                provider=registration.payment_provider,
+            )
+            _apply_provider_refund(registration, refund)
+            if registration.status == CommunityTournamentRegistrationStatus.REFUNDED:
+                _audit(
+                    "registration_refund_processed",
+                    "community_tournament_registration",
+                    registration.id,
+                    actor_type="system",
+                    metadata={"provider": registration.payment_provider},
+                )
+                _notify(
+                    registration.user_id,
+                    "community_registration_refunded",
+                    "Refund processed",
+                    f"Your refund for {tournament.title} has been processed.",
+                    tournament.id,
+                )
+            db.session.commit()
+            key = "refunded" if registration.status == CommunityTournamentRegistrationStatus.REFUNDED else "pending"
+            summary[key] += 1
+            summary["items"].append({"registration_id": str(registration.id), "status": registration.refund_status})
+        except Exception as exc:
+            db.session.rollback()
+            failed = CommunityTournamentRegistration.query.filter_by(id=registration_id).first()
+            if failed:
+                failed.refund_error = str(exc)[:500]
+                db.session.commit()
+            summary["failed"] += 1
+            summary["items"].append({"registration_id": str(registration_id), "status": "failed"})
     return summary
 
 
@@ -880,25 +1011,42 @@ def list_pending_community_payments(filters):
 
 
 def cancel_registration(user_id, tournament_id):
-    reg = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament_id, user_id=int(user_id)).with_for_update().first()
-    if not reg or reg.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
-        raise CommunityValidationError("active registration not found")
     tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
+    reg = (
+        CommunityTournamentRegistration.query
+        .filter(
+            CommunityTournamentRegistration.tournament_id == tournament_id,
+            CommunityTournamentRegistration.user_id == int(user_id),
+            CommunityTournamentRegistration.status.in_({
+                CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+                CommunityTournamentRegistrationStatus.CONFIRMED,
+                CommunityTournamentRegistrationStatus.REFUND_PENDING,
+            }),
+        )
+        .order_by(CommunityTournamentRegistration.created_at.desc())
+        .with_for_update()
+        .first()
+    )
+    if not reg:
+        raise CommunityValidationError("active registration not found")
     sync_tournament_status(tournament)
     if tournament.status in {CommunityTournamentStatus.LIVE, CommunityTournamentStatus.COMPLETED}:
         raise CommunityConflictError("registration cannot be cancelled after tournament starts")
-    reg.status = CommunityTournamentRegistrationStatus.CANCELLED
-    reg.cancelled_at = _now()
-    if reg.payment_status == "paid" and reg.amount_paid and reg.payment_provider == "wallet":
-        reg.payment_status = "refunded"
-        reg.status = CommunityTournamentRegistrationStatus.REFUNDED
-        _apply_wallet_transaction(user_id, reg.amount_paid, "community-tournament-refund", tournament.id)
-    tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
-    _recalculate_prize_pool(tournament)
+    try:
+        _refund_or_cancel_registration(reg, tournament)
+    except Exception:
+        db.session.rollback()
+        raise
     sync_tournament_status(tournament)
-    _audit("registration_cancelled", "community_tournament_registration", reg.id, user_id)
+    _audit(
+        "registration_cancelled",
+        "community_tournament_registration",
+        reg.id,
+        user_id,
+        metadata={"refund_status": reg.refund_status},
+    )
     db.session.commit()
     return reg
 
@@ -956,6 +1104,7 @@ def list_host_registrations(host_user_id, tournament_id, filters):
         CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
         CommunityTournamentRegistrationStatus.CONFIRMED,
         CommunityTournamentRegistrationStatus.CANCELLED,
+        CommunityTournamentRegistrationStatus.REFUND_PENDING,
         CommunityTournamentRegistrationStatus.REFUNDED,
     }
     if status and status not in valid_statuses:
@@ -993,19 +1142,19 @@ def manage_registration(host_user_id, tournament_id, registration_id, payload):
     elif action == "remove_participant":
         if tournament.status in {CommunityTournamentStatus.LIVE, CommunityTournamentStatus.COMPLETED, CommunityTournamentStatus.CANCELLED}:
             raise CommunityConflictError("participants cannot be removed after the tournament starts")
-        if registration.status not in {CommunityTournamentRegistrationStatus.PENDING_PAYMENT, CommunityTournamentRegistrationStatus.CONFIRMED}:
+        if registration.status not in {
+            CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+            CommunityTournamentRegistrationStatus.CONFIRMED,
+            CommunityTournamentRegistrationStatus.REFUND_PENDING,
+        }:
             raise CommunityConflictError("registration is no longer active")
-        if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED:
-            tournament.registered_players_count = max(0, tournament.registered_players_count - 1)
-        registration.cancelled_at = _now()
-        if registration.payment_status == "paid" and registration.amount_paid and registration.payment_provider == "wallet":
-            registration.status = CommunityTournamentRegistrationStatus.REFUNDED
-            registration.payment_status = "refunded"
-            _apply_wallet_transaction(registration.user_id, registration.amount_paid, "community-tournament-refund", tournament.id)
-        else:
-            registration.status = CommunityTournamentRegistrationStatus.CANCELLED
-        _recalculate_prize_pool(tournament)
-        _notify(registration.user_id, "community_registration_removed", "Registration cancelled", f"Your registration for {tournament.title} was cancelled by the host.", tournament.id)
+        try:
+            _refund_or_cancel_registration(registration, tournament)
+        except Exception:
+            db.session.rollback()
+            raise
+        title = "Refund initiated" if registration.status == CommunityTournamentRegistrationStatus.REFUND_PENDING else "Registration cancelled"
+        _notify(registration.user_id, "community_registration_removed", title, f"Your registration for {tournament.title} was cancelled by the host.", tournament.id)
     else:
         raise CommunityValidationError("action must be check_in, undo_check_in, or remove_participant")
 

@@ -65,6 +65,11 @@ class Config:
     USER_SIGNUP_EMAIL_LINK_FID_ENABLED = os.getenv("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
     USER_DELETION_COOLDOWN_DAYS = int(os.getenv("USER_DELETION_COOLDOWN_DAYS", "30") or 30)
 
+    # Server-to-server authorization for wallet credits. There is deliberately
+    # no development default: an unset token disables the credit endpoint.
+    WALLET_CREDIT_INTERNAL_TOKEN = os.getenv("WALLET_CREDIT_INTERNAL_TOKEN", "")
+    WALLET_CREDIT_MAX_AMOUNT = int(os.getenv("WALLET_CREDIT_MAX_AMOUNT", "1000000") or 1000000)
+
     # Community tournament host program
     COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE = float(os.getenv("COMMUNITY_HOST_VERIFICATION_MONTHLY_FEE", "199") or 199)
     COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK = int(os.getenv("COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK", "3") or 3)
