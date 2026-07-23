@@ -23,6 +23,8 @@ services:
       - COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK=3
       - COMMUNITY_ADMIN_TOKEN=dev
       - COMMUNITY_PAYMENT_CRON_TOKEN=${COMMUNITY_PAYMENT_CRON_TOKEN:-}
+      - WALLET_CREDIT_INTERNAL_TOKEN=${WALLET_CREDIT_INTERNAL_TOKEN:-}
+      - WALLET_CREDIT_MAX_AMOUNT=${WALLET_CREDIT_MAX_AMOUNT:-1000000}
       # Payment confirmation must be enabled in the deployment that receives
       # player registrations. Razorpay sends its signed webhook to this service.
       - PAYMENT_PROVIDER=${PAYMENT_PROVIDER:-mock}

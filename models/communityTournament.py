@@ -46,6 +46,7 @@ class CommunityTournamentRegistrationStatus:
     PENDING_PAYMENT = "pending_payment"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
+    REFUND_PENDING = "refund_pending"
     REFUNDED = "refunded"
 
 
@@ -213,6 +214,12 @@ class CommunityTournamentRegistration(db.Model):
     paid_at = Column(DateTime(timezone=True), nullable=True)
     checked_in_at = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    refund_status = Column(String(32), nullable=True)
+    refund_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    razorpay_refund_id = Column(String(120), nullable=True)
+    refund_requested_at = Column(DateTime(timezone=True), nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    refund_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -226,6 +233,13 @@ class CommunityTournamentRegistration(db.Model):
             unique=True,
             postgresql_where=db.text("status NOT IN ('cancelled', 'refunded')"),
         ),
+        Index(
+            "uq_community_registration_razorpay_refund_id",
+            "razorpay_refund_id",
+            unique=True,
+            postgresql_where=db.text("razorpay_refund_id IS NOT NULL"),
+        ),
+        Index("ix_community_registration_refund_status", "refund_status"),
     )
 
     def to_dict(self):
@@ -245,6 +259,11 @@ class CommunityTournamentRegistration(db.Model):
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "checked_in_at": self.checked_in_at.isoformat() if self.checked_in_at else None,
             "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
+            "refund_status": self.refund_status,
+            "refund_amount": float(self.refund_amount or 0),
+            "razorpay_refund_id": self.razorpay_refund_id,
+            "refund_requested_at": self.refund_requested_at.isoformat() if self.refund_requested_at else None,
+            "refunded_at": self.refunded_at.isoformat() if self.refunded_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

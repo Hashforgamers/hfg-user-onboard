@@ -105,6 +105,60 @@ def fetch_tournament_payment(payment_id: str, expected_amount, expected_currency
         raise ValueError("payment queue requires PAYMENT_PROVIDER=razorpay")
     return _rzp_fetch_tournament_payment(payment_id, expected_amount, expected_currency, order_id)
 
+
+def refund_tournament_payment(
+    payment_id: str,
+    amount,
+    currency: str,
+    receipt: str,
+    existing_refund_id: str = None,
+    provider: str = None,
+) -> Dict[str, Any]:
+    """Create or recover one idempotent tournament registration refund."""
+    selected_provider = str(provider or PROVIDER).lower()
+    if selected_provider == "mock":
+        return {
+            "provider": "mock",
+            "refund_id": existing_refund_id or f"rfnd_{receipt}",
+            "payment_id": str(payment_id),
+            "amount": Decimal(str(amount)).quantize(Decimal("0.01")),
+            "currency": str(currency).upper(),
+            "status": "processed",
+            "receipt": receipt,
+        }
+    if selected_provider != "razorpay" or PROVIDER != "razorpay":
+        raise ValueError("tournament refunds are not configured for this provider")
+    return _rzp_refund_tournament_payment(
+        payment_id,
+        amount,
+        currency,
+        receipt,
+        existing_refund_id=existing_refund_id,
+    )
+
+
+def fetch_tournament_refund(
+    refund_id: str,
+    payment_id: str,
+    amount,
+    currency: str,
+    provider: str = None,
+) -> Dict[str, Any]:
+    """Fetch and validate a provider refund during reconciliation."""
+    selected_provider = str(provider or PROVIDER).lower()
+    if selected_provider == "mock":
+        return {
+            "provider": "mock",
+            "refund_id": str(refund_id),
+            "payment_id": str(payment_id),
+            "amount": Decimal(str(amount)).quantize(Decimal("0.01")),
+            "currency": str(currency).upper(),
+            "status": "processed",
+        }
+    if selected_provider != "razorpay" or PROVIDER != "razorpay":
+        raise ValueError("tournament refunds are not configured for this provider")
+    return _rzp_fetch_tournament_refund(refund_id, payment_id, amount, currency)
+
 # ---------------------------
 # Mock provider (for dev/test)
 # ---------------------------
@@ -333,6 +387,116 @@ def _rzp_fetch_tournament_payment(payment_id: str, expected_amount, expected_cur
         "currency": expected_currency,
         "status": "captured",
     }
+
+
+def _validated_refund(refund, payment_id: str, expected_amount, expected_currency: str) -> Dict[str, Any]:
+    expected_paise = _amount_in_paise(expected_amount)
+    expected_currency = str(expected_currency or "INR").upper()
+    refund_id = str(refund.get("id") or "").strip()
+    if not refund_id:
+        raise ValueError("Razorpay refund has no ID")
+    if str(refund.get("payment_id") or "") != str(payment_id):
+        raise ValueError("Razorpay refund does not belong to the registration payment")
+    if int(refund.get("amount") or 0) != expected_paise:
+        raise ValueError("Razorpay refund amount does not match the registration payment")
+    actual_currency = str(refund.get("currency") or "").upper()
+    if actual_currency and actual_currency != expected_currency:
+        raise ValueError("Razorpay refund currency does not match the registration payment")
+    status = str(refund.get("status") or "").lower()
+    if status not in {"pending", "processed", "failed"}:
+        raise ValueError(f"Razorpay refund has an unsupported status: {status or 'unknown'}")
+    return {
+        "provider": "razorpay",
+        "refund_id": refund_id,
+        "payment_id": str(payment_id),
+        "amount": Decimal(expected_paise) / Decimal("100"),
+        "currency": expected_currency,
+        "status": status,
+        "receipt": refund.get("receipt"),
+    }
+
+
+def _rzp_fetch_tournament_refund(refund_id: str, payment_id: str, amount, currency: str) -> Dict[str, Any]:
+    import requests
+
+    key_id, key_secret = _razorpay_credentials()
+    response = requests.get(
+        f"https://api.razorpay.com/v1/refunds/{refund_id}",
+        auth=(key_id, key_secret),
+        timeout=10,
+    )
+    response.raise_for_status()
+    return _validated_refund(response.json(), payment_id, amount, currency)
+
+
+def _rzp_payment_refunds(payment_id: str):
+    import requests
+
+    key_id, key_secret = _razorpay_credentials()
+    response = requests.get(
+        f"https://api.razorpay.com/v1/payments/{payment_id}/refunds",
+        auth=(key_id, key_secret),
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload.get("items") or []
+
+
+def _rzp_refund_tournament_payment(
+    payment_id: str,
+    amount,
+    currency: str,
+    receipt: str,
+    existing_refund_id: str = None,
+) -> Dict[str, Any]:
+    import requests
+
+    payment_id = str(payment_id or "").strip()
+    receipt = str(receipt or "").strip()[:40]
+    if not payment_id or not receipt:
+        raise ValueError("payment_id and refund receipt are required")
+
+    if existing_refund_id:
+        existing = _rzp_fetch_tournament_refund(existing_refund_id, payment_id, amount, currency)
+        if existing["status"] in {"pending", "processed"}:
+            return existing
+
+    matching = [
+        refund for refund in _rzp_payment_refunds(payment_id)
+        if str(refund.get("receipt") or "").startswith(receipt)
+    ]
+    for refund in matching:
+        validated = _validated_refund(refund, payment_id, amount, currency)
+        if validated["status"] in {"pending", "processed"}:
+            return validated
+
+    attempt = len(matching) + 1
+    attempt_receipt = receipt if attempt == 1 else f"{receipt[:37]}_{attempt}"[:40]
+    key_id, key_secret = _razorpay_credentials()
+    payload = {
+        "amount": _amount_in_paise(amount),
+        "speed": "normal",
+        "receipt": attempt_receipt,
+        "notes": {"source": "community_tournament_registration"},
+    }
+    try:
+        response = requests.post(
+            f"https://api.razorpay.com/v1/payments/{payment_id}/refund",
+            auth=(key_id, key_secret),
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return _validated_refund(response.json(), payment_id, amount, currency)
+    except Exception:
+        # The request may have succeeded before a timeout. Recover it by receipt.
+        for refund in _rzp_payment_refunds(payment_id):
+            if str(refund.get("receipt") or "") == attempt_receipt:
+                validated = _validated_refund(refund, payment_id, amount, currency)
+                if validated["status"] in {"pending", "processed"}:
+                    return validated
+        raise
 
 # ---------------------------
 # Stripe (outline)

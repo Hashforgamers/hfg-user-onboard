@@ -34,6 +34,7 @@ from models.voucher import Voucher
 from services.security import encode_user, auth_required_self
 
 import jwt
+import hmac
 
 from datetime import datetime, timedelta
 import time
@@ -1641,28 +1642,66 @@ def get_wallet_balance_auth():
 @user_blueprint.route('/users/wallet', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
 def add_wallet_balance():
-    user_id = g.auth_user_id 
-    data = request.json
+    user_id = g.auth_user_id
+    configured_token = str(current_app.config.get("WALLET_CREDIT_INTERNAL_TOKEN") or "")
+    provided_token = str(request.headers.get("X-Wallet-Credit-Token") or "")
+    if not configured_token:
+        current_app.logger.error("Wallet credit endpoint is disabled because its internal token is not configured")
+        return jsonify({"message": "Wallet crediting is not configured"}), 503
+    if not provided_token or not hmac.compare_digest(provided_token, configured_token):
+        current_app.logger.warning("Rejected unauthorized wallet credit attempt for user_id=%s", user_id)
+        return jsonify({"message": "Wallet credit authorization required"}), 403
+
+    data = request.get_json(silent=True) or {}
     amount = data.get('amount')
-    txn_type = data.get('type', 'top-up')  # default to 'top-up'
-    reference_id = data.get('reference_id')
+    txn_type = str(data.get('type') or 'top-up').strip()
+    reference_id = str(data.get('reference_id') or '').strip()
 
-    if amount is None or not isinstance(amount, int) or amount <= 0:
+    if amount is None or isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
         return jsonify({"message": "Amount must be a positive integer"}), 400
+    max_amount = int(current_app.config.get("WALLET_CREDIT_MAX_AMOUNT", 1000000) or 1000000)
+    if amount > max_amount:
+        return jsonify({"message": f"Amount must not exceed {max_amount}"}), 400
+    if not reference_id:
+        return jsonify({"message": "reference_id is required"}), 400
+    if len(reference_id) > 50:
+        return jsonify({"message": "reference_id must not exceed 50 characters"}), 400
+    if not txn_type or len(txn_type) > 50:
+        return jsonify({"message": "type must be between 1 and 50 characters"}), 400
 
-    wallet = HashWallet.query.filter_by(user_id=user_id).first()
+    wallet = HashWallet.query.filter_by(user_id=user_id).with_for_update().first()
     if not wallet:
         _ensure_hash_wallet_row(int(user_id))
-        wallet = HashWallet.query.filter_by(user_id=user_id).first()
+        wallet = HashWallet.query.filter_by(user_id=user_id).with_for_update().first()
         if not wallet:
             return jsonify({"message": "Wallet not found"}), 404
 
-    user = db.session.query(User).filter_by(id=user_id).with_for_update().first()
+    user = db.session.query(User).filter_by(id=user_id).first()
 
     if not user:
         return jsonify({"message": "User not found"}), 404
 
     try:
+        # Serialize the global idempotency key even when two different wallets
+        # are credited concurrently with the same provider reference.
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:reference_id, 0))"),
+            {"reference_id": reference_id},
+        )
+        existing_txn = HashWalletTransaction.query.filter_by(reference_id=reference_id).first()
+        if existing_txn:
+            if (
+                int(existing_txn.user_id) != int(user_id)
+                or str(existing_txn.type or "") != txn_type
+                or int(existing_txn.amount) != amount
+            ):
+                return jsonify({"message": "reference_id was already used for another wallet credit"}), 409
+            return jsonify({
+                "message": "Wallet already updated",
+                "new_balance": wallet.balance,
+                "idempotent": True,
+            }), 200
+
         wallet.balance += amount
 
         txn = HashWalletTransaction(
