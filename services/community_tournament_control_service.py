@@ -467,6 +467,24 @@ def _schedule_time(tournament, index):
     return tournament.tournament_start_at + timedelta(minutes=(index // concurrent) * spacing)
 
 
+def _schedule_bracket_rounds(tournament, rounds):
+    """Schedule playable matches by round; automatic byes take no time slot."""
+    spacing = int(tournament.match_duration_minutes or 45) + int(tournament.break_duration_minutes or 15)
+    concurrent = max(int((tournament.schedule_config or {}).get("concurrent_matches") or 1), 1)
+    round_start = tournament.tournament_start_at
+
+    for round_number in sorted(rounds):
+        playable_matches = [
+            match for match in rounds[round_number]
+            if match.status != CommunityMatchStatus.COMPLETED
+        ]
+        for index, match in enumerate(playable_matches):
+            match.scheduled_at = round_start + timedelta(minutes=(index // concurrent) * spacing)
+        if playable_matches:
+            slots = math.ceil(len(playable_matches) / concurrent)
+            round_start += timedelta(minutes=slots * spacing)
+
+
 def start_tournament(host_user_id, tournament_id):
     """Start a bracket-ready tournament before its scheduled start time."""
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
@@ -535,7 +553,6 @@ def generate_matches(host_user_id, tournament_id):
         bracket_size = _next_power_of_two(len(teams))
         round_count = int(math.log2(bracket_size))
         rounds = {}
-        schedule_index = 0
         for round_number in range(1, round_count + 1):
             match_count = bracket_size // (2 ** round_number)
             rounds[round_number] = []
@@ -547,9 +564,7 @@ def generate_matches(host_user_id, tournament_id):
                     round_number=round_number,
                     match_number=match_number,
                     status=CommunityMatchStatus.SCHEDULED,
-                    scheduled_at=_schedule_time(tournament, schedule_index),
                 )
-                schedule_index += 1
                 rounds[round_number].append(match)
                 db.session.add(match)
         seeded_pairs = _seed_pairs(teams, bracket_size)
@@ -577,6 +592,7 @@ def generate_matches(host_user_id, tournament_id):
             for match in matches:
                 if match.team_a_id and match.team_b_id and match.status == CommunityMatchStatus.SCHEDULED:
                     match.status = CommunityMatchStatus.READY
+        _schedule_bracket_rounds(tournament, rounds)
     else:
         raise CommunityConflictError("automatic generation currently supports single_elimination, round_robin, and league")
 

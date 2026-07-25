@@ -7,6 +7,7 @@ from unittest.mock import patch
 from services.community_tournament_control_service import (
     _match_payload,
     _next_power_of_two,
+    _schedule_bracket_rounds,
     _schedule_time,
     _seed_pairs,
     _validate_roster,
@@ -56,6 +57,26 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertEqual(_schedule_time(tournament, 0), start)
         self.assertEqual(_schedule_time(tournament, 1), start)
         self.assertEqual(_schedule_time(tournament, 2).hour, 11)
+
+    def test_bracket_schedule_skips_byes_and_waits_for_the_prior_round(self):
+        start = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            tournament_start_at=start,
+            match_duration_minutes=45,
+            break_duration_minutes=15,
+            schedule_config={"concurrent_matches": 2},
+        )
+        bye = SimpleNamespace(status="completed", scheduled_at=None)
+        first_a = SimpleNamespace(status="ready", scheduled_at=None)
+        first_b = SimpleNamespace(status="ready", scheduled_at=None)
+        final = SimpleNamespace(status="scheduled", scheduled_at=None)
+
+        _schedule_bracket_rounds(tournament, {1: [bye, first_a, first_b], 2: [final]})
+
+        self.assertIsNone(bye.scheduled_at)
+        self.assertEqual(first_a.scheduled_at, start)
+        self.assertEqual(first_b.scheduled_at, start)
+        self.assertEqual(final.scheduled_at, start + timedelta(minutes=60))
 
     @patch("services.community_tournament_control_service.CommunityTournamentTeam")
     def test_public_match_payload_redacts_lobby_credentials(self, team_model):
