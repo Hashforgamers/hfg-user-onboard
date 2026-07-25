@@ -170,6 +170,19 @@ class CommunityEsportsOperationTests(unittest.TestCase):
 
         self.assertEqual(_derive_status(tournament, now), CommunityTournamentStatus.LIVE)
 
+    def test_new_tournament_status_treats_unset_registration_count_as_zero(self):
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            status=CommunityTournamentStatus.PUBLISHED,
+            registration_start_at=now - timedelta(minutes=5),
+            registration_end_at=now + timedelta(hours=1),
+            tournament_start_at=now + timedelta(hours=2),
+            registered_players_count=None,
+            max_players=16,
+        )
+
+        self.assertEqual(_derive_status(tournament, now), CommunityTournamentStatus.REGISTRATION_OPEN)
+
     @patch("services.community_tournament_service.db")
     @patch("services.community_tournament_service._notify")
     @patch("services.community_tournament_service._audit")
