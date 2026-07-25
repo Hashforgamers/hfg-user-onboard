@@ -70,6 +70,21 @@ Registration:
 - `refunded`
 - `refund_pending`
 
+Team:
+- `pending`
+- `approved`
+- `rejected`
+- `disqualified`
+
+Operational match:
+- `scheduled`
+- `ready`
+- `in_progress`
+- `awaiting_results`
+- `disputed`
+- `completed`
+- `cancelled`
+
 Result:
 - `submitted`
 - `verified`
@@ -120,11 +135,12 @@ Payout:
   "is_featured": false,
   "status": "registration_open",
   "total_collection": 500.0,
-  "platform_fee_amount": 40.0,
+  "platform_fee_rate": 10.0,
+  "platform_fee_amount": 50.0,
   "host_tier": "bronze",
   "organizer_commission_rate": 8.0,
   "organizer_commission_amount": 40.0,
-  "prize_pool": 460.0,
+  "prize_pool": 410.0,
   "registered_players_count": 10,
   "created_at": "2026-07-14T10:00:00+00:00",
   "updated_at": "2026-07-14T10:00:00+00:00"
@@ -425,8 +441,9 @@ Validation:
 Financial behavior:
 - Backend snapshots the host's current `host_tier` and `organizer_commission_rate` when the tournament is created.
 - Organizer commission is deducted from total collection before prize calculation.
-- `prize_pool = total_collection - organizer_commission_amount`.
-- `platform_fee_amount` currently mirrors `organizer_commission_amount` for backward compatibility with existing clients.
+- `prize_pool = total_collection - platform_fee_amount - organizer_commission_amount`.
+- New tournaments snapshot `platform_fee_rate` from backend configuration; clients cannot set either fee rate.
+- Existing tournaments migrate with `platform_fee_rate = 0` so their established prize economics remain unchanged.
 - `total_collection`, `organizer_commission_amount`, `platform_fee_amount`, and `prize_pool` are recalculated by backend.
 
 ### Update Tournament
