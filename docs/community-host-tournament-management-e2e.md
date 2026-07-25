@@ -322,7 +322,9 @@ member.
 Generation is one-time and host-only. Single elimination uses seeded,
 power-of-two brackets with byes and winner advancement. Round robin and league
 generate every pair. Scheduling uses `match_duration_minutes`,
-`break_duration_minutes`, and `schedule_config.concurrent_matches`.
+`break_duration_minutes`, and `schedule_config.concurrent_matches`. Generation
+automatically checks in every approved bracket entrant that is not already
+checked in, including the matching captain registration.
 
 ### Read Matches
 
