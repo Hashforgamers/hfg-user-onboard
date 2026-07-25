@@ -216,6 +216,7 @@ def _legacy_community_registration_response(tournament_id, body):
             int(user_id),
             tournament.id,
             payment_reference=body.get("payment_reference"),
+            invite_code=body.get("invite_code"),
         )
     except (CommunityConflictError, CommunityValidationError) as exc:
         return jsonify({

@@ -1,0 +1,157 @@
+import unittest
+import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from services.community_tournament_control_service import (
+    _match_payload,
+    _next_power_of_two,
+    _schedule_time,
+    _seed_pairs,
+    _validate_roster,
+    rule_template,
+)
+from services.community_tournament_service import (
+    CommunityForbiddenError,
+    CommunityValidationError,
+    _invite_code_hash,
+    _recalculate_prize_pool,
+    _validated_evidence_asset_ids,
+)
+
+
+class CommunityEsportsOperationTests(unittest.TestCase):
+    def test_bracket_size_uses_next_power_of_two(self):
+        self.assertEqual(_next_power_of_two(2), 2)
+        self.assertEqual(_next_power_of_two(5), 8)
+        self.assertEqual(_next_power_of_two(16), 16)
+
+    def test_seed_pairs_distribute_byes_without_empty_match(self):
+        teams = [SimpleNamespace(id=index) for index in range(1, 6)]
+
+        pairs = _seed_pairs(teams, 8)
+
+        self.assertEqual(len(pairs), 4)
+        self.assertEqual(sum(team is None for pair in pairs for team in pair), 3)
+        self.assertTrue(all(team_a is not None or team_b is not None for team_a, team_b in pairs))
+        self.assertEqual(
+            {team.id for pair in pairs for team in pair if team is not None},
+            {1, 2, 3, 4, 5},
+        )
+
+    def test_schedule_respects_concurrency_and_break(self):
+        start = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            tournament_start_at=start,
+            match_duration_minutes=45,
+            break_duration_minutes=15,
+            schedule_config={"concurrent_matches": 2},
+        )
+
+        self.assertEqual(_schedule_time(tournament, 0), start)
+        self.assertEqual(_schedule_time(tournament, 1), start)
+        self.assertEqual(_schedule_time(tournament, 2).hour, 11)
+
+    @patch("services.community_tournament_control_service.CommunityTournamentTeam")
+    def test_public_match_payload_redacts_lobby_credentials(self, team_model):
+        team_model.query.filter.return_value.all.return_value = []
+        match = SimpleNamespace(
+            team_a_id=None,
+            team_b_id=None,
+            winner_team_id=None,
+            to_dict=lambda: {
+                "id": str(uuid.uuid4()),
+                "lobby_details": {"access_code": "secret"},
+            },
+        )
+
+        payload = _match_payload(match, include_lobby=False)
+
+        self.assertEqual(payload["lobby_details"], {})
+
+    @patch("services.community_tournament_control_service.User")
+    def test_roster_requires_game_ids_and_adds_captain(self, user_model):
+        user_model.query.with_entities.return_value.filter.return_value.all.return_value = [
+            SimpleNamespace(id=7),
+            SimpleNamespace(id=8),
+        ]
+        user_model.query.filter_by.return_value.first.return_value = SimpleNamespace(game_username="Captain7")
+        tournament = SimpleNamespace(team_size=2, substitute_limit=0)
+
+        roster = _validate_roster(
+            tournament,
+            7,
+            [{"user_id": 8, "game_id": "Player8", "role": "player"}],
+        )
+
+        self.assertEqual(len(roster), 2)
+        self.assertEqual(roster[0]["user_id"], 7)
+        self.assertEqual(roster[0]["role"], "captain")
+
+    @patch("services.community_tournament_control_service.User")
+    def test_roster_rejects_missing_game_id(self, user_model):
+        tournament = SimpleNamespace(team_size=2, substitute_limit=0)
+
+        with self.assertRaisesRegex(CommunityValidationError, "game_id"):
+            _validate_roster(
+                tournament,
+                7,
+                [{"user_id": 8, "game_id": "", "role": "player"}],
+            )
+
+        user_model.query.with_entities.assert_not_called()
+
+    def test_invite_codes_are_stored_as_hashes(self):
+        digest = _invite_code_hash("private-code")
+
+        self.assertEqual(len(digest), 64)
+        self.assertNotIn("private-code", digest)
+        self.assertEqual(digest, _invite_code_hash("private-code"))
+
+    def test_rule_template_always_contains_hash_safety_rules(self):
+        payload = rule_template("Valorant")
+
+        self.assertEqual(payload["template"]["match_format"], "Best of 3")
+        self.assertGreaterEqual(len(payload["mandatory_hash_rules"]), 5)
+
+    def test_prize_pool_deducts_platform_and_organizer_fees_separately(self):
+        tournament = SimpleNamespace(
+            entry_fee=100,
+            registered_players_count=10,
+            organizer_commission_rate=8,
+            platform_fee_rate=10,
+            host_tier="bronze",
+        )
+
+        _recalculate_prize_pool(tournament)
+
+        self.assertEqual(float(tournament.total_collection), 1000.0)
+        self.assertEqual(float(tournament.platform_fee_amount), 100.0)
+        self.assertEqual(float(tournament.organizer_commission_amount), 80.0)
+        self.assertEqual(float(tournament.prize_pool), 820.0)
+
+    @patch("services.community_tournament_service.CommunityFileAsset")
+    def test_evidence_assets_must_belong_to_caller_and_tournament(self, asset_model):
+        asset_id = uuid.uuid4()
+        tournament_id = uuid.uuid4()
+        asset_model.query.filter.return_value.all.return_value = [
+            SimpleNamespace(
+                id=asset_id,
+                owner_user_id=99,
+                tournament_id=tournament_id,
+                purpose="result_evidence",
+            )
+        ]
+
+        with self.assertRaises(CommunityForbiddenError):
+            _validated_evidence_asset_ids(
+                [str(asset_id)],
+                tournament_id,
+                7,
+                {"result_evidence"},
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

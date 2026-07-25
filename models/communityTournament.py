@@ -113,8 +113,19 @@ class CommunityTournament(db.Model):
     banner_asset_id = Column(UUID(as_uuid=True), ForeignKey("community_file_assets.id"), nullable=True)
     banner_url = Column(Text, nullable=True)
     game = Column(String(80), nullable=False)
+    game_mode = Column(String(80), nullable=True)
+    platform = Column(String(24), nullable=False, default="cross_platform")
+    organization_name = Column(String(160), nullable=True)
     tournament_type = Column(String(64), nullable=False, default="single_elimination")
     team_mode = Column(String(24), nullable=False, default="solo")
+    team_size = Column(Integer, nullable=False, default=1)
+    substitute_limit = Column(Integer, nullable=False, default=0)
+    minimum_age = Column(Integer, nullable=True)
+    region = Column(String(80), nullable=True)
+    registration_policy = Column(String(32), nullable=False, default="automatic")
+    is_private = Column(Boolean, nullable=False, default=False)
+    invite_code_hash = Column(String(128), nullable=True)
+    min_entries = Column(Integer, nullable=False, default=2)
     entry_fee = Column(Numeric(12, 2), nullable=False, default=0)
     currency = Column(String(8), nullable=False, default="INR")
     max_players = Column(Integer, nullable=False)
@@ -122,6 +133,16 @@ class CommunityTournament(db.Model):
     registration_end_at = Column(DateTime(timezone=True), nullable=False)
     tournament_start_at = Column(DateTime(timezone=True), nullable=False)
     tournament_end_at = Column(DateTime(timezone=True), nullable=True)
+    roster_lock_at = Column(DateTime(timezone=True), nullable=True)
+    check_in_start_at = Column(DateTime(timezone=True), nullable=True)
+    check_in_end_at = Column(DateTime(timezone=True), nullable=True)
+    match_duration_minutes = Column(Integer, nullable=False, default=45)
+    break_duration_minutes = Column(Integer, nullable=False, default=15)
+    max_matches_per_team_per_day = Column(Integer, nullable=False, default=6)
+    result_submission_window_minutes = Column(Integer, nullable=False, default=15)
+    dispute_window_minutes = Column(Integer, nullable=False, default=30)
+    schedule_config = Column(JSONB, nullable=False, default=dict)
+    rules_config = Column(JSONB, nullable=False, default=dict)
     rules = Column(Text, nullable=True)
     prize_distribution = Column(JSONB, nullable=False, default=list)
     discord_link = Column(Text, nullable=True)
@@ -133,6 +154,7 @@ class CommunityTournament(db.Model):
     is_featured = Column(Boolean, nullable=False, default=False, index=True)
     status = Column(String(32), nullable=False, default=CommunityTournamentStatus.DRAFT, index=True)
     total_collection = Column(Numeric(12, 2), nullable=False, default=0)
+    platform_fee_rate = Column(Numeric(5, 2), nullable=False, default=0)
     platform_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     host_tier = Column(String(32), nullable=False, default=CommunityHostTier.BRONZE, index=True)
     organizer_commission_rate = Column(Numeric(5, 2), nullable=False, default=8)
@@ -148,8 +170,17 @@ class CommunityTournament(db.Model):
     __table_args__ = (
         CheckConstraint("entry_fee >= 0", name="ck_community_tournament_entry_fee_non_negative"),
         CheckConstraint("max_players > 0", name="ck_community_tournament_max_players_positive"),
+        CheckConstraint("team_size > 0", name="ck_community_tournament_team_size_positive"),
+        CheckConstraint("substitute_limit >= 0", name="ck_community_tournament_substitute_limit_non_negative"),
+        CheckConstraint("min_entries > 0 AND min_entries <= max_players", name="ck_community_tournament_min_entries"),
+        CheckConstraint("match_duration_minutes > 0", name="ck_community_tournament_match_duration_positive"),
+        CheckConstraint("break_duration_minutes >= 0", name="ck_community_tournament_break_non_negative"),
+        CheckConstraint("result_submission_window_minutes > 0", name="ck_community_tournament_result_window_positive"),
+        CheckConstraint("dispute_window_minutes > 0", name="ck_community_tournament_dispute_window_positive"),
         CheckConstraint("registered_players_count >= 0", name="ck_community_tournament_registered_non_negative"),
         CheckConstraint("organizer_commission_rate >= 0 AND organizer_commission_rate <= 100", name="ck_community_tournament_commission_rate"),
+        CheckConstraint("platform_fee_rate >= 0 AND platform_fee_rate <= 100", name="ck_community_tournament_platform_fee_rate"),
+        CheckConstraint("platform_fee_rate + organizer_commission_rate <= 100", name="ck_community_tournament_total_fee_rate"),
         Index("ix_community_tournaments_discovery", "visibility", "status", "registration_start_at", "tournament_start_at"),
         Index("ix_community_tournaments_host_status", "host_user_id", "status"),
     )
@@ -163,8 +194,19 @@ class CommunityTournament(db.Model):
             "banner_asset_id": str(self.banner_asset_id) if self.banner_asset_id else None,
             "banner_url": self.banner_url,
             "game": self.game,
+            "game_mode": self.game_mode,
+            "platform": self.platform,
+            "organization_name": self.organization_name,
             "tournament_type": self.tournament_type,
             "team_mode": self.team_mode,
+            "team_size": int(self.team_size or 1),
+            "substitute_limit": int(self.substitute_limit or 0),
+            "minimum_age": self.minimum_age,
+            "region": self.region,
+            "registration_policy": self.registration_policy,
+            "is_private": bool(self.is_private),
+            "requires_invite_code": bool(self.invite_code_hash),
+            "min_entries": int(self.min_entries or 2),
             "entry_fee": float(self.entry_fee or 0),
             "currency": self.currency,
             "max_players": int(self.max_players or 0),
@@ -172,6 +214,16 @@ class CommunityTournament(db.Model):
             "registration_end_at": self.registration_end_at.isoformat() if self.registration_end_at else None,
             "tournament_start_at": self.tournament_start_at.isoformat() if self.tournament_start_at else None,
             "tournament_end_at": self.tournament_end_at.isoformat() if self.tournament_end_at else None,
+            "roster_lock_at": self.roster_lock_at.isoformat() if self.roster_lock_at else None,
+            "check_in_start_at": self.check_in_start_at.isoformat() if self.check_in_start_at else None,
+            "check_in_end_at": self.check_in_end_at.isoformat() if self.check_in_end_at else None,
+            "match_duration_minutes": int(self.match_duration_minutes or 45),
+            "break_duration_minutes": int(self.break_duration_minutes or 15),
+            "max_matches_per_team_per_day": int(self.max_matches_per_team_per_day or 6),
+            "result_submission_window_minutes": int(self.result_submission_window_minutes or 15),
+            "dispute_window_minutes": int(self.dispute_window_minutes or 30),
+            "schedule_config": self.schedule_config or {},
+            "rules_config": self.rules_config or {},
             "rules": self.rules,
             "prize_distribution": self.prize_distribution or [],
             "discord_link": self.discord_link,
@@ -181,6 +233,7 @@ class CommunityTournament(db.Model):
             "is_featured": bool(self.is_featured),
             "status": self.status,
             "total_collection": float(self.total_collection or 0),
+            "platform_fee_rate": float(self.platform_fee_rate or 0),
             "platform_fee_amount": float(self.platform_fee_amount or 0),
             "host_tier": self.host_tier,
             "organizer_commission_rate": float(self.organizer_commission_rate or 0),

@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import hashlib
+import hmac
 import json
 import re
 import uuid
+from urllib.parse import urlparse
 
 from flask import current_app
 from sqlalchemy import func, or_
@@ -83,6 +86,17 @@ TERMINAL_STATUSES = {
     CommunityTournamentStatus.COMPLETED,
     CommunityTournamentStatus.CANCELLED,
 }
+TOURNAMENT_FORMATS = {
+    "single_elimination",
+    "round_robin",
+    "double_elimination",
+    "group_knockout",
+    "battle_royale",
+    "league",
+}
+TEAM_MODES = {"solo", "duo", "squad", "team", "custom"}
+PLATFORMS = {"mobile", "pc", "console", "cross_platform"}
+REGISTRATION_POLICIES = {"automatic", "manual_approval", "payment", "identity_verification"}
 
 
 class CommunityValidationError(ValueError):
@@ -141,6 +155,73 @@ def _room_details_data(value):
     return value
 
 
+def _json_object(value, field_name):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise CommunityValidationError(f"{field_name} must be an object")
+    try:
+        json.dumps(value, ensure_ascii=True)
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError(f"{field_name} must contain JSON-compatible values") from exc
+    return value
+
+
+def _bounded_int(value, field_name, minimum, maximum):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError(f"{field_name} must be an integer") from exc
+    if parsed < minimum or parsed > maximum:
+        raise CommunityValidationError(f"{field_name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _invite_code_hash(value):
+    return hashlib.sha256(str(value).strip().encode("utf-8")).hexdigest()
+
+
+def _validated_evidence_asset_ids(values, tournament_id, user_id, allowed_purposes):
+    if not isinstance(values, list):
+        raise CommunityValidationError("evidence_asset_ids must be a list")
+    if not values:
+        return []
+    try:
+        asset_ids = [uuid.UUID(str(value)) for value in values]
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError("evidence_asset_ids must contain valid UUIDs") from exc
+    if len(set(asset_ids)) != len(asset_ids):
+        raise CommunityValidationError("evidence_asset_ids must be unique")
+    assets = CommunityFileAsset.query.filter(CommunityFileAsset.id.in_(asset_ids)).all()
+    valid_ids = {
+        asset.id
+        for asset in assets
+        if asset.owner_user_id == int(user_id)
+        and asset.tournament_id == tournament_id
+        and asset.purpose in allowed_purposes
+    }
+    if valid_ids != set(asset_ids):
+        raise CommunityForbiddenError("one or more evidence assets are invalid or not owned by the caller")
+    return [str(asset_id) for asset_id in asset_ids]
+
+
+def _banner_asset(value, user_id, tournament_id=None):
+    if not value:
+        return None
+    try:
+        asset_id = uuid.UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError("banner_asset_id must be a valid UUID") from exc
+    asset = CommunityFileAsset.query.filter_by(id=asset_id, owner_user_id=int(user_id), purpose="banner").first()
+    if not asset:
+        raise CommunityForbiddenError("banner asset is invalid or not owned by the host")
+    if asset.tournament_id and tournament_id and asset.tournament_id != tournament_id:
+        raise CommunityConflictError("banner asset belongs to another tournament")
+    if asset.tournament_id and not tournament_id:
+        raise CommunityConflictError("banner asset is already attached to a tournament")
+    return asset
+
+
 def _host_commission_rate(host_tier):
     return HOST_TIER_COMMISSION_RATES.get(str(host_tier or CommunityHostTier.BRONZE).lower(), HOST_TIER_COMMISSION_RATES[CommunityHostTier.BRONZE])
 
@@ -172,6 +253,7 @@ def host_program_config():
     )
     included_per_week = int(current_app.config.get("COMMUNITY_HOST_INCLUDED_TOURNAMENTS_PER_WEEK", 3) or 3)
     return {
+        "platform_fee_rate": float(Decimal(str(current_app.config.get("COMMUNITY_PLATFORM_FEE_RATE", 10)))),
         "verification_fee": {
             "amount": float(monthly_fee),
             "currency": "INR",
@@ -257,12 +339,17 @@ def sync_tournament_status(tournament, now=None):
 def _recalculate_prize_pool(tournament):
     total = Decimal(str(tournament.entry_fee or 0)) * Decimal(int(tournament.registered_players_count or 0))
     commission_rate = Decimal(str(tournament.organizer_commission_rate or _host_commission_rate(tournament.host_tier)))
+    platform_fee_rate = Decimal(str(getattr(tournament, "platform_fee_rate", 0) or 0))
+    if commission_rate + platform_fee_rate > Decimal("100"):
+        raise CommunityValidationError("platform and organizer fee rates cannot exceed 100 percent")
     commission = (total * commission_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    platform_fee = (total * platform_fee_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     tournament.total_collection = total
     tournament.organizer_commission_rate = commission_rate
     tournament.organizer_commission_amount = commission
-    tournament.platform_fee_amount = commission
-    tournament.prize_pool = total - commission
+    tournament.platform_fee_rate = platform_fee_rate
+    tournament.platform_fee_amount = platform_fee
+    tournament.prize_pool = total - commission - platform_fee
 
 
 def _host_verification(user_id):
@@ -297,6 +384,20 @@ def submit_host_verification(user_id, payload):
         raise CommunityValidationError("upi_id is invalid")
     if len(address) < 10:
         raise CommunityValidationError("address is required")
+    government_asset = None
+    if government_id_asset_id:
+        try:
+            parsed_asset_id = uuid.UUID(str(government_id_asset_id))
+        except (TypeError, ValueError) as exc:
+            raise CommunityValidationError("government_id_asset_id must be a valid UUID") from exc
+        government_asset = CommunityFileAsset.query.filter_by(
+            id=parsed_asset_id,
+            owner_user_id=int(user_id),
+            purpose="government_id",
+            tournament_id=None,
+        ).first()
+        if not government_asset:
+            raise CommunityForbiddenError("government ID asset is invalid or not owned by the caller")
 
     verification = _host_verification(user_id)
     if not verification:
@@ -311,9 +412,10 @@ def submit_host_verification(user_id, payload):
     verification.upi_id = upi_id
     verification.address = address
     verification.government_id_reference = government_id_reference
-    verification.government_id_asset_id = uuid.UUID(str(government_id_asset_id)) if government_id_asset_id else None
+    verification.government_id_asset_id = government_asset.id if government_asset else None
     verification.verification_status = CommunityHostStatus.PENDING
     verification.rejection_reason = None
+    db.session.flush()
     _audit("host_verification_submitted", "community_host_verification", verification.id, user_id)
     db.session.commit()
     return verification
@@ -372,6 +474,12 @@ def create_tournament(host_user_id, payload):
     verification = _require_host_for_paid_tournament(host_user_id, entry_fee)
     host_tier = verification.host_tier if verification else CommunityHostTier.BRONZE
     organizer_commission_rate = _host_commission_rate(host_tier)
+    platform_fee_rate = Decimal(str(current_app.config.get("COMMUNITY_PLATFORM_FEE_RATE", 10))).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+    if platform_fee_rate < 0 or platform_fee_rate + organizer_commission_rate > 100:
+        raise CommunityValidationError("configured platform and organizer fee rates are invalid")
 
     title = str(payload.get("title") or "").strip()
     game = str(payload.get("game") or "").strip()
@@ -382,6 +490,24 @@ def create_tournament(host_user_id, payload):
         raise CommunityValidationError("game is required")
     if max_players <= 0 or max_players > 10000:
         raise CommunityValidationError("max_players must be between 1 and 10000")
+    tournament_type = str(payload.get("tournament_type") or "single_elimination").strip().lower()
+    team_mode = str(payload.get("team_mode") or "solo").strip().lower()
+    platform = str(payload.get("platform") or "cross_platform").strip().lower()
+    registration_policy = str(payload.get("registration_policy") or ("payment" if entry_fee > 0 else "automatic")).strip().lower()
+    if tournament_type not in TOURNAMENT_FORMATS:
+        raise CommunityValidationError("unsupported tournament_type")
+    if team_mode not in TEAM_MODES:
+        raise CommunityValidationError("unsupported team_mode")
+    if platform not in PLATFORMS:
+        raise CommunityValidationError("unsupported platform")
+    if registration_policy not in REGISTRATION_POLICIES:
+        raise CommunityValidationError("unsupported registration_policy")
+    team_size = _bounded_int(payload.get("team_size", 1 if team_mode == "solo" else 2), "team_size", 1, 100)
+    substitute_limit = _bounded_int(payload.get("substitute_limit", 0), "substitute_limit", 0, 20)
+    min_entries = _bounded_int(payload.get("min_entries", min(2, max_players)), "min_entries", 1, max_players)
+    minimum_age = payload.get("minimum_age")
+    minimum_age = _bounded_int(minimum_age, "minimum_age", 13, 100) if minimum_age is not None else None
+    banner_asset = _banner_asset(payload.get("banner_asset_id"), host_user_id)
 
     registration_start_at = _parse_datetime(payload.get("registration_start_at"), "registration_start_at")
     registration_end_at = _parse_datetime(payload.get("registration_end_at"), "registration_end_at")
@@ -401,19 +527,41 @@ def create_tournament(host_user_id, payload):
         title=title,
         description=str(payload.get("description") or "").strip() or None,
         banner_url=str(payload.get("banner_url") or "").strip() or None,
-        banner_asset_id=uuid.UUID(str(payload["banner_asset_id"])) if payload.get("banner_asset_id") else None,
+        banner_asset_id=banner_asset.id if banner_asset else None,
         game=game,
-        tournament_type=str(payload.get("tournament_type") or "single_elimination").strip(),
-        team_mode=str(payload.get("team_mode") or "solo").strip(),
+        game_mode=str(payload.get("game_mode") or "").strip() or None,
+        platform=platform,
+        organization_name=str(payload.get("organization_name") or "").strip() or None,
+        tournament_type=tournament_type,
+        team_mode=team_mode,
+        team_size=team_size,
+        substitute_limit=substitute_limit,
+        minimum_age=minimum_age,
+        region=str(payload.get("region") or "").strip() or None,
+        registration_policy=registration_policy,
+        is_private=payload.get("is_private", False),
+        invite_code_hash=_invite_code_hash(payload["invite_code"]) if payload.get("invite_code") else None,
+        min_entries=min_entries,
         entry_fee=entry_fee,
         host_tier=host_tier,
         organizer_commission_rate=organizer_commission_rate,
+        platform_fee_rate=platform_fee_rate,
         currency=str(payload.get("currency") or "INR").strip().upper(),
         max_players=max_players,
         registration_start_at=registration_start_at,
         registration_end_at=registration_end_at,
         tournament_start_at=tournament_start_at,
         tournament_end_at=tournament_end_at,
+        roster_lock_at=_parse_datetime(payload["roster_lock_at"], "roster_lock_at") if payload.get("roster_lock_at") else None,
+        check_in_start_at=_parse_datetime(payload["check_in_start_at"], "check_in_start_at") if payload.get("check_in_start_at") else None,
+        check_in_end_at=_parse_datetime(payload["check_in_end_at"], "check_in_end_at") if payload.get("check_in_end_at") else None,
+        match_duration_minutes=_bounded_int(payload.get("match_duration_minutes", 45), "match_duration_minutes", 5, 480),
+        break_duration_minutes=_bounded_int(payload.get("break_duration_minutes", 15), "break_duration_minutes", 0, 240),
+        max_matches_per_team_per_day=_bounded_int(payload.get("max_matches_per_team_per_day", 6), "max_matches_per_team_per_day", 1, 32),
+        result_submission_window_minutes=_bounded_int(payload.get("result_submission_window_minutes", 15), "result_submission_window_minutes", 1, 1440),
+        dispute_window_minutes=_bounded_int(payload.get("dispute_window_minutes", 30), "dispute_window_minutes", 1, 10080),
+        schedule_config=_json_object(payload.get("schedule_config"), "schedule_config"),
+        rules_config=_json_object(payload.get("rules_config"), "rules_config"),
         rules=str(payload.get("rules") or "").strip() or None,
         prize_distribution=payload.get("prize_distribution") or [],
         discord_link=str(payload.get("discord_link") or "").strip() or None,
@@ -425,12 +573,22 @@ def create_tournament(host_user_id, payload):
     )
     if tournament.status not in {CommunityTournamentStatus.DRAFT, CommunityTournamentStatus.PUBLISHED}:
         raise CommunityValidationError("new tournament status must be draft or published")
+    if not isinstance(tournament.is_private, bool):
+        raise CommunityValidationError("is_private must be a boolean")
+    if tournament.is_private and not tournament.invite_code_hash:
+        raise CommunityValidationError("private tournaments require an invite_code")
     if tournament.room_details or tournament.room_details_data:
         tournament.room_details_published_at = _now()
+    if tournament.check_in_start_at and tournament.check_in_end_at and tournament.check_in_end_at <= tournament.check_in_start_at:
+        raise CommunityValidationError("check_in_end_at must be after check_in_start_at")
+    if tournament.roster_lock_at and tournament.roster_lock_at > tournament.tournament_start_at:
+        raise CommunityValidationError("roster_lock_at cannot be after tournament_start_at")
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
     db.session.add(tournament)
     db.session.flush()
+    if banner_asset:
+        banner_asset.tournament_id = tournament.id
     _audit("tournament_created", "community_tournament", tournament.id, host_user_id)
     db.session.commit()
     return tournament
@@ -442,16 +600,38 @@ def update_tournament(host_user_id, tournament_id, payload):
         raise CommunityValidationError("tournament not found")
     if tournament.status in TERMINAL_STATUSES:
         raise CommunityConflictError("terminal tournaments cannot be edited")
+    from models.communityTournamentOperations import CommunityTournamentMatch, CommunityTournamentTeam
+
+    active_registration_query = CommunityTournamentRegistration.query.filter(
+        CommunityTournamentRegistration.tournament_id == tournament.id,
+        CommunityTournamentRegistration.status.notin_({
+            CommunityTournamentRegistrationStatus.CANCELLED,
+            CommunityTournamentRegistrationStatus.REFUNDED,
+        }),
+    )
+    active_registration_count = active_registration_query.count()
+    if active_registration_count and any(field in payload for field in {"entry_fee", "currency"}):
+        raise CommunityConflictError("entry_fee and currency cannot change after registration starts")
+    if tournament.registered_players_count > 0 and "prize_distribution" in payload:
+        raise CommunityConflictError("prize_distribution cannot change after confirmed registrations")
+    if any(field in payload for field in {"team_mode", "team_size", "substitute_limit"}) and CommunityTournamentTeam.query.filter_by(tournament_id=tournament.id).first():
+        raise CommunityConflictError("team configuration cannot change after a team is created")
+    if "tournament_type" in payload and CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first():
+        raise CommunityConflictError("tournament_type cannot change after matches are generated")
 
     editable = {
         "title", "description", "banner_url", "game", "tournament_type", "team_mode",
         "rules", "prize_distribution", "discord_link", "whatsapp_link", "room_details", "room_details_data",
+        "game_mode", "organization_name", "region", "schedule_config", "rules_config",
     }
     for field in editable:
         if field in payload:
             value = payload[field]
             if field == "room_details_data":
                 setattr(tournament, field, _room_details_data(value))
+                continue
+            if field in {"schedule_config", "rules_config"}:
+                setattr(tournament, field, _json_object(value, field))
                 continue
             if field in {"title", "game"}:
                 value = str(value or "").strip()
@@ -462,11 +642,44 @@ def update_tournament(host_user_id, tournament_id, payload):
             setattr(tournament, field, value)
 
     if "banner_asset_id" in payload:
-        tournament.banner_asset_id = uuid.UUID(str(payload["banner_asset_id"])) if payload["banner_asset_id"] else None
+        banner_asset = _banner_asset(payload["banner_asset_id"], host_user_id, tournament.id)
+        tournament.banner_asset_id = banner_asset.id if banner_asset else None
+        if banner_asset:
+            banner_asset.tournament_id = tournament.id
     if "visibility" in payload:
         if not isinstance(payload["visibility"], bool):
             raise CommunityValidationError("visibility must be a boolean")
         tournament.visibility = payload["visibility"]
+    for field, valid in (
+        ("platform", PLATFORMS),
+        ("tournament_type", TOURNAMENT_FORMATS),
+        ("team_mode", TEAM_MODES),
+        ("registration_policy", REGISTRATION_POLICIES),
+    ):
+        if field in payload:
+            value = str(payload[field] or "").strip().lower()
+            if value not in valid:
+                raise CommunityValidationError(f"unsupported {field}")
+            setattr(tournament, field, value)
+    if "is_private" in payload:
+        if not isinstance(payload["is_private"], bool):
+            raise CommunityValidationError("is_private must be a boolean")
+        tournament.is_private = payload["is_private"]
+    if "invite_code" in payload:
+        tournament.invite_code_hash = _invite_code_hash(payload["invite_code"]) if payload["invite_code"] else None
+    for field, minimum, maximum in (
+        ("team_size", 1, 100),
+        ("substitute_limit", 0, 20),
+        ("min_entries", 1, 10000),
+        ("minimum_age", 13, 100),
+        ("match_duration_minutes", 5, 480),
+        ("break_duration_minutes", 0, 240),
+        ("max_matches_per_team_per_day", 1, 32),
+        ("result_submission_window_minutes", 1, 1440),
+        ("dispute_window_minutes", 1, 10080),
+    ):
+        if field in payload:
+            setattr(tournament, field, _bounded_int(payload[field], field, minimum, maximum) if payload[field] is not None else None)
     if "max_players" in payload:
         try:
             max_players = int(payload["max_players"])
@@ -488,23 +701,32 @@ def update_tournament(host_user_id, tournament_id, payload):
     for field in ("registration_start_at", "registration_end_at", "tournament_start_at"):
         if field in payload:
             setattr(tournament, field, _parse_datetime(payload[field], field))
+    for field in ("roster_lock_at", "check_in_start_at", "check_in_end_at"):
+        if field in payload:
+            setattr(tournament, field, _parse_datetime(payload[field], field) if payload[field] else None)
     if "tournament_end_at" in payload:
         tournament.tournament_end_at = _parse_datetime(payload["tournament_end_at"], "tournament_end_at") if payload["tournament_end_at"] else None
     if "entry_fee" in payload:
         new_fee = _money(payload["entry_fee"], "entry_fee")
-        if tournament.registered_players_count > 0:
-            raise CommunityConflictError("entry_fee cannot be changed after registrations")
         _require_host_for_paid_tournament(host_user_id, new_fee)
         tournament.entry_fee = new_fee
 
-    if tournament.max_players < tournament.registered_players_count:
-        raise CommunityValidationError("max_players cannot be lower than current registrations")
+    if tournament.max_players < active_registration_count:
+        raise CommunityValidationError("max_players cannot be lower than active registrations")
     if tournament.registration_end_at <= tournament.registration_start_at:
         raise CommunityValidationError("registration_end_at must be after registration_start_at")
     if tournament.tournament_start_at < tournament.registration_end_at:
         raise CommunityValidationError("tournament_start_at must be after registration_end_at")
     if tournament.tournament_end_at and tournament.tournament_end_at <= tournament.tournament_start_at:
         raise CommunityValidationError("tournament_end_at must be after tournament_start_at")
+    if tournament.min_entries > tournament.max_players:
+        raise CommunityValidationError("min_entries cannot exceed max_players")
+    if tournament.check_in_start_at and tournament.check_in_end_at and tournament.check_in_end_at <= tournament.check_in_start_at:
+        raise CommunityValidationError("check_in_end_at must be after check_in_start_at")
+    if tournament.roster_lock_at and tournament.roster_lock_at > tournament.tournament_start_at:
+        raise CommunityValidationError("roster_lock_at cannot be after tournament_start_at")
+    if tournament.is_private and not tournament.invite_code_hash:
+        raise CommunityValidationError("private tournaments require an invite_code")
     if (tournament.room_details or tournament.room_details_data) and not tournament.room_details_published_at:
         tournament.room_details_published_at = _now()
     sync_tournament_status(tournament)
@@ -520,15 +742,27 @@ def cancel_tournament(host_user_id, tournament_id, reason=None):
         raise CommunityValidationError("tournament not found")
     if tournament.status == CommunityTournamentStatus.COMPLETED:
         raise CommunityConflictError("completed tournaments cannot be cancelled")
-    tournament.status = CommunityTournamentStatus.CANCELLED
-    registrations = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament.id, status=CommunityTournamentRegistrationStatus.CONFIRMED).all()
+    registrations = (
+        CommunityTournamentRegistration.query
+        .filter(
+            CommunityTournamentRegistration.tournament_id == tournament.id,
+            CommunityTournamentRegistration.status.in_({
+                CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
+                CommunityTournamentRegistrationStatus.CONFIRMED,
+                CommunityTournamentRegistrationStatus.REFUND_PENDING,
+            }),
+        )
+        .with_for_update()
+        .all()
+    )
     for reg in registrations:
-        reg.status = CommunityTournamentRegistrationStatus.REFUNDED
-        reg.payment_status = "refunded"
-        reg.cancelled_at = _now()
-        if reg.amount_paid:
-            _apply_wallet_transaction(reg.user_id, reg.amount_paid, "community-tournament-refund", tournament.id)
+        try:
+            _refund_or_cancel_registration(reg, tournament)
+        except Exception:
+            db.session.rollback()
+            raise
         _notify(reg.user_id, "community_tournament_cancelled", "Tournament cancelled", f"{tournament.title} was cancelled. Refund processing has started.", tournament.id)
+    tournament.status = CommunityTournamentStatus.CANCELLED
     _audit("tournament_cancelled", "community_tournament", tournament.id, host_user_id, metadata={"reason": reason})
     db.session.commit()
     return tournament
@@ -541,9 +775,11 @@ def list_tournaments(filters):
     search = str(filters.get("search") or "").strip()
     sort = str(filters.get("sort") or "soonest").strip().lower()
 
-    query = CommunityTournament.query.filter(CommunityTournament.visibility.is_(True))
-    if view != "admin":
-        query = query.filter(CommunityTournament.status.in_(PUBLIC_STATUSES))
+    query = CommunityTournament.query.filter(
+        CommunityTournament.visibility.is_(True),
+        CommunityTournament.is_private.is_(False),
+        CommunityTournament.status.in_(PUBLIC_STATUSES),
+    )
     if filters.get("game"):
         query = query.filter(func.lower(CommunityTournament.game) == str(filters["game"]).lower())
     if search:
@@ -583,13 +819,29 @@ def list_tournaments(filters):
     }
 
 
-def get_tournament(tournament_id, requester_user_id=None):
+def get_tournament(tournament_id, requester_user_id=None, invite_code=None):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
+    active_registration = (
+        CommunityTournamentRegistration.query.filter(
+            CommunityTournamentRegistration.tournament_id == tournament.id,
+            CommunityTournamentRegistration.user_id == int(requester_user_id),
+            CommunityTournamentRegistration.status.notin_({
+                CommunityTournamentRegistrationStatus.CANCELLED,
+                CommunityTournamentRegistrationStatus.REFUNDED,
+            }),
+        ).first()
+        if requester_user_id else None
+    )
+    is_host = bool(requester_user_id and int(requester_user_id) == int(tournament.host_user_id))
+    if tournament.is_private and not is_host and not active_registration:
+        supplied_hash = _invite_code_hash(invite_code or "")
+        if not tournament.invite_code_hash or not hmac.compare_digest(tournament.invite_code_hash, supplied_hash):
+            raise CommunityForbiddenError("a valid tournament invite code is required")
     sync_tournament_status(tournament)
     db.session.commit()
-    include_room = bool(requester_user_id and (int(requester_user_id) == int(tournament.host_user_id) or CommunityTournamentRegistration.query.filter_by(tournament_id=tournament.id, user_id=int(requester_user_id), status=CommunityTournamentRegistrationStatus.CONFIRMED).first()))
+    include_room = bool(is_host or (active_registration and active_registration.status == CommunityTournamentRegistrationStatus.CONFIRMED))
     return tournament.to_dict(include_room_details=include_room)
 
 
@@ -625,13 +877,17 @@ def _queue_payment_settlement(registration, payment_id=None, order_id=None, payl
     return job
 
 
-def register_for_tournament(user_id, tournament_id, payment_reference=None, payment_order_id=None):
+def register_for_tournament(user_id, tournament_id, payment_reference=None, payment_order_id=None, invite_code=None):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
     sync_tournament_status(tournament)
     if tournament.status != CommunityTournamentStatus.REGISTRATION_OPEN:
         raise CommunityConflictError("registration is not open")
+    if tournament.invite_code_hash:
+        supplied_hash = _invite_code_hash(invite_code or "")
+        if not hmac.compare_digest(tournament.invite_code_hash, supplied_hash):
+            raise CommunityForbiddenError("a valid tournament invite code is required")
     if tournament.registered_players_count >= tournament.max_players:
         tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
         raise CommunityConflictError("tournament is full")
@@ -1305,7 +1561,12 @@ def review_payout(tournament_id, payout_id, payload, admin_id=None):
         payout.approved_at = _now()
     elif status == CommunityPayoutStatus.PAID:
         payout.paid_at = _now()
-        _apply_wallet_transaction(payout.user_id, payout.amount, "community-tournament-prize", payout.tournament_id)
+        transaction_type = (
+            "community-tournament-organizer-commission"
+            if payout.payout_type == "organizer_commission"
+            else "community-tournament-prize"
+        )
+        _apply_wallet_transaction(payout.user_id, payout.amount, transaction_type, payout.tournament_id)
     _audit("payout_reviewed", "community_tournament_payout", payout.id, admin_id, "admin", {"status": status})
     _notify(payout.user_id, "community_payout_updated", "Tournament payout updated", f"Your tournament payout is now {status}.", payout.tournament_id)
     db.session.commit()
@@ -1338,7 +1599,12 @@ def submit_match_result(user_id, tournament_id, payload):
         winner_user_id=winner_user_id,
         rank=rank,
         score=str(payload.get("score") or "").strip() or None,
-        evidence_asset_ids=payload.get("evidence_asset_ids") or [],
+        evidence_asset_ids=_validated_evidence_asset_ids(
+            payload.get("evidence_asset_ids") or [],
+            tournament.id,
+            user_id,
+            {"result_evidence"},
+        ),
         stream_url=str(payload.get("stream_url") or "").strip() or None,
         notes=str(payload.get("notes") or "").strip() or None,
     )
@@ -1374,13 +1640,35 @@ def create_dispute(user_id, tournament_id, payload):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
+    registration = CommunityTournamentRegistration.query.filter_by(
+        tournament_id=tournament.id,
+        user_id=int(user_id),
+        status=CommunityTournamentRegistrationStatus.CONFIRMED,
+    ).first()
+    if int(tournament.host_user_id) != int(user_id) and not registration:
+        raise CommunityForbiddenError("only the host or confirmed participants can open disputes")
+    result_id = uuid.UUID(str(payload["result_id"])) if payload.get("result_id") else None
+    match_id = uuid.UUID(str(payload["match_id"])) if payload.get("match_id") else None
+    if result_id and not CommunityMatchResult.query.filter_by(id=result_id, tournament_id=tournament.id).first():
+        raise CommunityValidationError("result_id does not belong to this tournament")
+    if match_id:
+        from models.communityTournamentOperations import CommunityTournamentMatch
+        if not CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).first():
+            raise CommunityValidationError("match_id does not belong to this tournament")
     dispute = CommunityTournamentDispute(
         tournament_id=tournament.id,
-        result_id=uuid.UUID(str(payload["result_id"])) if payload.get("result_id") else None,
+        result_id=result_id,
+        match_id=match_id,
         reported_by_user_id=int(user_id),
         reason=reason,
         description=description,
-        evidence_asset_ids=payload.get("evidence_asset_ids") or [],
+        evidence_asset_ids=_validated_evidence_asset_ids(
+            payload.get("evidence_asset_ids") or [],
+            tournament.id,
+            user_id,
+            {"dispute_evidence", "result_evidence"},
+        ),
+        response_deadline_at=_now() + timedelta(minutes=int(tournament.dispute_window_minutes or 30)),
     )
     db.session.add(dispute)
     db.session.flush()
@@ -1404,6 +1692,7 @@ def review_dispute(dispute_id, payload, admin_id=None):
         raise CommunityValidationError("invalid dispute status")
     dispute.status = status
     dispute.admin_comment = str(payload.get("admin_comment") or "").strip() or None
+    dispute.resolution_action = str(payload.get("resolution_action") or "").strip().lower() or None
     dispute.reviewed_by_admin_id = int(admin_id) if admin_id else None
     dispute.reviewed_at = _now()
     _audit("dispute_reviewed", "community_tournament_dispute", dispute.id, admin_id, "admin", {"status": status})
@@ -1423,6 +1712,26 @@ def submit_winners(host_user_id, tournament_id, winners):
     existing = CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).first()
     if existing:
         raise CommunityConflictError("winners already submitted")
+    open_dispute = CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.tournament_id == tournament.id,
+        CommunityTournamentDispute.status.in_({
+            CommunityDisputeStatus.OPEN,
+            CommunityDisputeStatus.UNDER_REVIEW,
+        }),
+    ).first()
+    if open_dispute:
+        raise CommunityConflictError("winners cannot be submitted while tournament disputes are open")
+    from models.communityTournamentOperations import CommunityMatchStatus, CommunityTournamentMatch
+    generated_match = CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first()
+    unfinished_match = CommunityTournamentMatch.query.filter(
+        CommunityTournamentMatch.tournament_id == tournament.id,
+        CommunityTournamentMatch.status.notin_({
+            CommunityMatchStatus.COMPLETED,
+            CommunityMatchStatus.CANCELLED,
+        }),
+    ).first()
+    if generated_match and unfinished_match:
+        raise CommunityConflictError("all generated matches must be completed before winners are submitted")
 
     distribution = tournament.prize_distribution or []
     payout_rows = []
@@ -1464,13 +1773,27 @@ def submit_winners(host_user_id, tournament_id, winners):
                 rank=rank,
                 amount=amount,
                 currency=tournament.currency,
+                payout_type="player_prize",
+                status=CommunityPayoutStatus.PENDING_ADMIN_APPROVAL,
+            )
+        )
+    organizer_commission = Decimal(str(tournament.organizer_commission_amount or 0))
+    if organizer_commission > 0:
+        db.session.add(
+            CommunityTournamentPayout(
+                tournament_id=tournament.id,
+                user_id=tournament.host_user_id,
+                rank=None,
+                payout_type="organizer_commission",
+                amount=organizer_commission,
+                currency=tournament.currency,
                 status=CommunityPayoutStatus.PENDING_ADMIN_APPROVAL,
             )
         )
     tournament.status = CommunityTournamentStatus.COMPLETED
     _audit("winners_submitted", "community_tournament", tournament.id, host_user_id, metadata={"winner_count": len(winners)})
     db.session.commit()
-    return CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).order_by(CommunityTournamentPayout.rank.asc()).all()
+    return CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).order_by(CommunityTournamentPayout.rank.asc().nullslast()).all()
 
 
 def create_file_asset(user_id, payload):
@@ -1478,14 +1801,45 @@ def create_file_asset(user_id, payload):
     file_url = str(payload.get("file_url") or "").strip()
     if not purpose or not file_url:
         raise CommunityValidationError("purpose and file_url are required")
+    allowed_purposes = {"banner", "government_id", "result_evidence", "dispute_evidence"}
+    if purpose not in allowed_purposes:
+        raise CommunityValidationError("unsupported file purpose")
+    parsed_url = urlparse(file_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise CommunityValidationError("file_url must be an absolute http or https URL")
+    try:
+        file_size_bytes = int(payload["file_size_bytes"]) if payload.get("file_size_bytes") is not None else None
+    except (TypeError, ValueError) as exc:
+        raise CommunityValidationError("file_size_bytes must be an integer") from exc
+    if file_size_bytes is not None and (file_size_bytes < 0 or file_size_bytes > 100 * 1024 * 1024):
+        raise CommunityValidationError("file_size_bytes must be between 0 and 100 MB")
+    tournament_id = uuid.UUID(str(payload["tournament_id"])) if payload.get("tournament_id") else None
+    if purpose == "government_id" and tournament_id:
+        raise CommunityValidationError("government_id assets cannot be attached to a tournament")
+    if purpose in {"result_evidence", "dispute_evidence"} and not tournament_id:
+        raise CommunityValidationError("tournament_id is required for evidence assets")
+    if tournament_id:
+        tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+        if not tournament:
+            raise CommunityValidationError("tournament not found")
+        is_host = int(tournament.host_user_id) == int(user_id)
+        registration = CommunityTournamentRegistration.query.filter_by(
+            tournament_id=tournament.id,
+            user_id=int(user_id),
+            status=CommunityTournamentRegistrationStatus.CONFIRMED,
+        ).first()
+        if purpose == "banner" and not is_host:
+            raise CommunityForbiddenError("only the tournament host can create banner assets")
+        if purpose in {"result_evidence", "dispute_evidence"} and not is_host and not registration:
+            raise CommunityForbiddenError("only the host or confirmed participants can create evidence assets")
     asset = CommunityFileAsset(
         owner_user_id=int(user_id),
-        tournament_id=uuid.UUID(str(payload["tournament_id"])) if payload.get("tournament_id") else None,
+        tournament_id=tournament_id,
         purpose=purpose,
         file_url=file_url,
         storage_key=str(payload.get("storage_key") or "").strip() or None,
         mime_type=str(payload.get("mime_type") or "").strip() or None,
-        file_size_bytes=int(payload["file_size_bytes"]) if payload.get("file_size_bytes") is not None else None,
+        file_size_bytes=file_size_bytes,
         checksum=str(payload.get("checksum") or "").strip() or None,
         meta=payload.get("metadata") or {},
     )

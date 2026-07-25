@@ -40,13 +40,18 @@ Use `GET /api/events/<tournament_id>` with the logged-in user's Bearer token bef
 6. Host submits winners once. The tournament becomes `completed` and payouts enter `pending_admin_approval`.
 7. Platform admin reviews disputes and approves/settles payouts.
 
+The esports operations extension also supports team rosters, consent-based roster
+invitations, seeding, generated brackets, captain result agreement, targeted
+announcements, and a host control room. Existing solo registration APIs remain
+compatible.
+
 ## 1. Host Onboarding
 
 ### Read Host Program
 
 `GET /hosts/program`
 
-No auth. Use this to show the monthly verification fee, included tournament allowance, host tiers, and organizer commission rates.
+No auth. Use this to show the monthly verification fee, included tournament allowance, Hash platform fee, host tiers, and organizer commission rates.
 
 ### Submit or Resubmit Verification
 
@@ -97,7 +102,43 @@ Check `verification_status` before allowing a paid tournament. Paid tournament c
 }
 ```
 
+Additional esports configuration fields:
+
+```json
+{
+  "game_mode": "5v5",
+  "platform": "pc",
+  "organization_name": "Hash Community",
+  "team_size": 5,
+  "substitute_limit": 2,
+  "minimum_age": 16,
+  "region": "India",
+  "registration_policy": "manual_approval",
+  "is_private": false,
+  "invite_code": null,
+  "min_entries": 8,
+  "roster_lock_at": "2026-07-25T08:00:00Z",
+  "check_in_start_at": "2026-07-25T09:00:00Z",
+  "check_in_end_at": "2026-07-25T09:45:00Z",
+  "match_duration_minutes": 45,
+  "break_duration_minutes": 15,
+  "max_matches_per_team_per_day": 6,
+  "result_submission_window_minutes": 15,
+  "dispute_window_minutes": 30,
+  "schedule_config": {"concurrent_matches": 2},
+  "rules_config": {"evidence_required": true}
+}
+```
+
+Allowed automatic formats are `single_elimination`, `round_robin`, and `league`.
+Other stored format values require manually managed matches until their dedicated
+generator is enabled.
+
 The response is the managed tournament object, including calculated `total_collection`, `organizer_commission_amount`, `prize_pool`, and the commission rate snapshotted from the host tier.
+
+New tournaments also snapshot the configured Hash `platform_fee_rate`.
+`prize_pool = total_collection - platform_fee_amount - organizer_commission_amount`.
+Clients cannot supply either fee rate.
 
 ### Upload/Register a File Asset
 
@@ -118,6 +159,10 @@ Upload the binary with the app's storage flow first, then register its public UR
 ```
 
 Use the returned `id` as `banner_asset_id` in the next edit.
+Unattached banner assets are allowed for the create wizard and are attached when
+the tournament is created. Evidence assets require `tournament_id`, must be
+created by the host or a confirmed participant, and can only be referenced by
+their owner.
 
 ### Edit or Publish
 
@@ -166,6 +211,9 @@ Rules:
 ```
 
 Confirmed paid registrations are marked refunded and notified. Completed tournaments cannot be cancelled.
+Razorpay registrations use the same idempotent provider refund flow as player
+cancellation. A tournament is not reported as successfully cancelled when a
+provider refund request fails.
 
 ### Host Dashboard List and Detail
 
@@ -215,6 +263,133 @@ Each item includes the registration fields plus a display-safe gamer object:
   }
 }
 ```
+
+## 3A. Esports Teams and Rosters
+
+### Create Team for a Registration
+
+`POST /tournaments/<tournament_id>/teams`
+
+```json
+{
+  "name": "Team Phoenix",
+  "members": [
+    {"user_id": 2482, "game_id": "Phoenix#001", "role": "captain"},
+    {"user_id": 2501, "game_id": "Hydra#002", "role": "player"},
+    {"user_id": 2502, "game_id": "Nova#003", "role": "substitute"}
+  ]
+}
+```
+
+The caller must own an active registration. Non-captain members start as
+`invited`; adding a user ID does not enroll that user without consent.
+
+### Accept or Decline Roster Invitation
+
+`POST /tournaments/<tournament_id>/teams/<team_id>/invitation`
+
+```json
+{"action": "accept"}
+```
+
+Allowed actions are `accept` and `decline`.
+
+### Replace Roster
+
+`PUT /tournaments/<tournament_id>/teams/<team_id>/roster`
+
+Only the captain can replace the roster, and only before roster lock. Any roster
+change returns the team to pending until all members accept.
+
+### Team Lists and Host Actions
+
+- Authenticated: `GET /tournaments/<tournament_id>/teams`
+- Public, member-redacted: `GET /tournaments/public/<tournament_id>/teams`
+- Host action: `PATCH /tournaments/<tournament_id>/teams/<team_id>`
+
+Host actions are `approve`, `reject`, `request_information`, `lock_roster`,
+`check_in`, `undo_check_in`, `seed`, `warn`, `disqualify`, and `refund`.
+Reason-bearing actions are audited. Approval requires confirmed payment,
+the configured active-player count, and accepted invitations from every roster
+member.
+
+## 3B. Match Operations
+
+### Generate Schedule and Bracket
+
+`POST /tournaments/<tournament_id>/matches/generate`
+
+Generation is one-time and host-only. Single elimination uses seeded,
+power-of-two brackets with byes and winner advancement. Round robin and league
+generate every pair. Scheduling uses `match_duration_minutes`,
+`break_duration_minutes`, and `schedule_config.concurrent_matches`.
+
+### Read Matches
+
+- Public/redacted: `GET /tournaments/<tournament_id>/matches`
+- Host or active participant, including lobby details:
+  `GET /tournaments/<tournament_id>/matches/private`
+- Public standings: `GET /tournaments/<tournament_id>/leaderboard`
+
+Public match payloads never include lobby access credentials.
+
+### Operate a Match
+
+For formats without an automatic generator, hosts can create scheduled matches
+with `POST /tournaments/<tournament_id>/matches`. Supply `team_a_id` and
+`team_b_id` for head-to-head play, or `participant_team_ids` for a multi-team
+battle-royale round.
+
+`PATCH /tournaments/<tournament_id>/matches/<match_id>`
+
+Host actions are `start`, `reschedule`, `set_lobby`, `override_result`,
+`record_standings`, `restart`, and `cancel`. `record_standings` accepts placement,
+kills, penalty points, and optional total points for every multi-team
+participant; it feeds the cumulative leaderboard. Result override, restart, and
+cancellation require a reason and create audit entries.
+
+### Captain Result Agreement
+
+`POST /tournaments/<tournament_id>/matches/<match_id>/result-submissions`
+
+```json
+{
+  "winner_team_id": "uuid",
+  "team_a_score": 2,
+  "team_b_score": 1,
+  "evidence_asset_ids": ["asset-uuid"],
+  "notes": "Final scoreboard"
+}
+```
+
+Only each match team's accepted captain can submit once. Matching winner and
+score submissions automatically complete the match and advance the winner.
+Conflicting submissions mark the match disputed and create a structured
+platform-admin dispute.
+
+Schedule `POST /internal/operations/process-deadlines` every 1-2 minutes with
+`X-Community-Payment-Cron-Token`. It escalates one-sided submissions after
+`result_submission_window_minutes` and notifies the host.
+
+## 3C. Control Room and Communication
+
+- Host dashboard: `GET /hosts/me/dashboard`
+- Tournament control room: `GET /tournaments/<tournament_id>/control-room`
+- Audit trail: `GET /tournaments/<tournament_id>/audit-log`
+- Publish: `POST /tournaments/<tournament_id>/announcements`
+- Participant inbox: `GET /tournaments/<tournament_id>/announcements`
+
+Announcement audiences are `all_participants`, `captains`, `unchecked_in`, and
+`specific_teams`. The inbox enforces audience membership server-side.
+
+### Rules and Publish Readiness
+
+- `GET /rules/template?game=Valorant`
+- `GET /tournaments/<tournament_id>/readiness`
+
+Templates include game defaults and mandatory Hash safety rules. Readiness
+returns `ready_to_publish`, hard blockers, and operational warnings without
+silently changing tournament state.
 
 ### Host Registration Actions
 
@@ -315,11 +490,40 @@ Host-only, read-only. The host can see the dispute and its reporter but cannot a
 
 This is host-only and one-time, available once the tournament is live or has ended. Winners must be confirmed tournament participants, ranks and users must be unique, and the total cannot exceed the calculated `prize_pool`. If `amount` is `0`, the backend calculates it from `prize_distribution`. Winner submission changes the tournament status to `completed` and creates payouts with `pending_admin_approval`.
 
+Winner submission is blocked while any dispute is `open` or `under_review`.
+It also creates a separate `organizer_commission` payout for the snapshotted
+organizer commission. Platform admin must approve and settle it exactly like a
+player prize.
+
 ### Host Payout Tracker
 
 `GET /tournaments/<tournament_id>/payouts?status=pending_admin_approval&page=1&per_page=50`
 
 Host-only, read-only. Use it to show winner payout progress. Each payout includes its gamer summary.
+
+## 5A. Organizer Reputation
+
+After completion, a confirmed participant can submit one review:
+
+`POST /tournaments/<tournament_id>/reviews`
+
+```json
+{
+  "management_rating": 5,
+  "communication_rating": 4,
+  "fairness_rating": 5,
+  "scheduling_rating": 4,
+  "dispute_handling_rating": 5,
+  "comment": "Well managed."
+}
+```
+
+Ratings must be integers from 1 to 5. Public organizer trust data is available at:
+
+`GET /hosts/<host_user_id>/profile`
+
+It includes verified status, hosted/completed/cancelled counts, calculated
+completion rate, participant rating, review count, and paid prize history.
 
 ## 6. Platform Admin Operations
 

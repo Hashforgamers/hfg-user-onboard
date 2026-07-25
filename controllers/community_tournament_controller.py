@@ -36,6 +36,30 @@ from services.community_tournament_service import (
     update_tournament,
     verify_match_result,
 )
+from services.community_tournament_control_service import (
+    control_room,
+    create_announcement,
+    create_manual_match,
+    create_team,
+    create_tournament_review,
+    generate_matches,
+    host_dashboard,
+    list_announcements,
+    list_audit_log,
+    list_matches,
+    list_private_matches,
+    list_teams,
+    leaderboard,
+    manage_match,
+    manage_team,
+    replace_team_roster,
+    public_host_profile,
+    process_operational_deadlines,
+    rule_template,
+    respond_team_invitation,
+    submit_captain_result,
+    tournament_readiness,
+)
 from services.security import auth_required_self
 from models.communityTournament import CommunityHostVerification
 
@@ -113,7 +137,7 @@ def list_community_tournaments():
 @auth_required_self(decrypt_user=True)
 def get_community_tournament(tournament_id):
     try:
-        return jsonify(get_tournament(tournament_id, g.auth_user_id)), 200
+        return jsonify(get_tournament(tournament_id, g.auth_user_id, request.args.get("invite_code"))), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -121,7 +145,7 @@ def get_community_tournament(tournament_id):
 @community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>")
 def get_public_community_tournament(tournament_id):
     try:
-        return jsonify(get_tournament(tournament_id)), 200
+        return jsonify(get_tournament(tournament_id, invite_code=request.args.get("invite_code"))), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -214,6 +238,7 @@ def register_community_tournament(tournament_id):
             tournament_id,
             payment_reference=body.get("payment_reference") or body.get("razorpay_payment_id"),
             payment_order_id=body.get("razorpay_order_id") or body.get("payment_order_id"),
+            invite_code=body.get("invite_code"),
         )
         return jsonify(registration.to_dict()), 201
     except Exception as exc:
@@ -377,5 +402,204 @@ def create_community_file_asset():
     try:
         asset = create_file_asset(g.auth_user_id, _body())
         return jsonify(asset.to_dict()), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/hosts/me/dashboard")
+@auth_required_self(decrypt_user=True)
+def get_community_host_dashboard():
+    try:
+        return jsonify(host_dashboard(g.auth_user_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/control-room")
+@auth_required_self(decrypt_user=True)
+def get_community_control_room(tournament_id):
+    try:
+        return jsonify(control_room(g.auth_user_id, tournament_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams")
+@auth_required_self(decrypt_user=True)
+def create_community_team(tournament_id):
+    try:
+        return jsonify(create_team(g.auth_user_id, tournament_id, _body())), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.put("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/roster")
+@auth_required_self(decrypt_user=True)
+def replace_community_team_roster(tournament_id, team_id):
+    try:
+        return jsonify(replace_team_roster(g.auth_user_id, tournament_id, team_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/invitation")
+@auth_required_self(decrypt_user=True)
+def respond_community_team_invitation(tournament_id, team_id):
+    try:
+        return jsonify(respond_team_invitation(g.auth_user_id, tournament_id, team_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/teams")
+@auth_required_self(decrypt_user=True)
+def list_community_teams(tournament_id):
+    try:
+        return jsonify(list_teams(tournament_id, request.args, g.auth_user_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>/teams")
+def list_public_community_teams(tournament_id):
+    try:
+        return jsonify(list_teams(tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.patch("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>")
+@auth_required_self(decrypt_user=True)
+def manage_community_team(tournament_id, team_id):
+    try:
+        return jsonify(manage_team(g.auth_user_id, tournament_id, team_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/generate")
+@auth_required_self(decrypt_user=True)
+def generate_community_matches(tournament_id):
+    try:
+        return jsonify(generate_matches(g.auth_user_id, tournament_id)), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches")
+@auth_required_self(decrypt_user=True)
+def create_manual_community_match(tournament_id):
+    try:
+        return jsonify(create_manual_match(g.auth_user_id, tournament_id, _body())), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/matches")
+def list_community_matches(tournament_id):
+    try:
+        return jsonify(list_matches(tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/matches/private")
+@auth_required_self(decrypt_user=True)
+def list_private_community_matches(tournament_id):
+    try:
+        return jsonify(list_private_matches(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/leaderboard")
+def get_community_leaderboard(tournament_id):
+    try:
+        return jsonify(leaderboard(tournament_id, request.args.get("invite_code"))), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.patch("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>")
+@auth_required_self(decrypt_user=True)
+def manage_community_match(tournament_id, match_id):
+    try:
+        return jsonify(manage_match(g.auth_user_id, tournament_id, match_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-submissions")
+@auth_required_self(decrypt_user=True)
+def submit_community_captain_result(tournament_id, match_id):
+    try:
+        return jsonify(submit_captain_result(g.auth_user_id, tournament_id, match_id, _body())), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/announcements")
+@auth_required_self(decrypt_user=True)
+def create_community_announcement(tournament_id):
+    try:
+        return jsonify(create_announcement(g.auth_user_id, tournament_id, _body()).to_dict()), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/announcements")
+@auth_required_self(decrypt_user=True)
+def list_community_announcements(tournament_id):
+    try:
+        return jsonify(list_announcements(tournament_id, g.auth_user_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/audit-log")
+@auth_required_self(decrypt_user=True)
+def list_community_audit_log(tournament_id):
+    try:
+        return jsonify(list_audit_log(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/rules/template")
+def get_community_rule_template():
+    return jsonify(rule_template(request.args.get("game"))), 200
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/readiness")
+@auth_required_self(decrypt_user=True)
+def get_community_tournament_readiness(tournament_id):
+    try:
+        return jsonify(tournament_readiness(g.auth_user_id, tournament_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/reviews")
+@auth_required_self(decrypt_user=True)
+def create_community_tournament_review(tournament_id):
+    try:
+        return jsonify(create_tournament_review(g.auth_user_id, tournament_id, _body()).to_dict()), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/hosts/<int:host_user_id>/profile")
+def get_public_community_host_profile(host_user_id):
+    try:
+        return jsonify(public_host_profile(host_user_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/internal/operations/process-deadlines")
+@_payment_cron_required
+def process_community_operational_deadlines():
+    try:
+        return jsonify(process_operational_deadlines((_body()).get("limit", 50))), 200
     except Exception as exc:
         return _handle_service_error(exc)
