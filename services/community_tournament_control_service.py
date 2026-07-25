@@ -485,6 +485,26 @@ def _schedule_bracket_rounds(tournament, rounds):
             round_start += timedelta(minutes=slots * spacing)
 
 
+def _auto_check_in_teams(teams, now=None):
+    """Mark bracket entrants checked in and keep registration reporting aligned."""
+    check_in_time = now or _now()
+    registration_ids = [team.registration_id for team in teams]
+    registrations = CommunityTournamentRegistration.query.filter(
+        CommunityTournamentRegistration.id.in_(registration_ids)
+    ).all()
+    registrations_by_id = {registration.id: registration for registration in registrations}
+    auto_checked_in = 0
+    for team in teams:
+        if team.checked_in_at is not None:
+            continue
+        team.checked_in_at = check_in_time
+        registration = registrations_by_id.get(team.registration_id)
+        if registration and registration.checked_in_at is None:
+            registration.checked_in_at = check_in_time
+        auto_checked_in += 1
+    return auto_checked_in
+
+
 def start_tournament(host_user_id, tournament_id):
     """Start a bracket-ready tournament before its scheduled start time."""
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
@@ -533,8 +553,7 @@ def generate_matches(host_user_id, tournament_id):
     ).all()
     if len(teams) < max(int(tournament.min_entries or 2), 2):
         raise CommunityConflictError("not enough approved entries to generate matches")
-    if tournament.check_in_start_at and any(team.checked_in_at is None for team in teams):
-        raise CommunityConflictError("all approved teams must check in before matches are generated")
+    auto_checked_in = _auto_check_in_teams(teams)
 
     if tournament.tournament_type in {"round_robin", "league"}:
         pairs = [(teams[left], teams[right]) for left in range(len(teams)) for right in range(left + 1, len(teams))]
@@ -610,7 +629,13 @@ def generate_matches(host_user_id, tournament_id):
     ):
         db.session.rollback()
         raise CommunityConflictError("generated schedule exceeds tournament_end_at; adjust duration, concurrency, or end time")
-    _audit("community_matches_generated", "community_tournament", tournament.id, host_user_id, metadata={"format": tournament.tournament_type})
+    _audit(
+        "community_matches_generated",
+        "community_tournament",
+        tournament.id,
+        host_user_id,
+        metadata={"format": tournament.tournament_type, "auto_checked_in": auto_checked_in},
+    )
     db.session.commit()
     return list_matches(tournament.id, {}, include_lobby=True)
 

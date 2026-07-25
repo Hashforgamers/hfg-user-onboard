@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from services.community_tournament_control_service import (
     _match_payload,
+    _auto_check_in_teams,
     _next_power_of_two,
     _schedule_bracket_rounds,
     _schedule_time,
@@ -77,6 +78,27 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertEqual(first_a.scheduled_at, start)
         self.assertEqual(first_b.scheduled_at, start)
         self.assertEqual(final.scheduled_at, start + timedelta(minutes=60))
+
+    @patch("services.community_tournament_control_service.CommunityTournamentRegistration")
+    def test_bracket_generation_auto_checks_in_approved_teams(self, registration_model):
+        now = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+        first_registration_id = uuid.uuid4()
+        second_registration_id = uuid.uuid4()
+        first_registration = SimpleNamespace(id=first_registration_id, checked_in_at=None)
+        second_registration = SimpleNamespace(id=second_registration_id, checked_in_at=now)
+        registration_model.query.filter.return_value.all.return_value = [
+            first_registration,
+            second_registration,
+        ]
+        first_team = SimpleNamespace(registration_id=first_registration_id, checked_in_at=None)
+        second_team = SimpleNamespace(registration_id=second_registration_id, checked_in_at=now)
+
+        auto_checked_in = _auto_check_in_teams([first_team, second_team], now)
+
+        self.assertEqual(auto_checked_in, 1)
+        self.assertEqual(first_team.checked_in_at, now)
+        self.assertEqual(first_registration.checked_in_at, now)
+        self.assertEqual(second_team.checked_in_at, now)
 
     @patch("services.community_tournament_control_service.CommunityTournamentTeam")
     def test_public_match_payload_redacts_lobby_credentials(self, team_model):
