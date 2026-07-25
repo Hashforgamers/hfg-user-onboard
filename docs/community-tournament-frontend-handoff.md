@@ -546,6 +546,16 @@ Behavior:
 - If Razorpay cannot accept the refund request, cancellation returns a conflict and the registration remains active.
 - Registration count and prize pool are recalculated.
 
+### Close Registration Early
+- **Method**: `POST`
+- **Path**: `/tournaments/<tournament_id>/registrations/close`
+- **Auth**: Required, host only.
+
+Behavior:
+- Closes an actively open registration window immediately without changing the scheduled tournament start.
+- Cannot be used before registration opens or after the tournament starts.
+- The close is durable: cron status syncs cannot reopen registration.
+
 ### Submit Match Result
 - **Method**: `POST`
 - **Path**: `/tournaments/<tournament_id>/results`

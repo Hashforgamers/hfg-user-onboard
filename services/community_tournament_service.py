@@ -322,9 +322,8 @@ def _derive_status(tournament, now=None):
         return CommunityTournamentStatus.REGISTRATION_OPEN
     if current < tournament.tournament_start_at:
         return CommunityTournamentStatus.REGISTRATION_CLOSED
-    end_at = tournament.tournament_end_at
-    if end_at and current > end_at:
-        return CommunityTournamentStatus.COMPLETED
+    # Reaching the scheduled end must not bypass unfinished matches, disputes,
+    # or payout/result checks. Completion is an explicit finalization action.
     return CommunityTournamentStatus.LIVE
 
 
@@ -732,6 +731,34 @@ def update_tournament(host_user_id, tournament_id, payload):
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
     _audit("tournament_updated", "community_tournament", tournament.id, host_user_id)
+    db.session.commit()
+    return tournament
+
+
+def close_registration(host_user_id, tournament_id):
+    """Close an active registration window early without moving the start time."""
+    tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
+    now = _now()
+    sync_tournament_status(tournament, now)
+
+    if tournament.status == CommunityTournamentStatus.REGISTRATION_CLOSED:
+        return tournament
+    if tournament.status != CommunityTournamentStatus.REGISTRATION_OPEN:
+        raise CommunityConflictError("registration can be closed only while it is open")
+    if now >= tournament.tournament_start_at:
+        raise CommunityConflictError("registration cannot be closed after the tournament starts")
+
+    # Make the close durable across future time-based status synchronizations.
+    tournament.registration_end_at = now - timedelta(microseconds=1)
+    tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
+    _audit("registration_closed_early", "community_tournament", tournament.id, host_user_id)
+    _notify(
+        tournament.host_user_id,
+        "community_registration_closed",
+        "Registration closed",
+        f"Registration for {tournament.title} has been closed by the organizer.",
+        tournament.id,
+    )
     db.session.commit()
     return tournament
 
