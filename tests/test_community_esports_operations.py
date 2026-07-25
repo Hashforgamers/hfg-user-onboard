@@ -11,6 +11,7 @@ from services.community_tournament_control_service import (
     _seed_pairs,
     _validate_roster,
     rule_template,
+    start_tournament,
 )
 from services.community_tournament_service import (
     CommunityForbiddenError,
@@ -181,6 +182,45 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertIs(result, tournament)
         self.assertEqual(tournament.status, CommunityTournamentStatus.REGISTRATION_CLOSED)
         self.assertLess(tournament.registration_end_at, now)
+        mocked_db.session.commit.assert_called_once()
+
+    @patch("services.community_tournament_control_service.db")
+    @patch("services.community_tournament_control_service._notify")
+    @patch("services.community_tournament_control_service._audit")
+    @patch("services.community_tournament_control_service._now")
+    @patch("services.community_tournament_control_service.CommunityTournamentMatch")
+    @patch("services.community_tournament_control_service._owned_tournament")
+    def test_host_can_start_a_bracket_ready_tournament_early(
+        self,
+        owned_tournament,
+        match_model,
+        mocked_now,
+        _audit,
+        _notify,
+        mocked_db,
+    ):
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Community Cup",
+            host_user_id=7,
+            status=CommunityTournamentStatus.REGISTRATION_CLOSED,
+            registration_start_at=now - timedelta(hours=2),
+            registration_end_at=now - timedelta(hours=1),
+            tournament_start_at=now + timedelta(hours=1),
+            tournament_end_at=now + timedelta(hours=3),
+            registered_players_count=4,
+            max_players=16,
+        )
+        owned_tournament.return_value = tournament
+        match_model.query.filter_by.return_value.first.return_value = SimpleNamespace(id=uuid.uuid4())
+        mocked_now.return_value = now
+
+        result = start_tournament(7, tournament.id)
+
+        self.assertIs(result, tournament)
+        self.assertEqual(tournament.status, CommunityTournamentStatus.LIVE)
+        self.assertEqual(tournament.tournament_start_at, now)
         mocked_db.session.commit.assert_called_once()
 
     @patch("services.community_tournament_service.CommunityFileAsset")

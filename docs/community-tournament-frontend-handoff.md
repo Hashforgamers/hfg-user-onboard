@@ -556,6 +556,24 @@ Behavior:
 - Cannot be used before registration opens or after the tournament starts.
 - The close is durable: cron status syncs cannot reopen registration.
 
+### Start Tournament Early
+- **Method**: `POST`
+- **Path**: `/tournaments/<tournament_id>/start`
+- **Auth**: Required, host only.
+
+Behavior:
+- Registration must already be closed.
+- At least one generated or manually created match must exist.
+- Moves the tournament to `live` and updates `tournament_start_at` to the request time.
+
+### Current Tournament Status
+- **Method**: `GET`
+- **Path**: `/tournaments/public/<tournament_id>/status`
+- **Auth**: Not required for public tournaments. Private tournaments require `?invite_code=<code>`.
+
+The response contains the current `status`, scheduled times, confirmed-entry count,
+and capacity. The backend refreshes the time-based status before responding.
+
 ### Submit Match Result
 - **Method**: `POST`
 - **Path**: `/tournaments/<tournament_id>/results`

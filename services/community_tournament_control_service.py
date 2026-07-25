@@ -467,6 +467,35 @@ def _schedule_time(tournament, index):
     return tournament.tournament_start_at + timedelta(minutes=(index // concurrent) * spacing)
 
 
+def start_tournament(host_user_id, tournament_id):
+    """Start a bracket-ready tournament before its scheduled start time."""
+    tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
+    now = _now()
+    sync_tournament_status(tournament, now)
+    if tournament.status == CommunityTournamentStatus.LIVE:
+        return tournament
+    if tournament.status != CommunityTournamentStatus.REGISTRATION_CLOSED:
+        raise CommunityConflictError("registration must be closed before the tournament can start")
+    if not CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first():
+        raise CommunityConflictError("generate or create matches before starting the tournament")
+    if tournament.tournament_end_at and now >= tournament.tournament_end_at:
+        raise CommunityConflictError("the scheduled tournament end time has already passed")
+
+    # Move the scheduled start to now so future time-based syncs preserve live status.
+    tournament.tournament_start_at = now
+    tournament.status = CommunityTournamentStatus.LIVE
+    _audit("community_tournament_started_manually", "community_tournament", tournament.id, host_user_id)
+    _notify(
+        tournament.host_user_id,
+        "community_tournament_started",
+        "Tournament is live",
+        f"{tournament.title} has started.",
+        tournament.id,
+    )
+    db.session.commit()
+    return tournament
+
+
 def generate_matches(host_user_id, tournament_id):
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
     sync_tournament_status(tournament)
