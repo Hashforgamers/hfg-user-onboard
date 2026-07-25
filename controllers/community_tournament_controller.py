@@ -58,6 +58,7 @@ from services.community_tournament_control_service import (
     process_operational_deadlines,
     rule_template,
     respond_team_invitation,
+    start_tournament,
     submit_captain_result,
     tournament_readiness,
 )
@@ -147,6 +148,25 @@ def get_community_tournament(tournament_id):
 def get_public_community_tournament(tournament_id):
     try:
         return jsonify(get_tournament(tournament_id, invite_code=request.args.get("invite_code"))), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>/status")
+def get_public_community_tournament_status(tournament_id):
+    try:
+        tournament = get_tournament(tournament_id, invite_code=request.args.get("invite_code"))
+        return jsonify({
+            "id": tournament["id"],
+            "title": tournament["title"],
+            "status": tournament["status"],
+            "registration_start_at": tournament["registration_start_at"],
+            "registration_end_at": tournament["registration_end_at"],
+            "tournament_start_at": tournament["tournament_start_at"],
+            "tournament_end_at": tournament["tournament_end_at"],
+            "registered_players_count": tournament["registered_players_count"],
+            "max_players": tournament["max_players"],
+        }), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -261,6 +281,16 @@ def cancel_my_community_registration(tournament_id):
 def close_community_tournament_registration(tournament_id):
     try:
         tournament = close_registration(g.auth_user_id, tournament_id)
+        return jsonify(tournament.to_dict(include_room_details=True)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/start")
+@auth_required_self(decrypt_user=True)
+def start_community_tournament(tournament_id):
+    try:
+        tournament = start_tournament(g.auth_user_id, tournament_id)
         return jsonify(tournament.to_dict(include_room_details=True)), 200
     except Exception as exc:
         return _handle_service_error(exc)
