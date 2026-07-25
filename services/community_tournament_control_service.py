@@ -1141,6 +1141,47 @@ def list_audit_log(host_user_id, tournament_id, filters):
 
 def process_operational_deadlines(limit=50):
     limit = min(max(int(limit or 50), 1), 100)
+    summary = {"processed": 0, "escalated": 0, "lifecycle_updated": 0, "items": [], "lifecycle": []}
+
+    lifecycle_tournaments = (
+        CommunityTournament.query
+        .filter(CommunityTournament.status.in_({
+            CommunityTournamentStatus.PUBLISHED,
+            CommunityTournamentStatus.REGISTRATION_OPEN,
+            CommunityTournamentStatus.REGISTRATION_CLOSED,
+            CommunityTournamentStatus.LIVE,
+        }))
+        .order_by(CommunityTournament.tournament_start_at.asc())
+        .limit(limit)
+        .all()
+    )
+    for tournament in lifecycle_tournaments:
+        previous_status = tournament.status
+        if not sync_tournament_status(tournament):
+            continue
+        _audit(
+            "community_tournament_lifecycle_updated",
+            "community_tournament",
+            tournament.id,
+            actor_type="system",
+            metadata={"from_status": previous_status, "to_status": tournament.status},
+        )
+        _notify(
+            tournament.host_user_id,
+            "community_tournament_status_changed",
+            "Tournament status updated",
+            f"{tournament.title} is now {tournament.status.replace('_', ' ')}.",
+            tournament.id,
+        )
+        summary["lifecycle_updated"] += 1
+        summary["lifecycle"].append({
+            "tournament_id": str(tournament.id),
+            "from_status": previous_status,
+            "to_status": tournament.status,
+        })
+    if summary["lifecycle_updated"]:
+        db.session.commit()
+
     matches = (
         CommunityTournamentMatch.query
         .filter(
@@ -1152,7 +1193,6 @@ def process_operational_deadlines(limit=50):
         .limit(limit)
         .all()
     )
-    summary = {"processed": 0, "escalated": 0, "items": []}
     for match in matches:
         summary["processed"] += 1
         existing = CommunityTournamentDispute.query.filter(

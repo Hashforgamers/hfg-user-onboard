@@ -9,6 +9,7 @@ from services.community_tournament_service import (
     CommunityValidationError,
     cancel_registration,
     cancel_tournament,
+    close_registration,
     create_dispute,
     create_file_asset,
     create_tournament,
@@ -251,6 +252,16 @@ def cancel_my_community_registration(tournament_id):
     try:
         registration = cancel_registration(g.auth_user_id, tournament_id)
         return jsonify(registration.to_dict()), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/registrations/close")
+@auth_required_self(decrypt_user=True)
+def close_community_tournament_registration(tournament_id):
+    try:
+        tournament = close_registration(g.auth_user_id, tournament_id)
+        return jsonify(tournament.to_dict(include_room_details=True)), 200
     except Exception as exc:
         return _handle_service_error(exc)
 

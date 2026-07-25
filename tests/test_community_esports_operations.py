@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,10 +15,13 @@ from services.community_tournament_control_service import (
 from services.community_tournament_service import (
     CommunityForbiddenError,
     CommunityValidationError,
+    _derive_status,
     _invite_code_hash,
     _recalculate_prize_pool,
     _validated_evidence_asset_ids,
+    close_registration,
 )
+from models.communityTournament import CommunityTournamentStatus
 
 
 class CommunityEsportsOperationTests(unittest.TestCase):
@@ -130,6 +133,55 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertEqual(float(tournament.platform_fee_amount), 100.0)
         self.assertEqual(float(tournament.organizer_commission_amount), 80.0)
         self.assertEqual(float(tournament.prize_pool), 820.0)
+
+    def test_scheduled_end_does_not_complete_tournament_with_unresolved_operations(self):
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            status=CommunityTournamentStatus.PUBLISHED,
+            registration_start_at=now - timedelta(hours=3),
+            registration_end_at=now - timedelta(hours=2),
+            tournament_start_at=now - timedelta(hours=1),
+            tournament_end_at=now - timedelta(minutes=1),
+            registered_players_count=4,
+            max_players=16,
+        )
+
+        self.assertEqual(_derive_status(tournament, now), CommunityTournamentStatus.LIVE)
+
+    @patch("services.community_tournament_service.db")
+    @patch("services.community_tournament_service._notify")
+    @patch("services.community_tournament_service._audit")
+    @patch("services.community_tournament_service._now")
+    @patch("services.community_tournament_service._owned_tournament")
+    def test_host_can_close_an_open_registration_window_early(
+        self,
+        owned_tournament,
+        mocked_now,
+        _audit,
+        _notify,
+        mocked_db,
+    ):
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        tournament = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Community Cup",
+            host_user_id=7,
+            status=CommunityTournamentStatus.REGISTRATION_OPEN,
+            registration_start_at=now - timedelta(hours=1),
+            registration_end_at=now + timedelta(hours=1),
+            tournament_start_at=now + timedelta(hours=2),
+            registered_players_count=4,
+            max_players=16,
+        )
+        owned_tournament.return_value = tournament
+        mocked_now.return_value = now
+
+        result = close_registration(7, tournament.id)
+
+        self.assertIs(result, tournament)
+        self.assertEqual(tournament.status, CommunityTournamentStatus.REGISTRATION_CLOSED)
+        self.assertLess(tournament.registration_end_at, now)
+        mocked_db.session.commit.assert_called_once()
 
     @patch("services.community_tournament_service.CommunityFileAsset")
     def test_evidence_assets_must_belong_to_caller_and_tournament(self, asset_model):

@@ -34,7 +34,7 @@ Use `GET /api/events/<tournament_id>` with the logged-in user's Bearer token bef
 
 1. Host reads `/hosts/program`, submits verification, and waits for platform approval.
 2. Host optionally creates a banner file asset, then creates a draft tournament.
-3. Host edits the draft and sets `status: "published"` when ready. Time-based statuses then progress automatically.
+3. Host edits the draft and sets `status: "published"` when ready. A scheduled cron call progresses the non-terminal time-based statuses: `published`, `registration_open`, `registration_closed`, and `live`.
 4. Players register. Razorpay verification or a webhook confirms paid registrations; the host never approves provider payments.
 5. Host publishes room details, runs check-in, and verifies submitted results.
 6. Host submits winners once. The tournament becomes `completed` and payouts enter `pending_admin_approval`.
@@ -369,7 +369,8 @@ platform-admin dispute.
 
 Schedule `POST /internal/operations/process-deadlines` every 1-2 minutes with
 `X-Community-Payment-Cron-Token`. It escalates one-sided submissions after
-`result_submission_window_minutes` and notifies the host.
+`result_submission_window_minutes`, notifies the host, and progresses scheduled
+tournament statuses through registration open, registration closed, and live.
 
 ## 3C. Control Room and Communication
 
