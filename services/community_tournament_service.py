@@ -317,7 +317,7 @@ def _derive_status(tournament, now=None):
     if current < tournament.registration_start_at:
         return CommunityTournamentStatus.PUBLISHED
     if tournament.registration_start_at <= current <= tournament.registration_end_at:
-        if tournament.registered_players_count >= tournament.max_players:
+        if int(tournament.registered_players_count or 0) >= int(tournament.max_players or 0):
             return CommunityTournamentStatus.REGISTRATION_CLOSED
         return CommunityTournamentStatus.REGISTRATION_OPEN
     if current < tournament.tournament_start_at:
