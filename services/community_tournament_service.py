@@ -866,8 +866,8 @@ def get_tournament(tournament_id, requester_user_id=None, invite_code=None):
         supplied_hash = _invite_code_hash(invite_code or "")
         if not tournament.invite_code_hash or not hmac.compare_digest(tournament.invite_code_hash, supplied_hash):
             raise CommunityForbiddenError("a valid tournament invite code is required")
-    sync_tournament_status(tournament)
-    db.session.commit()
+    if sync_tournament_status(tournament):
+        db.session.commit()
     include_room = bool(is_host or (active_registration and active_registration.status == CommunityTournamentRegistrationStatus.CONFIRMED))
     return tournament.to_dict(include_room_details=include_room)
 

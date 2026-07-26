@@ -1,4 +1,6 @@
 from functools import wraps
+from threading import Lock
+import time
 
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
@@ -71,6 +73,48 @@ from models.communityTournament import CommunityHostVerification
 
 community_tournament_bp = Blueprint("community_tournaments", __name__, url_prefix="/api/v1/community")
 
+_COMMUNITY_PUBLIC_CACHE = {}
+_COMMUNITY_PUBLIC_CACHE_LOCK = Lock()
+
+
+def _community_cache_response(namespace, producer, ttl_sec=None, authenticated_user_id=None):
+    """Cache public or user-scoped read payloads briefly; writes invalidate it."""
+    if request.args.get("invite_code"):
+        return jsonify(producer())
+    if request.headers.get("Authorization") and authenticated_user_id is None:
+        return jsonify(producer())
+    ttl = int(
+        current_app.config.get("COMMUNITY_PUBLIC_CACHE_TTL_SEC", 5)
+        if ttl_sec is None else ttl_sec
+    )
+    if ttl <= 0:
+        return jsonify(producer())
+    scope = f"user:{int(authenticated_user_id)}" if authenticated_user_id is not None else "public"
+    key = f"{scope}:{namespace}:{request.full_path}"
+    now = time.monotonic()
+    with _COMMUNITY_PUBLIC_CACHE_LOCK:
+        cached = _COMMUNITY_PUBLIC_CACHE.get(key)
+        if cached and cached["expires_at"] > now:
+            return jsonify(cached["payload"])
+    payload = producer()
+    with _COMMUNITY_PUBLIC_CACHE_LOCK:
+        if len(_COMMUNITY_PUBLIC_CACHE) >= int(current_app.config.get("API_MICROCACHE_MAX_ITEMS", 50000)):
+            _COMMUNITY_PUBLIC_CACHE.pop(next(iter(_COMMUNITY_PUBLIC_CACHE)), None)
+        _COMMUNITY_PUBLIC_CACHE[key] = {"payload": payload, "expires_at": now + ttl}
+    return jsonify(payload)
+
+
+def _community_public_cache_response(namespace, producer, ttl_sec=None):
+    return _community_cache_response(namespace, producer, ttl_sec)
+
+
+@community_tournament_bp.after_request
+def _invalidate_community_public_cache_after_write(response):
+    if request.method != "GET" and response.status_code < 400:
+        with _COMMUNITY_PUBLIC_CACHE_LOCK:
+            _COMMUNITY_PUBLIC_CACHE.clear()
+    return response
+
 
 def _body():
     return request.get_json(silent=True) or {}
@@ -127,13 +171,13 @@ def community_health():
 
 @community_tournament_bp.get("/hosts/program")
 def get_host_program():
-    return jsonify(host_program_config()), 200
+    return _community_public_cache_response("host-program", host_program_config), 200
 
 
 @community_tournament_bp.get("/tournaments")
 def list_community_tournaments():
     try:
-        return jsonify(list_tournaments(request.args)), 200
+        return _community_public_cache_response("tournaments", lambda: list_tournaments(request.args)), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -150,7 +194,10 @@ def get_community_tournament(tournament_id):
 @community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>")
 def get_public_community_tournament(tournament_id):
     try:
-        return jsonify(get_tournament(tournament_id, invite_code=request.args.get("invite_code"))), 200
+        return _community_public_cache_response(
+            f"tournament:{tournament_id}",
+            lambda: get_tournament(tournament_id, invite_code=request.args.get("invite_code")),
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -158,18 +205,24 @@ def get_public_community_tournament(tournament_id):
 @community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>/status")
 def get_public_community_tournament_status(tournament_id):
     try:
-        tournament = get_tournament(tournament_id, invite_code=request.args.get("invite_code"))
-        return jsonify({
-            "id": tournament["id"],
-            "title": tournament["title"],
-            "status": tournament["status"],
-            "registration_start_at": tournament["registration_start_at"],
-            "registration_end_at": tournament["registration_end_at"],
-            "tournament_start_at": tournament["tournament_start_at"],
-            "tournament_end_at": tournament["tournament_end_at"],
-            "registered_players_count": tournament["registered_players_count"],
-            "max_players": tournament["max_players"],
-        }), 200
+        def payload():
+            tournament = get_tournament(tournament_id, invite_code=request.args.get("invite_code"))
+            return {
+                "id": tournament["id"],
+                "title": tournament["title"],
+                "status": tournament["status"],
+                "registration_start_at": tournament["registration_start_at"],
+                "registration_end_at": tournament["registration_end_at"],
+                "tournament_start_at": tournament["tournament_start_at"],
+                "tournament_end_at": tournament["tournament_end_at"],
+                "registered_players_count": tournament["registered_players_count"],
+                "max_players": tournament["max_players"],
+            }
+        return _community_public_cache_response(
+            f"tournament-status:{tournament_id}",
+            payload,
+            current_app.config.get("COMMUNITY_PUBLIC_STATUS_CACHE_TTL_SEC", 2),
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -507,7 +560,10 @@ def list_community_teams(tournament_id):
 @community_tournament_bp.get("/tournaments/public/<uuid:tournament_id>/teams")
 def list_public_community_teams(tournament_id):
     try:
-        return jsonify(list_teams(tournament_id, request.args)), 200
+        return _community_public_cache_response(
+            f"teams:{tournament_id}",
+            lambda: list_teams(tournament_id, request.args),
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -542,7 +598,10 @@ def create_manual_community_match(tournament_id):
 @community_tournament_bp.get("/tournaments/<uuid:tournament_id>/matches")
 def list_community_matches(tournament_id):
     try:
-        return jsonify(list_matches(tournament_id, request.args)), 200
+        return _community_public_cache_response(
+            f"matches:{tournament_id}",
+            lambda: list_matches(tournament_id, request.args),
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -551,7 +610,12 @@ def list_community_matches(tournament_id):
 @auth_required_self(decrypt_user=True)
 def list_private_community_matches(tournament_id):
     try:
-        return jsonify(list_private_matches(g.auth_user_id, tournament_id, request.args)), 200
+        return _community_cache_response(
+            f"private-matches:{tournament_id}",
+            lambda: list_private_matches(g.auth_user_id, tournament_id, request.args),
+            ttl_sec=2,
+            authenticated_user_id=g.auth_user_id,
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -559,7 +623,10 @@ def list_private_community_matches(tournament_id):
 @community_tournament_bp.get("/tournaments/<uuid:tournament_id>/leaderboard")
 def get_community_leaderboard(tournament_id):
     try:
-        return jsonify(leaderboard(tournament_id, request.args.get("invite_code"))), 200
+        return _community_public_cache_response(
+            f"leaderboard:{tournament_id}",
+            lambda: leaderboard(tournament_id, request.args.get("invite_code")),
+        ), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -638,7 +705,11 @@ def list_community_audit_log(tournament_id):
 
 @community_tournament_bp.get("/rules/template")
 def get_community_rule_template():
-    return jsonify(rule_template(request.args.get("game"))), 200
+    return _community_public_cache_response(
+        "rule-template",
+        lambda: rule_template(request.args.get("game")),
+        60,
+    ), 200
 
 
 @community_tournament_bp.get("/tournaments/<uuid:tournament_id>/readiness")

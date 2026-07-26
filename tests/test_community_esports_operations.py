@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from flask import Flask
+
 from services.community_tournament_control_service import (
     _match_payload,
     _auto_check_in_teams,
@@ -27,6 +29,7 @@ from services.community_tournament_service import (
     _recalculate_prize_pool,
     _validated_evidence_asset_ids,
     close_registration,
+    get_tournament,
 )
 from models.communityTournament import CommunityTournamentStatus
 
@@ -162,6 +165,42 @@ class CommunityEsportsOperationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(CommunityConflictError, "result proposal"):
             manage_match(7, tournament.id, uuid.uuid4(), {"action": "override_result"})
+
+    @patch("services.community_tournament_service.db")
+    @patch("services.community_tournament_service.sync_tournament_status", return_value=False)
+    @patch("services.community_tournament_service.CommunityTournament")
+    def test_unchanged_tournament_read_does_not_commit(self, tournament_model, _sync_status, mocked_db):
+        tournament = SimpleNamespace(
+            id=uuid.uuid4(),
+            is_private=False,
+            host_user_id=7,
+            to_dict=lambda include_room_details=False: {"id": "tournament", "room": include_room_details},
+        )
+        tournament_model.query.filter_by.return_value.first.return_value = tournament
+
+        payload = get_tournament(tournament.id)
+
+        self.assertEqual(payload["id"], "tournament")
+        mocked_db.session.commit.assert_not_called()
+
+    def test_community_public_cache_serves_repeated_anonymous_requests(self):
+        from controllers.community_tournament_controller import (
+            _COMMUNITY_PUBLIC_CACHE,
+            _community_public_cache_response,
+        )
+
+        app = Flask(__name__)
+        app.config["COMMUNITY_PUBLIC_CACHE_TTL_SEC"] = 5
+        app.config["API_MICROCACHE_MAX_ITEMS"] = 10
+        _COMMUNITY_PUBLIC_CACHE.clear()
+        calls = []
+        with app.test_request_context("/api/v1/community/tournaments?page=1"):
+            first = _community_public_cache_response("tournaments", lambda: calls.append(1) or {"items": []})
+            second = _community_public_cache_response("tournaments", lambda: calls.append(1) or {"items": ["new"]})
+
+        self.assertEqual(first.get_json(), {"items": []})
+        self.assertEqual(second.get_json(), {"items": []})
+        self.assertEqual(calls, [1])
 
     @patch("services.community_tournament_control_service.User")
     def test_roster_requires_game_ids_and_adds_captain(self, user_model):
@@ -308,7 +347,7 @@ class CommunityEsportsOperationTests(unittest.TestCase):
             host_user_id=7,
             status=CommunityTournamentStatus.REGISTRATION_CLOSED,
             registration_start_at=now - timedelta(hours=2),
-            registration_end_at=now - timedelta(hours=1),
+            registration_end_at=now + timedelta(hours=1),
             tournament_start_at=now + timedelta(hours=1),
             tournament_end_at=now + timedelta(hours=3),
             registered_players_count=4,
@@ -323,6 +362,7 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertIs(result, tournament)
         self.assertEqual(tournament.status, CommunityTournamentStatus.LIVE)
         self.assertEqual(tournament.tournament_start_at, now)
+        self.assertEqual(tournament.registration_end_at, now)
         mocked_db.session.commit.assert_called_once()
 
     @patch("services.community_tournament_service.CommunityFileAsset")
