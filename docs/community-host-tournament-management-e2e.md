@@ -344,11 +344,49 @@ battle-royale round.
 
 `PATCH /tournaments/<tournament_id>/matches/<match_id>`
 
-Host actions are `start`, `reschedule`, `set_lobby`, `override_result`,
-`record_standings`, `restart`, and `cancel`. `record_standings` accepts placement,
-kills, penalty points, and optional total points for every multi-team
-participant; it feeds the cumulative leaderboard. Result override, restart, and
-cancellation require a reason and create audit entries.
+Host actions are `start`, `reschedule`, `set_lobby`, `record_standings`,
+`restart`, and `cancel`. `record_standings` accepts placement, kills, penalty
+points, and optional total points for every multi-team participant; it feeds
+the cumulative leaderboard. Restart and cancellation require a reason and
+create audit entries. Host result overrides must use result proposals; the
+legacy `override_result` action is rejected to prevent bypassing captain review.
+
+### Host Result Proposal and 15-Minute Review
+
+`POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals`
+
+```json
+{
+  "winner_team_id": "uuid",
+  "team_a_score": 2,
+  "team_b_score": 1,
+  "evidence_asset_ids": ["asset-uuid"],
+  "evidence_urls": ["https://firebasestorage.googleapis.com/.../scoreboard.png"],
+  "ocr_data": {
+    "text": "Team Alpha 2 Team Bravo 1",
+    "detected_teams": ["Team Alpha", "Team Bravo"],
+    "scores": {"team_a": 2, "team_b": 1},
+    "confidence": 0.94,
+    "submitter_type": "host"
+  }
+}
+```
+
+Only the tournament host can create a proposal, and it is valid for 15 minutes.
+Supply at least one uploaded Hash evidence asset or an absolute HTTPS screenshot
+URL. The backend stores the URLs and OCR/consensus metadata but does not grant
+Firestore access; Firebase Security Rules must still enforce authenticated,
+authorized writes.
+
+Each match team's accepted captain can respond:
+
+- `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/accept`
+- `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/dispute`
+
+Both captains accepting finalizes the match immediately and advances the winner.
+A dispute marks the proposal disputed and opens the normal organizer/admin
+dispute record. If nobody disputes, the deadline processor finalizes the pending
+proposal once its 15-minute server deadline has elapsed.
 
 ### Captain Result Agreement
 
@@ -370,7 +408,8 @@ Conflicting submissions mark the match disputed and create a structured
 platform-admin dispute.
 
 Schedule `POST /internal/operations/process-deadlines` every 1-2 minutes with
-`X-Community-Payment-Cron-Token`. It escalates one-sided submissions after
+`X-Community-Payment-Cron-Token`. It finalizes undisputed expired result
+proposals, escalates one-sided submissions after
 `result_submission_window_minutes`, notifies the host, and progresses scheduled
 tournament statuses through registration open, registration closed, and live.
 

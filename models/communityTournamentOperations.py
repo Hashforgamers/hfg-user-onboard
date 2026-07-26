@@ -48,6 +48,7 @@ class CommunityMatchStatus:
     READY = "ready"
     IN_PROGRESS = "in_progress"
     AWAITING_RESULTS = "awaiting_results"
+    RESULT_PENDING = "result_pending"
     DISPUTED = "disputed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -222,6 +223,47 @@ class CommunityMatchResultSubmission(db.Model):
             "evidence_asset_ids": self.evidence_asset_ids or [],
             "notes": self.notes,
             "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CommunityMatchResultProposal(db.Model):
+    __tablename__ = "community_match_result_proposals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tournament_id = Column(UUID(as_uuid=True), ForeignKey("community_tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
+    match_id = Column(UUID(as_uuid=True), ForeignKey("community_tournament_matches.id", ondelete="CASCADE"), nullable=False, index=True)
+    proposed_by_user_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    winner_team_id = Column(UUID(as_uuid=True), ForeignKey("community_tournament_teams.id", ondelete="RESTRICT"), nullable=False)
+    team_a_score = Column(Integer, nullable=False)
+    team_b_score = Column(Integer, nullable=False)
+    evidence_asset_ids = Column(JSONB, nullable=False, default=list)
+    evidence_urls = Column(JSONB, nullable=False, default=list)
+    ocr_data = Column(JSONB, nullable=False, default=dict)
+    accepted_team_ids = Column(JSONB, nullable=False, default=list)
+    status = Column(String(24), nullable=False, default="pending", index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    finalized_at = Column(DateTime(timezone=True), nullable=True)
+    disputed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uq_community_pending_result_proposal", "match_id", unique=True, postgresql_where=db.text("status = 'pending'")),
+        CheckConstraint("team_a_score >= 0", name="ck_community_result_proposal_team_a_score"),
+        CheckConstraint("team_b_score >= 0", name="ck_community_result_proposal_team_b_score"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": str(self.id), "tournament_id": str(self.tournament_id), "match_id": str(self.match_id),
+            "proposed_by_user_id": int(self.proposed_by_user_id) if self.proposed_by_user_id else None,
+            "winner_team_id": str(self.winner_team_id), "team_a_score": self.team_a_score,
+            "team_b_score": self.team_b_score, "evidence_asset_ids": self.evidence_asset_ids or [],
+            "evidence_urls": self.evidence_urls or [], "ocr_data": self.ocr_data or {},
+            "accepted_team_ids": self.accepted_team_ids or [], "status": self.status,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "finalized_at": self.finalized_at.isoformat() if self.finalized_at else None,
+            "disputed_at": self.disputed_at.isoformat() if self.disputed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

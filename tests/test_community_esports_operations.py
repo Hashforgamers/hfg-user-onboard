@@ -7,15 +7,19 @@ from unittest.mock import patch
 from services.community_tournament_control_service import (
     _match_payload,
     _auto_check_in_teams,
+    _finalize_result_proposal,
     _next_power_of_two,
+    _proposal_evidence_urls,
     _schedule_bracket_rounds,
     _schedule_time,
     _seed_pairs,
     _validate_roster,
+    manage_match,
     rule_template,
     start_tournament,
 )
 from services.community_tournament_service import (
+    CommunityConflictError,
     CommunityForbiddenError,
     CommunityValidationError,
     _derive_status,
@@ -116,6 +120,48 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         payload = _match_payload(match, include_lobby=False)
 
         self.assertEqual(payload["lobby_details"], {})
+
+    def test_result_proposal_evidence_urls_require_https(self):
+        urls = _proposal_evidence_urls(["https://firebasestorage.googleapis.com/evidence.png"])
+
+        self.assertEqual(urls, ["https://firebasestorage.googleapis.com/evidence.png"])
+        with self.assertRaisesRegex(CommunityValidationError, "https"):
+            _proposal_evidence_urls(["http://example.test/evidence.png"])
+
+    @patch("services.community_tournament_control_service._now")
+    @patch("services.community_tournament_control_service._advance_match_winner")
+    def test_finalizing_result_proposal_advances_the_match(self, advance_winner, mocked_now):
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        winning_team_id = uuid.uuid4()
+        proposal = SimpleNamespace(
+            team_a_score=2,
+            team_b_score=1,
+            winner_team_id=winning_team_id,
+            status="pending",
+            finalized_at=None,
+        )
+        match = SimpleNamespace(team_a_score=None, team_b_score=None)
+        mocked_now.return_value = now
+
+        _finalize_result_proposal(proposal, match)
+
+        self.assertEqual(match.team_a_score, 2)
+        self.assertEqual(match.team_b_score, 1)
+        self.assertEqual(proposal.status, "finalized")
+        self.assertEqual(proposal.finalized_at, now)
+        advance_winner.assert_called_once_with(match, winning_team_id)
+
+    @patch("services.community_tournament_control_service.CommunityTournamentMatch")
+    @patch("services.community_tournament_control_service._owned_tournament")
+    def test_host_cannot_bypass_result_proposal_with_legacy_override(self, owned_tournament, match_model):
+        tournament = SimpleNamespace(id=uuid.uuid4())
+        owned_tournament.return_value = tournament
+        match_model.query.filter_by.return_value.with_for_update.return_value.first.return_value = SimpleNamespace(
+            id=uuid.uuid4()
+        )
+
+        with self.assertRaisesRegex(CommunityConflictError, "result proposal"):
+            manage_match(7, tournament.id, uuid.uuid4(), {"action": "override_result"})
 
     @patch("services.community_tournament_control_service.User")
     def test_roster_requires_game_ids_and_adds_captain(self, user_model):
