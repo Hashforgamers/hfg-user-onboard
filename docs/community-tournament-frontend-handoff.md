@@ -574,6 +574,23 @@ Behavior:
 The response contains the current `status`, scheduled times, confirmed-entry count,
 and capacity. The backend refreshes the time-based status before responding.
 
+### Host Result Proposal Review
+- **Create**: `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals`
+- **Accept**: `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/accept`
+- **Dispute**: `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/dispute`
+
+The host creates a proposal with `winner_team_id`, both scores, and at least one
+Hash evidence asset ID or HTTPS evidence URL. The optional `ocr_data` object can
+contain ML Kit text, detected teams, scores, confidence, consensus, submitter
+type, and Firebase Storage URLs. The server records this evidence, sets the match
+to `result_pending`, and sets a non-client-controlled 15-minute expiry.
+
+Each match team's accepted captain can accept or dispute. Two accepts finalize
+the result immediately; a dispute creates the normal dispute case. The configured
+deadline cron finalizes an undisputed pending proposal after the server expiry.
+Do not call the legacy `PATCH .../matches/<match_id>` `override_result` action:
+the backend rejects it so the review flow cannot be bypassed.
+
 ### Submit Match Result
 - **Method**: `POST`
 - **Path**: `/tournaments/<tournament_id>/results`

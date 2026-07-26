@@ -3,6 +3,7 @@ from decimal import Decimal
 import hmac
 import math
 import uuid
+from urllib.parse import urlparse
 
 from sqlalchemy import func, or_
 
@@ -19,6 +20,7 @@ from models.communityTournamentOperations import (
     CommunityAuditLog,
     CommunityDisputeStatus,
     CommunityMatchResultSubmission,
+    CommunityMatchResultProposal,
     CommunityMatchStatus,
     CommunityTeamStatus,
     CommunityTournamentAnnouncement,
@@ -846,6 +848,121 @@ def _retract_advanced_winner(match):
     next_match.status = CommunityMatchStatus.SCHEDULED
 
 
+def _proposal_evidence_urls(values):
+    if not isinstance(values, list) or len(values) > 10:
+        raise CommunityValidationError("evidence_urls must contain at most 10 URLs")
+    urls = []
+    for value in values:
+        url = str(value or "").strip()
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise CommunityValidationError("each evidence URL must be an absolute https URL")
+        urls.append(url)
+    return urls
+
+
+def _match_captain_team(user_id, tournament_id, match):
+    membership = CommunityTournamentTeamMember.query.filter(
+        CommunityTournamentTeamMember.tournament_id == tournament_id,
+        CommunityTournamentTeamMember.user_id == int(user_id),
+        CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
+        CommunityTournamentTeamMember.role == "captain",
+        CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
+    ).first()
+    if not membership:
+        raise CommunityForbiddenError("only a match team captain can respond to this proposal")
+    return membership.team_id
+
+
+def _finalize_result_proposal(proposal, match):
+    match.team_a_score = proposal.team_a_score
+    match.team_b_score = proposal.team_b_score
+    _advance_match_winner(match, proposal.winner_team_id)
+    proposal.status = "finalized"
+    proposal.finalized_at = _now()
+
+
+def create_result_proposal(host_user_id, tournament_id, match_id, payload):
+    tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
+    match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).with_for_update().first()
+    if not match:
+        raise CommunityValidationError("match not found")
+    if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS, CommunityMatchStatus.DISPUTED}:
+        raise CommunityConflictError("result proposals are available only for active, awaiting, or disputed matches")
+    if not match.team_a_id or not match.team_b_id:
+        raise CommunityConflictError("result proposals require two assigned teams")
+    if CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").first():
+        raise CommunityConflictError("a result proposal is already pending")
+    try:
+        winner_team_id = uuid.UUID(str(payload["winner_team_id"]))
+        team_a_score = int(payload["team_a_score"])
+        team_b_score = int(payload["team_b_score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CommunityValidationError("winner_team_id and both non-negative scores are required") from exc
+    if winner_team_id not in {match.team_a_id, match.team_b_id} or min(team_a_score, team_b_score) < 0:
+        raise CommunityValidationError("invalid result proposal")
+    evidence = _validated_evidence_asset_ids(payload.get("evidence_asset_ids") or [], tournament.id, host_user_id, {"result_evidence"})
+    evidence_urls = _proposal_evidence_urls(payload.get("evidence_urls") or [])
+    if not evidence and not evidence_urls:
+        raise CommunityValidationError("at least one evidence asset or screenshot URL is required")
+    ocr_data = payload.get("ocr_data") or {}
+    if not isinstance(ocr_data, dict):
+        raise CommunityValidationError("ocr_data must be an object")
+    proposal = CommunityMatchResultProposal(
+        tournament_id=tournament.id, match_id=match.id, proposed_by_user_id=int(host_user_id),
+        winner_team_id=winner_team_id, team_a_score=team_a_score, team_b_score=team_b_score,
+        evidence_asset_ids=evidence, evidence_urls=evidence_urls, ocr_data=ocr_data,
+        expires_at=_now() + timedelta(minutes=15),
+    )
+    db.session.add(proposal)
+    db.session.flush()
+    match.status = CommunityMatchStatus.RESULT_PENDING
+    _audit("community_result_proposed", "community_match_result_proposal", proposal.id, host_user_id)
+    db.session.commit()
+    return proposal
+
+
+def accept_result_proposal(user_id, tournament_id, match_id, proposal_id):
+    match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament_id).with_for_update().first()
+    proposal = CommunityMatchResultProposal.query.filter_by(id=proposal_id, match_id=match_id, tournament_id=tournament_id).with_for_update().first()
+    if not match or not proposal:
+        raise CommunityValidationError("result proposal not found")
+    if proposal.status != "pending" or proposal.expires_at <= _now():
+        raise CommunityConflictError("result proposal is no longer pending")
+    team_id = _match_captain_team(user_id, tournament_id, match)
+    accepted = {str(value) for value in (proposal.accepted_team_ids or [])}
+    accepted.add(str(team_id))
+    proposal.accepted_team_ids = sorted(accepted)
+    if {str(match.team_a_id), str(match.team_b_id)}.issubset(accepted):
+        _finalize_result_proposal(proposal, match)
+    _audit("community_result_proposal_accepted", "community_match_result_proposal", proposal.id, user_id)
+    db.session.commit()
+    return proposal
+
+
+def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, payload):
+    match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament_id).with_for_update().first()
+    proposal = CommunityMatchResultProposal.query.filter_by(id=proposal_id, match_id=match_id, tournament_id=tournament_id).with_for_update().first()
+    if not match or not proposal:
+        raise CommunityValidationError("result proposal not found")
+    if proposal.status != "pending" or proposal.expires_at <= _now():
+        raise CommunityConflictError("result proposal is no longer pending")
+    _match_captain_team(user_id, tournament_id, match)
+    proposal.status = "disputed"
+    proposal.disputed_at = _now()
+    match.status = CommunityMatchStatus.DISPUTED
+    dispute = CommunityTournamentDispute(
+        tournament_id=tournament_id, match_id=match_id, reported_by_user_id=int(user_id),
+        reason="Host result proposal disputed", description=str(payload.get("description") or "Result proposal disputed by a match captain.").strip(),
+        evidence_asset_ids=_validated_evidence_asset_ids(payload.get("evidence_asset_ids") or [], tournament_id, user_id, {"dispute_evidence", "result_evidence"}),
+        response_deadline_at=_now() + timedelta(minutes=15),
+    )
+    db.session.add(dispute)
+    _audit("community_result_proposal_disputed", "community_match_result_proposal", proposal.id, user_id)
+    db.session.commit()
+    return proposal
+
+
 def manage_match(host_user_id, tournament_id, match_id, payload):
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
     match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).with_for_update().first()
@@ -871,17 +988,9 @@ def manage_match(host_user_id, tournament_id, match_id, payload):
             raise CommunityValidationError("lobby_details must be an object")
         match.lobby_details = payload["lobby_details"]
     elif action == "override_result":
-        if match.status in {CommunityMatchStatus.COMPLETED, CommunityMatchStatus.CANCELLED}:
-            raise CommunityConflictError("closed matches cannot be overridden")
-        if not reason:
-            raise CommunityValidationError("reason is required for result override")
-        winner_team_id = uuid.UUID(str(payload.get("winner_team_id")))
-        if winner_team_id not in {match.team_a_id, match.team_b_id}:
-            raise CommunityValidationError("winner_team_id must be a match participant")
-        match.team_a_score = int(payload.get("team_a_score")) if payload.get("team_a_score") is not None else None
-        match.team_b_score = int(payload.get("team_b_score")) if payload.get("team_b_score") is not None else None
-        match.admin_notes = reason
-        _advance_match_winner(match, winner_team_id)
+        raise CommunityConflictError(
+            "host result overrides require a result proposal; use the result-proposals endpoint"
+        )
     elif action == "record_standings":
         raw_standings = payload.get("standings")
         if not isinstance(raw_standings, list) or len(raw_standings) < 2:
@@ -1304,6 +1413,23 @@ def process_operational_deadlines(limit=50):
         db.session.commit()
         summary["escalated"] += 1
         summary["items"].append({"match_id": str(match.id), "status": match.status})
+    proposals = (
+        CommunityMatchResultProposal.query
+        .filter_by(status="pending")
+        .filter(CommunityMatchResultProposal.expires_at <= _now())
+        .order_by(CommunityMatchResultProposal.expires_at.asc())
+        .limit(limit)
+        .all()
+    )
+    for proposal in proposals:
+        match = CommunityTournamentMatch.query.filter_by(id=proposal.match_id).with_for_update().first()
+        if not match or match.status != CommunityMatchStatus.RESULT_PENDING:
+            continue
+        _finalize_result_proposal(proposal, match)
+        _audit("community_result_proposal_expired_finalized", "community_match_result_proposal", proposal.id, actor_type="system")
+        db.session.commit()
+        summary.setdefault("proposals_finalized", 0)
+        summary["proposals_finalized"] += 1
     return summary
 
 

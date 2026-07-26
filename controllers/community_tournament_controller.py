@@ -41,6 +41,7 @@ from services.community_tournament_control_service import (
     control_room,
     create_announcement,
     create_manual_match,
+    create_result_proposal,
     create_team,
     create_tournament_review,
     generate_matches,
@@ -58,6 +59,8 @@ from services.community_tournament_control_service import (
     process_operational_deadlines,
     rule_template,
     respond_team_invitation,
+    accept_result_proposal,
+    dispute_result_proposal,
     start_tournament,
     submit_captain_result,
     tournament_readiness,
@@ -566,6 +569,33 @@ def get_community_leaderboard(tournament_id):
 def manage_community_match(tournament_id, match_id):
     try:
         return jsonify(manage_match(g.auth_user_id, tournament_id, match_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-proposals")
+@auth_required_self(decrypt_user=True)
+def create_community_result_proposal(tournament_id, match_id):
+    try:
+        return jsonify(create_result_proposal(g.auth_user_id, tournament_id, match_id, _body()).to_dict()), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-proposals/<uuid:proposal_id>/accept")
+@auth_required_self(decrypt_user=True)
+def accept_community_result_proposal(tournament_id, match_id, proposal_id):
+    try:
+        return jsonify(accept_result_proposal(g.auth_user_id, tournament_id, match_id, proposal_id).to_dict()), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-proposals/<uuid:proposal_id>/dispute")
+@auth_required_self(decrypt_user=True)
+def dispute_community_result_proposal(tournament_id, match_id, proposal_id):
+    try:
+        return jsonify(dispute_result_proposal(g.auth_user_id, tournament_id, match_id, proposal_id, _body()).to_dict()), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
