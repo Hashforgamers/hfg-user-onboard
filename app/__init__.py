@@ -47,6 +47,10 @@ def create_app():
             or path.startswith("/api/events/") and (
                 path.endswith("/leaderboard") or path.count("/") == 4
             )
+            or path == "/api/v1/community/tournaments"
+            or path.startswith("/api/v1/community/tournaments/public/")
+            or path == "/api/v1/community/hosts/program"
+            or path == "/api/v1/community/rules/template"
         )
 
     @app.before_request

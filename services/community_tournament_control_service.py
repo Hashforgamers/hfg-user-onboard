@@ -511,15 +511,24 @@ def start_tournament(host_user_id, tournament_id):
     """Start a bracket-ready tournament before its scheduled start time."""
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
     now = _now()
-    sync_tournament_status(tournament, now)
     if tournament.status == CommunityTournamentStatus.LIVE:
         return tournament
+    # An explicit host registration close is authoritative for this transition.
+    # Do not recalculate it from a stale end timestamp before we correct that
+    # timestamp below.
+    if tournament.status != CommunityTournamentStatus.REGISTRATION_CLOSED:
+        sync_tournament_status(tournament, now)
     if tournament.status != CommunityTournamentStatus.REGISTRATION_CLOSED:
         raise CommunityConflictError("registration must be closed before the tournament can start")
     if not CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first():
         raise CommunityConflictError("generate or create matches before starting the tournament")
     if tournament.tournament_end_at and now >= tournament.tournament_end_at:
         raise CommunityConflictError("the scheduled tournament end time has already passed")
+
+    # Manual start also closes registration durably. Without this, an organizer
+    # can have a closed status with a future registration_end_at, which violates
+    # the database schedule constraint when tournament_start_at moves to now.
+    tournament.registration_end_at = min(tournament.registration_end_at, now)
 
     # Move the scheduled start to now so future time-based syncs preserve live status.
     tournament.tournament_start_at = now
@@ -711,25 +720,26 @@ def create_manual_match(host_user_id, tournament_id, payload):
     return _match_payload(match)
 
 
-def _match_payload(match, include_lobby=True):
+def _match_payload(match, include_lobby=True, team_names=None):
     payload = match.to_dict()
     if not include_lobby:
         payload["lobby_details"] = {}
-    team_ids = [team_id for team_id in (match.team_a_id, match.team_b_id, match.winner_team_id) if team_id]
-    names = {
-        str(team.id): team.name
-        for team in CommunityTournamentTeam.query.filter(CommunityTournamentTeam.id.in_(team_ids)).all()
-    } if team_ids else {}
+    if team_names is None:
+        team_ids = [team_id for team_id in (match.team_a_id, match.team_b_id, match.winner_team_id) if team_id]
+        team_names = {
+            str(team.id): team.name
+            for team in CommunityTournamentTeam.query.filter(CommunityTournamentTeam.id.in_(team_ids)).all()
+        } if team_ids else {}
     payload.update({
-        "team_a_name": names.get(str(match.team_a_id)) if match.team_a_id else None,
-        "team_b_name": names.get(str(match.team_b_id)) if match.team_b_id else None,
-        "winner_team_name": names.get(str(match.winner_team_id)) if match.winner_team_id else None,
+        "team_a_name": team_names.get(str(match.team_a_id)) if match.team_a_id else None,
+        "team_b_name": team_names.get(str(match.team_b_id)) if match.team_b_id else None,
+        "winner_team_name": team_names.get(str(match.winner_team_id)) if match.winner_team_id else None,
     })
     return payload
 
 
-def list_matches(tournament_id, filters, include_lobby=False):
-    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+def list_matches(tournament_id, filters, include_lobby=False, tournament=None):
+    tournament = tournament or CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
     if not include_lobby:
@@ -741,7 +751,20 @@ def list_matches(tournament_id, filters, include_lobby=False):
         CommunityTournamentMatch.round_number.asc(),
         CommunityTournamentMatch.match_number.asc(),
     ).all()
-    return {"items": [_match_payload(match, include_lobby=include_lobby) for match in matches]}
+    team_ids = {
+        team_id
+        for match in matches
+        for team_id in (match.team_a_id, match.team_b_id, match.winner_team_id)
+        if team_id
+    }
+    team_names = {
+        str(team.id): team.name
+        for team in CommunityTournamentTeam.query.filter(CommunityTournamentTeam.id.in_(team_ids)).all()
+    } if team_ids else {}
+    return {"items": [
+        _match_payload(match, include_lobby=include_lobby, team_names=team_names)
+        for match in matches
+    ]}
 
 
 def list_private_matches(user_id, tournament_id, filters):
@@ -751,7 +774,7 @@ def list_private_matches(user_id, tournament_id, filters):
     registration = _registration_for_user(tournament.id, user_id)
     if int(tournament.host_user_id) != int(user_id) and not registration:
         raise CommunityForbiddenError("only the host or active participants can view lobby details")
-    return list_matches(tournament_id, filters, include_lobby=True)
+    return list_matches(tournament_id, filters, include_lobby=True, tournament=tournament)
 
 
 def leaderboard(tournament_id, invite_code=None):
