@@ -15,6 +15,7 @@ from services.community_tournament_control_service import (
     _schedule_bracket_rounds,
     _schedule_time,
     _seed_pairs,
+    submit_captain_result,
     _validate_roster,
     manage_match,
     rule_template,
@@ -201,6 +202,75 @@ class CommunityEsportsOperationTests(unittest.TestCase):
         self.assertEqual(first.get_json(), {"items": []})
         self.assertEqual(second.get_json(), {"items": []})
         self.assertEqual(calls, [1])
+
+    @patch("services.community_tournament_control_service._match_payload", return_value={"id": "match"})
+    @patch("services.community_tournament_control_service._audit")
+    @patch("services.community_tournament_control_service._validated_evidence_asset_ids", return_value=["asset-id"])
+    @patch("services.community_tournament_control_service._match_captain_team")
+    @patch("services.community_tournament_control_service._now")
+    @patch("services.community_tournament_control_service.db")
+    @patch("services.community_tournament_control_service.CommunityMatchResultSubmission")
+    @patch("services.community_tournament_control_service.CommunityTournamentMatch")
+    @patch("services.community_tournament_control_service.CommunityTournament")
+    def test_first_captain_can_amend_before_opponent_responds(
+        self,
+        tournament_model,
+        match_model,
+        submission_model,
+        mocked_db,
+        mocked_now,
+        captain_team,
+        _validated_assets,
+        audit,
+        _match_payload,
+    ):
+        now = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
+        team_a_id = uuid.uuid4()
+        team_b_id = uuid.uuid4()
+        existing = SimpleNamespace(
+            submitted_by_user_id=7,
+            winner_team_id=team_a_id,
+            team_a_score=1,
+            team_b_score=0,
+            evidence_asset_ids=["old-asset"],
+            notes="old",
+            to_dict=lambda: {"id": "submission"},
+        )
+        tournament = SimpleNamespace(id=uuid.uuid4(), result_submission_window_minutes=15)
+        match = SimpleNamespace(
+            id=uuid.uuid4(),
+            team_a_id=team_a_id,
+            team_b_id=team_b_id,
+            status="awaiting_results",
+            result_due_at=now + timedelta(minutes=10),
+        )
+        tournament_model.query.filter_by.return_value.first.return_value = tournament
+        match_model.query.filter_by.return_value.with_for_update.return_value.first.return_value = match
+        submission_model.query.filter.return_value.first.return_value = None
+        submission_model.query.filter_by.return_value.with_for_update.return_value.first.return_value = existing
+        captain_team.return_value = team_a_id
+        mocked_now.return_value = now
+
+        result = submit_captain_result(
+            7,
+            tournament.id,
+            match.id,
+            {
+                "winner_team_id": str(team_b_id),
+                "team_a_score": 0,
+                "team_b_score": 1,
+                "evidence_asset_ids": ["asset-id"],
+                "notes": "Corrected scoreboard",
+            },
+        )
+
+        self.assertTrue(result["amended"])
+        self.assertEqual(result["result_state"], "awaiting_opponent")
+        self.assertEqual(existing.winner_team_id, team_b_id)
+        self.assertEqual(existing.team_a_score, 0)
+        self.assertEqual(existing.team_b_score, 1)
+        audit.assert_called_once()
+        mocked_db.session.commit.assert_called_once()
 
     @patch("services.community_tournament_control_service.User")
     def test_roster_requires_game_ids_and_adds_captain(self, user_model):

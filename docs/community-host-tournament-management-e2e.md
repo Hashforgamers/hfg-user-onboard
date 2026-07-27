@@ -388,6 +388,19 @@ A dispute marks the proposal disputed and opens the normal organizer/admin
 dispute record. If nobody disputes, the deadline processor finalizes the pending
 proposal once its 15-minute server deadline has elapsed.
 
+### Admin Referee Resolution
+
+For a disputed or otherwise unresolved match, a platform administrator can make
+the final referee decision:
+
+`POST /admin/tournaments/<tournament_id>/matches/<match_id>/resolve-result`
+
+Send `X-Admin-Token`, `X-Admin-Id`, a non-empty `reason`, `winner_team_id`, and
+both non-negative scores. This closes open match disputes, marks pending
+proposals/submissions as admin-overridden, writes an audit record, notifies the
+host, and advances the bracket. It cannot alter a completed match; a completed
+match requires a separate controlled restart workflow.
+
 ### Captain Result Agreement
 
 `POST /tournaments/<tournament_id>/matches/<match_id>/result-submissions`
@@ -406,6 +419,11 @@ Only each match team's accepted captain can submit once. Matching winner and
 score submissions automatically complete the match and advance the winner.
 Conflicting submissions mark the match disputed and create a structured
 platform-admin dispute.
+
+The first captain may amend their own submission only while the match is still
+awaiting the other captain and before its original response deadline. An
+amendment does not extend that deadline. Once the other captain responds, both
+submissions are immutable and either finalize or create a dispute.
 
 Schedule `POST /internal/operations/process-deadlines` every 1-2 minutes with
 `X-Community-Payment-Cron-Token`. It finalizes undisputed expired result

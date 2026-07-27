@@ -591,6 +591,27 @@ deadline cron finalizes an undisputed pending proposal after the server expiry.
 Do not call the legacy `PATCH .../matches/<match_id>` `override_result` action:
 the backend rejects it so the review flow cannot be bypassed.
 
+### Captain-Submitted Result Alternative
+
+For a captain-versus-captain flow, use
+`POST /tournaments/<tournament_id>/matches/<match_id>/result-submissions` once
+per accepted match captain. The first submission enters `awaiting_opponent`; a
+matching second submission finalizes the bracket, while a different second
+submission creates a dispute. The first captain can amend their submission only
+before the second response and before the original 15-minute deadline. Do not
+mix this endpoint with host result proposals for the same match.
+
+### Admin Referee Result
+
+Only the platform admin UI may call:
+
+`POST /admin/tournaments/<tournament_id>/matches/<match_id>/resolve-result`
+
+It requires `X-Admin-Token`, `X-Admin-Id`, `reason`, `winner_team_id`,
+`team_a_score`, and `team_b_score`. It is available only for unresolved matches,
+closes open disputes, records an audit entry, and advances the winner. It must
+never be exposed as a host or participant action.
+
 ### Submit Match Result
 - **Method**: `POST`
 - **Path**: `/tournaments/<tournament_id>/results`
