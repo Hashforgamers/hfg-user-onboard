@@ -986,6 +986,70 @@ def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, paylo
     return proposal
 
 
+def admin_resolve_match_result(admin_id, tournament_id, match_id, payload):
+    """Apply a referee decision only for an unresolved match and retain the evidence trail."""
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament_id).with_for_update().first()
+    if not tournament or not match:
+        raise CommunityValidationError("match not found")
+    if match.status not in {
+        CommunityMatchStatus.IN_PROGRESS,
+        CommunityMatchStatus.AWAITING_RESULTS,
+        CommunityMatchStatus.RESULT_PENDING,
+        CommunityMatchStatus.DISPUTED,
+    }:
+        raise CommunityConflictError("only an unresolved match can receive an admin result")
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise CommunityValidationError("reason is required for an admin result")
+    try:
+        winner_team_id = uuid.UUID(str(payload["winner_team_id"]))
+        team_a_score = int(payload["team_a_score"])
+        team_b_score = int(payload["team_b_score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CommunityValidationError("winner_team_id and both non-negative scores are required") from exc
+    if winner_team_id not in {match.team_a_id, match.team_b_id} or min(team_a_score, team_b_score) < 0:
+        raise CommunityValidationError("invalid admin result")
+
+    now = _now()
+    for proposal in CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").all():
+        proposal.status = "admin_overridden"
+        proposal.finalized_at = now
+    for submission in CommunityMatchResultSubmission.query.filter_by(match_id=match.id).all():
+        submission.status = "admin_overridden"
+    for dispute in CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.match_id == match.id,
+        CommunityTournamentDispute.status.in_({CommunityDisputeStatus.OPEN, CommunityDisputeStatus.UNDER_REVIEW}),
+    ).all():
+        dispute.status = CommunityDisputeStatus.CLOSED
+        dispute.admin_comment = reason
+        dispute.reviewed_by_admin_id = int(admin_id)
+        dispute.reviewed_at = now
+        dispute.resolution_action = "admin_match_result"
+
+    match.team_a_score = team_a_score
+    match.team_b_score = team_b_score
+    match.admin_notes = reason
+    _advance_match_winner(match, winner_team_id)
+    _audit(
+        "community_match_result_admin_resolved",
+        "community_tournament_match",
+        match.id,
+        admin_id,
+        "admin",
+        {"winner_team_id": str(winner_team_id), "reason": reason},
+    )
+    _notify(
+        tournament.host_user_id,
+        "community_match_admin_resolved",
+        "Match result resolved",
+        f"Match {match.match_number} was resolved by a tournament administrator.",
+        tournament.id,
+    )
+    db.session.commit()
+    return _match_payload(match)
+
+
 def manage_match(host_user_id, tournament_id, match_id, payload):
     tournament = _owned_tournament(host_user_id, tournament_id, lock=True)
     match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).with_for_update().first()
@@ -1085,17 +1149,7 @@ def submit_captain_result(user_id, tournament_id, match_id, payload):
     match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament_id).with_for_update().first()
     if not tournament or not match:
         raise CommunityValidationError("match not found")
-    membership = (
-        CommunityTournamentTeamMember.query
-        .filter(
-            CommunityTournamentTeamMember.user_id == int(user_id),
-            CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
-            CommunityTournamentTeamMember.role == "captain",
-        )
-        .first()
-    )
-    if not membership:
-        raise CommunityForbiddenError("only a match team captain can submit this result")
+    team_id = _match_captain_team(user_id, tournament_id, match)
     if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS}:
         raise CommunityConflictError("results can be submitted only after the match starts")
     try:
@@ -1115,23 +1169,43 @@ def submit_captain_result(user_id, tournament_id, match_id, payload):
         user_id,
         {"result_evidence"},
     )
-    if CommunityMatchResultSubmission.query.filter_by(match_id=match.id, team_id=membership.team_id).first():
-        raise CommunityConflictError("this team has already submitted a result")
-    submission = CommunityMatchResultSubmission(
-        match_id=match.id,
-        team_id=membership.team_id,
-        submitted_by_user_id=int(user_id),
-        winner_team_id=winner_team_id,
-        team_a_score=team_a_score,
-        team_b_score=team_b_score,
-        evidence_asset_ids=evidence,
-        notes=str(payload.get("notes") or "").strip() or None,
-    )
-    db.session.add(submission)
     prior = CommunityMatchResultSubmission.query.filter(
         CommunityMatchResultSubmission.match_id == match.id,
-        CommunityMatchResultSubmission.team_id != membership.team_id,
+        CommunityMatchResultSubmission.team_id != team_id,
     ).first()
+    existing = CommunityMatchResultSubmission.query.filter_by(match_id=match.id, team_id=team_id).with_for_update().first()
+    is_amendment = existing is not None
+    if existing:
+        if prior or match.status != CommunityMatchStatus.AWAITING_RESULTS:
+            raise CommunityConflictError("a submitted result cannot be changed after the opponent responds")
+        if match.result_due_at and match.result_due_at <= _now():
+            raise CommunityConflictError("the result response deadline has passed")
+        if existing.submitted_by_user_id != int(user_id):
+            raise CommunityForbiddenError("only the captain who submitted this result can amend it")
+        submission = existing
+        previous = {
+            "winner_team_id": str(existing.winner_team_id),
+            "team_a_score": existing.team_a_score,
+            "team_b_score": existing.team_b_score,
+        }
+        submission.winner_team_id = winner_team_id
+        submission.team_a_score = team_a_score
+        submission.team_b_score = team_b_score
+        submission.evidence_asset_ids = evidence
+        submission.notes = str(payload.get("notes") or "").strip() or None
+    else:
+        submission = CommunityMatchResultSubmission(
+            match_id=match.id,
+            team_id=team_id,
+            submitted_by_user_id=int(user_id),
+            winner_team_id=winner_team_id,
+            team_a_score=team_a_score,
+            team_b_score=team_b_score,
+            evidence_asset_ids=evidence,
+            notes=str(payload.get("notes") or "").strip() or None,
+        )
+        db.session.add(submission)
+        previous = None
     if prior:
         agrees = (
             prior.winner_team_id == winner_team_id
@@ -1161,10 +1235,24 @@ def submit_captain_result(user_id, tournament_id, match_id, payload):
             _notify(tournament.host_user_id, "community_result_conflict", "Result conflict requires review", f"Match {match.match_number} has conflicting captain submissions.", tournament.id)
     else:
         match.status = CommunityMatchStatus.AWAITING_RESULTS
-        match.result_due_at = _now() + timedelta(minutes=int(tournament.result_submission_window_minutes or 15))
-    _audit("community_captain_result_submitted", "community_tournament_match", match.id, user_id, metadata={"team_id": str(membership.team_id)})
+        if not is_amendment:
+            match.result_due_at = _now() + timedelta(minutes=int(tournament.result_submission_window_minutes or 15))
+    _audit(
+        "community_captain_result_amended" if is_amendment else "community_captain_result_submitted",
+        "community_tournament_match",
+        match.id,
+        user_id,
+        metadata={"team_id": str(team_id), "previous": previous} if is_amendment else {"team_id": str(team_id)},
+    )
     db.session.commit()
-    return {"match": _match_payload(match), "submission": submission.to_dict()}
+    return {
+        "match": _match_payload(match),
+        "submission": submission.to_dict(),
+        "result_state": "disputed" if match.status == CommunityMatchStatus.DISPUTED else (
+            "finalized" if match.status == CommunityMatchStatus.COMPLETED else "awaiting_opponent"
+        ),
+        "amended": is_amendment,
+    }
 
 
 def create_announcement(host_user_id, tournament_id, payload):

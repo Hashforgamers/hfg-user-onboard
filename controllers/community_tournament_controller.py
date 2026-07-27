@@ -40,6 +40,7 @@ from services.community_tournament_service import (
     verify_match_result,
 )
 from services.community_tournament_control_service import (
+    admin_resolve_match_result,
     control_room,
     create_announcement,
     create_manual_match,
@@ -470,6 +471,17 @@ def admin_review_community_dispute(dispute_id):
 def admin_list_community_disputes(tournament_id):
     try:
         return jsonify(list_admin_disputes(tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/admin/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/resolve-result")
+@_admin_required
+def admin_resolve_community_match_result(tournament_id, match_id):
+    if not g.admin_id:
+        return _error("X-Admin-Id is required for an admin result", 400, "validation_error")
+    try:
+        return jsonify(admin_resolve_match_result(g.admin_id, tournament_id, match_id, _body())), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
