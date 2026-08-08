@@ -1507,7 +1507,15 @@ def list_audit_log(host_user_id, tournament_id, filters):
 
 def process_operational_deadlines(limit=50):
     limit = min(max(int(limit or 50), 1), 100)
-    summary = {"processed": 0, "escalated": 0, "lifecycle_updated": 0, "items": [], "lifecycle": []}
+    summary = {
+        "processed": 0,
+        "escalated": 0,
+        "lifecycle_updated": 0,
+        "brackets_generated": 0,
+        "bracket_blocked": [],
+        "items": [],
+        "lifecycle": [],
+    }
 
     lifecycle_tournaments = (
         CommunityTournament.query
@@ -1522,6 +1530,60 @@ def process_operational_deadlines(limit=50):
         .all()
     )
     for tournament in lifecycle_tournaments:
+        # The deadline worker owns scheduled starts.  Generate the bracket before
+        # publishing the live transition so a tournament never becomes live with
+        # no playable matches.  generate_matches also locks rosters and checks in
+        # every approved entrant atomically.
+        if (
+            _now() >= tournament.tournament_start_at
+            and not CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first()
+        ):
+            scheduled_previous_status = tournament.status
+            try:
+                generate_matches(tournament.host_user_id, tournament.id)
+                summary["brackets_generated"] += 1
+                summary["lifecycle"].append({
+                    "tournament_id": str(tournament.id),
+                    "bracket_generated": True,
+                })
+                # generate_matches commits and expires this row. Reload it before
+                # deciding whether there is any lifecycle work left to do.
+                tournament = CommunityTournament.query.filter_by(id=tournament.id).first()
+                if not tournament:
+                    continue
+                if scheduled_previous_status != tournament.status:
+                    _audit(
+                        "community_tournament_lifecycle_updated",
+                        "community_tournament",
+                        tournament.id,
+                        actor_type="system",
+                        metadata={
+                            "from_status": scheduled_previous_status,
+                            "to_status": tournament.status,
+                            "bracket_generated": True,
+                        },
+                    )
+                    _notify(
+                        tournament.host_user_id,
+                        "community_tournament_status_changed",
+                        "Tournament status updated",
+                        f"{tournament.title} is now {tournament.status.replace('_', ' ')}.",
+                        tournament.id,
+                    )
+                    summary["lifecycle_updated"] += 1
+                    db.session.commit()
+                continue
+            except CommunityConflictError as exc:
+                # Keep registration closed when there are not enough approved
+                # entrants or scheduling is invalid. Retrying on the next cron
+                # tick is safe after the host resolves the reported blocker.
+                db.session.rollback()
+                summary["bracket_blocked"].append({
+                    "tournament_id": str(tournament.id),
+                    "reason": str(exc),
+                })
+                continue
+
         previous_status = tournament.status
         if not sync_tournament_status(tournament):
             continue
@@ -1545,7 +1607,9 @@ def process_operational_deadlines(limit=50):
             "from_status": previous_status,
             "to_status": tournament.status,
         })
-    if summary["lifecycle_updated"]:
+        # Commit per tournament. generate_matches can safely run during the same
+        # cron pass without accidentally committing or rolling back another
+        # tournament's lifecycle update.
         db.session.commit()
 
     matches = (

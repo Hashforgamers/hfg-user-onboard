@@ -422,8 +422,9 @@ match requires a separate controlled restart workflow.
 ### Dispute Chat Provisioning
 
 When `COMMUNITY_DISPUTE_CHAT_ENABLED=true`, every newly opened dispute receives
-a backend-created Firestore room. Configure one or more trusted platform user
-IDs with `COMMUNITY_DISPUTE_ADMIN_USER_IDS=123,456`. The dispute response exposes
+a backend-created Firestore room. The tournament host manages the room by
+default. `COMMUNITY_DISPUTE_ADMIN_USER_IDS=123,456` is optional and adds Hash
+support staff only for escalated disputes. The dispute response exposes
 `chat_room_id` and `chat_room_status: ready`; the backend owns the room roster
 and initial system message. Clients obtain a Firebase custom token from
 `POST /chat/firebase-token` before opening the returned room.

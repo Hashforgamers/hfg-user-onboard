@@ -626,9 +626,9 @@ plus the backend-created chat reference when dispute chat is enabled:
 ```
 
 The backend creates the Firestore room and opening system message. It includes
-the host, reporting user, accepted/verified members of both match teams, and
-the configured Hash admin users. The client must never construct membership or
-choose an admin UID itself.
+the host, reporting user, and accepted/verified members of both match teams.
+Configured Hash admin users are optional escalation participants. The client
+must never construct membership or choose an admin UID itself.
 
 Before opening a room, obtain a trusted Firebase custom token from:
 
