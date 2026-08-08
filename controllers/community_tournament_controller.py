@@ -49,6 +49,7 @@ from services.community_tournament_control_service import (
     create_tournament_review,
     generate_matches,
     host_dashboard,
+    invite_team_member,
     list_announcements,
     list_audit_log,
     list_matches,
@@ -70,6 +71,7 @@ from services.community_tournament_control_service import (
 )
 from services.security import auth_required_self
 from models.communityTournament import CommunityHostVerification
+from services.community_dispute_chat_service import CommunityDisputeChatError, mint_dispute_chat_token
 
 
 community_tournament_bp = Blueprint("community_tournaments", __name__, url_prefix="/api/v1/community")
@@ -152,6 +154,8 @@ def _payment_cron_required(fn):
 
 
 def _handle_service_error(exc):
+    if isinstance(exc, CommunityDisputeChatError):
+        return _error(str(exc), 503, "dispute_chat_unavailable")
     if isinstance(exc, CommunityForbiddenError):
         return _error(str(exc), 403, "forbidden")
     if isinstance(exc, CommunityConflictError):
@@ -447,6 +451,15 @@ def create_community_dispute(tournament_id):
         return _handle_service_error(exc)
 
 
+@community_tournament_bp.post("/chat/firebase-token")
+@auth_required_self(decrypt_user=True)
+def create_community_dispute_chat_token():
+    try:
+        return jsonify(mint_dispute_chat_token(g.auth_user_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @community_tournament_bp.get("/tournaments/<uuid:tournament_id>/disputes")
 @auth_required_self(decrypt_user=True)
 def list_managed_community_disputes(tournament_id):
@@ -547,6 +560,15 @@ def create_community_team(tournament_id):
 def replace_community_team_roster(tournament_id, team_id):
     try:
         return jsonify(replace_team_roster(g.auth_user_id, tournament_id, team_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/members")
+@auth_required_self(decrypt_user=True)
+def invite_community_team_member(tournament_id, team_id):
+    try:
+        return jsonify(invite_team_member(g.auth_user_id, tournament_id, team_id, _body())), 201
     except Exception as exc:
         return _handle_service_error(exc)
 

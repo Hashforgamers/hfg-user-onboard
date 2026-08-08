@@ -37,6 +37,7 @@ from models.hashWalletTransaction import HashWalletTransaction
 from models.hashWallet import HashWallet
 from models.notification import Notification
 from models.user import User
+from services.community_dispute_chat_service import provision_dispute_chat_room
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -1699,6 +1700,7 @@ def create_dispute(user_id, tournament_id, payload):
     )
     db.session.add(dispute)
     db.session.flush()
+    provision_dispute_chat_room(dispute, tournament)
     _audit("dispute_created", "community_tournament_dispute", dispute.id, user_id)
     _notify(tournament.host_user_id, "community_dispute_created", "Tournament dispute opened", f"A dispute was opened for {tournament.title}.", tournament.id)
     db.session.commit()

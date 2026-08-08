@@ -284,6 +284,21 @@ Each item includes the registration fields plus a display-safe gamer object:
 The caller must own an active registration. Non-captain members start as
 `invited`; adding a user ID does not enroll that user without consent.
 
+### Invite One Member
+
+To invite a friend without replacing the full roster, the captain calls:
+
+`POST /tournaments/<tournament_id>/teams/<team_id>/members`
+
+```json
+{"user_id": 2502, "game_id": "Nova#003", "role": "player"}
+```
+
+The captain counts as one active player. Therefore, a duo (`team_size: 2`) can
+invite one `player`; a four-player squad can invite three. `substitute_limit`
+adds only substitute slots. A tournament configured with `team_size: 1` has no
+additional active-player slot.
+
 ### Accept or Decline Roster Invitation
 
 `POST /tournaments/<tournament_id>/teams/<team_id>/invitation`
@@ -293,6 +308,9 @@ The caller must own an active registration. Non-captain members start as
 ```
 
 Allowed actions are `accept` and `decline`.
+
+This endpoint is for the invited user to respond. It is not the captain's
+add-friend endpoint.
 
 ### Replace Roster
 
@@ -400,6 +418,15 @@ both non-negative scores. This closes open match disputes, marks pending
 proposals/submissions as admin-overridden, writes an audit record, notifies the
 host, and advances the bracket. It cannot alter a completed match; a completed
 match requires a separate controlled restart workflow.
+
+### Dispute Chat Provisioning
+
+When `COMMUNITY_DISPUTE_CHAT_ENABLED=true`, every newly opened dispute receives
+a backend-created Firestore room. Configure one or more trusted platform user
+IDs with `COMMUNITY_DISPUTE_ADMIN_USER_IDS=123,456`. The dispute response exposes
+`chat_room_id` and `chat_room_status: ready`; the backend owns the room roster
+and initial system message. Clients obtain a Firebase custom token from
+`POST /chat/firebase-token` before opening the returned room.
 
 ### Captain Result Agreement
 
