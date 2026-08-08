@@ -42,8 +42,6 @@ def _admin_user_ids():
         user_ids = sorted({int(value.strip()) for value in raw.split(",") if value.strip()})
     except ValueError as exc:
         raise CommunityDisputeChatError("COMMUNITY_DISPUTE_ADMIN_USER_IDS must be comma-separated user IDs") from exc
-    if not user_ids:
-        raise CommunityDisputeChatError("community dispute chat requires at least one configured admin user")
     return user_ids
 
 
