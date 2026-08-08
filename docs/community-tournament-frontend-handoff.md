@@ -612,6 +612,60 @@ It requires `X-Admin-Token`, `X-Admin-Id`, `reason`, `winner_team_id`,
 closes open disputes, records an audit entry, and advances the winner. It must
 never be exposed as a host or participant action.
 
+### Dispute Chat Room
+
+`POST /tournaments/<tournament_id>/disputes` returns the normal dispute object
+plus the backend-created chat reference when dispute chat is enabled:
+
+```json
+{
+  "id": "dispute-uuid",
+  "chat_room_id": "community-dispute-dispute-uuid",
+  "chat_room_status": "ready"
+}
+```
+
+The backend creates the Firestore room and opening system message. It includes
+the host, reporting user, accepted/verified members of both match teams, and
+the configured Hash admin users. The client must never construct membership or
+choose an admin UID itself.
+
+Before opening a room, obtain a trusted Firebase custom token from:
+
+`POST /chat/firebase-token`
+
+Then call Firebase `signInWithCustomToken` and open
+`communityDisputeRooms/<chat_room_id>`. The backend issues deterministic Firebase
+UIDs in the form `hfg-user-<Hash user ID>` with a `hash_user_id` custom claim.
+
+Firestore rules must restrict access using that claim. The room document should
+not be client-writable. A safe baseline is:
+
+```text
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function member(roomId) {
+      return request.auth != null
+        && request.auth.token.community_dispute_chat == true
+        && request.auth.token.hash_user_id in get(/databases/$(database)/documents/communityDisputeRooms/$(roomId)).data.participant_user_ids;
+    }
+
+    match /communityDisputeRooms/{roomId} {
+      allow get: if member(roomId);
+      allow list, create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if member(roomId);
+        allow create: if member(roomId)
+          && request.resource.data.sender_user_id == request.auth.token.hash_user_id
+          && request.resource.data.message_type == "user";
+        allow update, delete: if false;
+      }
+    }
+  }
+}
+```
+
 ### Submit Match Result
 - **Method**: `POST`
 - **Path**: `/tournaments/<tournament_id>/results`

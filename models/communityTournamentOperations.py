@@ -388,6 +388,8 @@ class CommunityTournamentDispute(db.Model):
     reason = Column(String(120), nullable=False)
     description = Column(Text, nullable=False)
     evidence_asset_ids = Column(JSONB, nullable=False, default=list)
+    chat_room_id = Column(String(160), nullable=True, unique=True, index=True)
+    chat_room_status = Column(String(24), nullable=False, default="not_requested")
     status = Column(String(32), nullable=False, default=CommunityDisputeStatus.OPEN, index=True)
     admin_comment = Column(Text, nullable=True)
     reviewed_by_admin_id = Column(BigInteger, nullable=True)
@@ -407,6 +409,8 @@ class CommunityTournamentDispute(db.Model):
             "reason": self.reason,
             "description": self.description,
             "evidence_asset_ids": self.evidence_asset_ids or [],
+            "chat_room_id": self.chat_room_id,
+            "chat_room_status": self.chat_room_status,
             "status": self.status,
             "admin_comment": self.admin_comment,
             "reviewed_by_admin_id": self.reviewed_by_admin_id,

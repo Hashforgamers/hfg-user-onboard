@@ -47,6 +47,7 @@ from services.community_tournament_service import (
     _refund_or_cancel_registration,
     sync_tournament_status,
 )
+from services.community_dispute_chat_service import provision_dispute_chat_room
 
 
 def _require_private_access(tournament, invite_code=None):
@@ -119,8 +120,16 @@ def _validate_roster(tournament, captain_user_id, members):
         seen_users.add(int(captain_user_id))
     for member in normalized:
         member["role"] = "captain" if member["user_id"] == int(captain_user_id) else member["role"]
+        if member["role"] == "captain" and member["user_id"] != int(captain_user_id):
+            raise CommunityValidationError("only the team creator can be captain")
     if len(normalized) > maximum:
         raise CommunityValidationError(f"roster cannot exceed {maximum} members including substitutes")
+    active_count = sum(member["role"] != "substitute" for member in normalized)
+    substitute_count = sum(member["role"] == "substitute" for member in normalized)
+    if active_count > int(tournament.team_size or 1):
+        raise CommunityValidationError(f"roster cannot exceed {int(tournament.team_size or 1)} active players")
+    if substitute_count > int(tournament.substitute_limit or 0):
+        raise CommunityValidationError(f"roster cannot exceed {int(tournament.substitute_limit or 0)} substitutes")
     existing_users = {int(row.id) for row in User.query.with_entities(User.id).filter(User.id.in_(seen_users)).all()}
     if existing_users != seen_users:
         raise CommunityValidationError("one or more roster users do not exist")
@@ -235,6 +244,68 @@ def replace_team_roster(user_id, tournament_id, team_id, payload):
     if registration and _automatic_team_ready(tournament, registration, current_members):
         team.status = CommunityTeamStatus.APPROVED
     _audit("community_team_roster_updated", "community_tournament_team", team.id, user_id)
+    db.session.commit()
+    return _team_payload(team)
+
+
+def invite_team_member(captain_user_id, tournament_id, team_id, payload):
+    """Reserve one roster slot and notify an invited player without replacing the roster."""
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    team = CommunityTournamentTeam.query.filter_by(id=team_id, tournament_id=tournament_id).with_for_update().first()
+    if not tournament or not team:
+        raise CommunityValidationError("team not found")
+    if int(team.captain_user_id) != int(captain_user_id):
+        raise CommunityForbiddenError("only the team captain can invite a member")
+    if team.roster_locked_at or (tournament.roster_lock_at and _now() >= tournament.roster_lock_at):
+        raise CommunityConflictError("roster is locked")
+    try:
+        invited_user_id = int(payload["user_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CommunityValidationError("user_id is required") from exc
+    game_id = str(payload.get("game_id") or "").strip()
+    role = str(payload.get("role") or "player").strip().lower()
+    if not game_id:
+        raise CommunityValidationError("game_id is required")
+    if role not in {"player", "substitute"}:
+        raise CommunityValidationError("an invited member must be a player or substitute")
+    if invited_user_id == int(team.captain_user_id):
+        raise CommunityValidationError("the captain is already in the roster")
+    if not User.query.filter_by(id=invited_user_id).first():
+        raise CommunityValidationError("invited user does not exist")
+    if CommunityTournamentTeamMember.query.filter_by(team_id=team.id, user_id=invited_user_id).first():
+        raise CommunityConflictError("this user is already in the roster")
+
+    members = CommunityTournamentTeamMember.query.filter_by(team_id=team.id).with_for_update().all()
+    active_count = sum(member.role != "substitute" for member in members)
+    substitute_count = sum(member.role == "substitute" for member in members)
+    if role == "player" and active_count >= int(tournament.team_size or 1):
+        raise CommunityConflictError(f"roster already has {int(tournament.team_size or 1)} active players")
+    if role == "substitute" and substitute_count >= int(tournament.substitute_limit or 0):
+        raise CommunityConflictError(f"roster already has {int(tournament.substitute_limit or 0)} substitutes")
+
+    db.session.add(CommunityTournamentTeamMember(
+        tournament_id=tournament.id,
+        team_id=team.id,
+        user_id=invited_user_id,
+        role=role,
+        game_id=game_id,
+        verification_status="invited",
+    ))
+    team.status = CommunityTeamStatus.PENDING
+    _audit(
+        "community_team_member_invited",
+        "community_tournament_team",
+        team.id,
+        captain_user_id,
+        metadata={"invited_user_id": invited_user_id, "role": role},
+    )
+    _notify(
+        invited_user_id,
+        "community_team_invitation",
+        "Tournament team invitation",
+        f"You were invited to join {team.name}.",
+        tournament.id,
+    )
     db.session.commit()
     return _team_payload(team)
 
@@ -981,6 +1052,9 @@ def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, paylo
         response_deadline_at=_now() + timedelta(minutes=15),
     )
     db.session.add(dispute)
+    db.session.flush()
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    provision_dispute_chat_room(dispute, tournament)
     _audit("community_result_proposal_disputed", "community_match_result_proposal", proposal.id, user_id)
     db.session.commit()
     return proposal
@@ -1232,6 +1306,8 @@ def submit_captain_result(user_id, tournament_id, match_id, payload):
                 response_deadline_at=_now() + timedelta(minutes=int(tournament.dispute_window_minutes or 30)),
             )
             db.session.add(dispute)
+            db.session.flush()
+            provision_dispute_chat_room(dispute, tournament)
             _notify(tournament.host_user_id, "community_result_conflict", "Result conflict requires review", f"Match {match.match_number} has conflicting captain submissions.", tournament.id)
     else:
         match.status = CommunityMatchStatus.AWAITING_RESULTS
@@ -1505,6 +1581,10 @@ def process_operational_deadlines(limit=50):
                 response_deadline_at=_now(),
             )
             db.session.add(dispute)
+            db.session.flush()
+            tournament = CommunityTournament.query.filter_by(id=match.tournament_id).first()
+            if tournament:
+                provision_dispute_chat_room(dispute, tournament)
         match.status = CommunityMatchStatus.DISPUTED
         tournament = CommunityTournament.query.filter_by(id=match.tournament_id).first()
         if tournament:
