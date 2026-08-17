@@ -556,7 +556,9 @@ class UserService:
     @staticmethod
     def is_in_cooldown(email, phone):
         """Check if email or phone is in cooldown period"""
-        if not email and not phone:
+        normalized_email = str(email or "").strip().lower()
+        normalized_phone = str(phone or "").strip()
+        if not normalized_email and not normalized_phone:
             return False
         cooldown_days_cfg = current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30)
         cooldown_days = max(0, int(30 if cooldown_days_cfg is None else cooldown_days_cfg))
@@ -564,10 +566,10 @@ class UserService:
             return False
         now = datetime.utcnow()
         predicates = []
-        if email:
-            predicates.append(DeletedUserCooldown.email == email)
-        if phone:
-            predicates.append(DeletedUserCooldown.phone == phone)
+        if normalized_email:
+            predicates.append(func.lower(DeletedUserCooldown.email) == normalized_email)
+        if normalized_phone:
+            predicates.append(DeletedUserCooldown.phone == normalized_phone)
         cooldown = DeletedUserCooldown.query.filter(
             or_(*predicates),
             DeletedUserCooldown.expires_at > now

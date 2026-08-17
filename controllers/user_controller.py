@@ -122,6 +122,71 @@ def _ensure_hash_wallet_row(user_id: int):
     db.session.commit()
 
 
+_USER_DELETION_BLOCKER_MESSAGES = {
+    "financial_history": "Financial history exists for this account.",
+    "community_host_program": "A community host-program record exists for this account.",
+    "community_host": "You host one or more community tournaments.",
+    "community_registration": "A community tournament registration record exists for this account.",
+    "community_team": "You belong to a community tournament team.",
+    "community_payout": "A community tournament payout record exists for this account.",
+    "community_review": "A community tournament review record exists for this account.",
+    "event_team": "You belong to an event team.",
+    "booking_or_pass": "A booking or pass record exists for this account.",
+}
+
+
+def _user_deletion_blockers(user_id: int):
+    """Return records that must be retained instead of hard-deleted."""
+    row = db.session.execute(
+        text(
+            """
+            SELECT
+                EXISTS(
+                    SELECT 1 FROM transactions WHERE user_id = :user_id
+                    UNION ALL
+                    SELECT 1 FROM hash_wallet_transactions WHERE user_id = :user_id
+                ) AS financial_history,
+                EXISTS(
+                    SELECT 1 FROM community_host_verifications WHERE user_id = :user_id
+                ) AS community_host_program,
+                EXISTS(
+                    SELECT 1 FROM community_tournaments WHERE host_user_id = :user_id
+                ) AS community_host,
+                EXISTS(
+                    SELECT 1
+                    FROM community_tournament_registrations
+                    WHERE user_id = :user_id
+                ) AS community_registration,
+                EXISTS(
+                    SELECT 1 FROM community_tournament_teams WHERE captain_user_id = :user_id
+                    UNION ALL
+                    SELECT 1 FROM community_tournament_team_members WHERE user_id = :user_id
+                ) AS community_team,
+                EXISTS(
+                    SELECT 1 FROM community_tournament_payouts WHERE user_id = :user_id
+                ) AS community_payout,
+                EXISTS(
+                    SELECT 1
+                    FROM community_tournament_reviews
+                    WHERE host_user_id = :user_id OR reviewer_user_id = :user_id
+                ) AS community_review,
+                EXISTS(
+                    SELECT 1 FROM teams WHERE created_by_user = :user_id
+                    UNION ALL
+                    SELECT 1 FROM team_members WHERE user_id = :user_id
+                ) AS event_team,
+                EXISTS(
+                    SELECT 1 FROM bookings WHERE user_id = :user_id
+                    UNION ALL
+                    SELECT 1 FROM user_passes WHERE user_id = :user_id
+                ) AS booking_or_pass
+            """
+        ),
+        {"user_id": int(user_id)},
+    ).mappings().one()
+    return [code for code in _USER_DELETION_BLOCKER_MESSAGES if bool(row.get(code))]
+
+
 def _sanitize_signup_payload(data):
     payload = dict(data) if isinstance(data, dict) else {}
     payload["fid"] = str(payload.get("fid") or "").strip()
@@ -1016,17 +1081,39 @@ def delete_user_id():
         cooldown_days = max(0, int(30 if cooldown_days_cfg is None else cooldown_days_cfg))
         cooldown_expires_at = datetime.utcnow() + timedelta(days=cooldown_days)
         user_row = db.session.execute(text("""
-            SELECT u.id, u.referred_by, c.email, c.phone
+            SELECT u.id, u.fid, u.referral_code, u.referred_by,
+                   COALESCE((
+                       SELECT lower(c.email)
+                       FROM contact_info c
+                       WHERE c.parent_id = u.id AND c.parent_type = 'user'
+                       ORDER BY c.id DESC
+                       LIMIT 1
+                   ), '') AS email,
+                   COALESCE((
+                       SELECT c.phone
+                       FROM contact_info c
+                       WHERE c.parent_id = u.id AND c.parent_type = 'user'
+                       ORDER BY c.id DESC
+                       LIMIT 1
+                   ), '') AS phone
             FROM users u
-            LEFT JOIN contact_info c
-                ON c.parent_id = u.id AND c.parent_type = 'user'
             WHERE u.id = :user_id
-            LIMIT 1
+            FOR UPDATE
         """), {"user_id": user_id}).mappings().first()
         if not user_row:
+            db.session.rollback()
             return jsonify({"message": "User not found"}), 404
 
-        if cooldown_days > 0:
+        blockers = _user_deletion_blockers(user_id)
+        if blockers:
+            db.session.rollback()
+            return jsonify({
+                "message": "Account cannot be deleted while protected records exist",
+                "blockers": blockers,
+                "details": [_USER_DELETION_BLOCKER_MESSAGES[code] for code in blockers],
+            }), 409
+
+        if cooldown_days > 0 and (user_row.get("email") or user_row.get("phone")):
             db.session.execute(text("""
                 INSERT INTO deleted_user_cooldown (email, phone, referred_by, created_at, expires_at)
                 VALUES (
@@ -1037,7 +1124,7 @@ def delete_user_id():
                     :expires_at
                 )
             """), {
-                "email": user_row.get("email"),
+                "email": str(user_row.get("email") or "").strip().lower(),
                 "phone": user_row.get("phone"),
                 "referred_by": user_row.get("referred_by"),
                 "expires_at": cooldown_expires_at,
@@ -1072,7 +1159,9 @@ def delete_user_id():
             DELETE FROM team_invites WHERE inviter_user_id = :user_id OR invited_user_id = :user_id;
             DELETE FROM team_members WHERE user_id = :user_id;
             DELETE FROM teams WHERE created_by_user = :user_id;
-            DELETE FROM referral_tracking WHERE referred_user_id = :user_id;
+            UPDATE users SET referred_by = NULL WHERE referred_by = :referral_code;
+            DELETE FROM referral_tracking
+            WHERE referred_user_id = :user_id OR referrer_code = :referral_code;
             DELETE FROM notifications WHERE user_id = :user_id;
             DELETE FROM user_hash_coins WHERE user_id = :user_id;
             DELETE FROM fcm_tokens WHERE user_id = :user_id;
@@ -1080,16 +1169,33 @@ def delete_user_id():
             DELETE FROM transactions WHERE user_id = :user_id OR
                 (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
             DELETE FROM user_passes WHERE user_id = :user_id;
+            DELETE FROM password_manager WHERE parent_id = :user_id AND parent_type = 'user';
             DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
             DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
             DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
             DELETE FROM hash_wallets WHERE user_id = :user_id;
             DELETE FROM users WHERE id = :user_id;
-        """), {"user_id": user_id})
+        """), {
+            "user_id": user_id,
+            "referral_code": user_row.get("referral_code"),
+        })
 
         db.session.commit()
         _USER_CACHE.pop(user_id, None)
-        _USER_FID_CACHE.clear()
+        _USER_PHONE_CACHE.pop(user_id, None)
+        _invalidate_fid_caches(user_row.get("fid"))
+        _USER_SEARCH_CACHE.clear()
+        _invalidate_user_microcache(
+            user_id,
+            prefixes=(
+                "users-wallet|",
+                "users-hash-coins|",
+                "users-notifications|",
+                "users-transactions|",
+                "users-voucher|",
+                "user-passes|",
+            ),
+        )
 
         return jsonify({"message": "User deleted successfully"}), 200
 
