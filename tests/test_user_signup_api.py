@@ -1,12 +1,14 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from flask import Flask
+from flask import Flask, g
 
 from controllers.user_controller import (
     _sanitize_signup_payload,
+    _user_deletion_blockers,
     _validate_signup_payload,
+    delete_user_id,
     user_blueprint,
 )
 from models.user import User
@@ -88,6 +90,57 @@ class UserSignupApiTests(unittest.TestCase):
         user = User(fid="firebase-user-123", name="Player", game_username="PlayerOne")
 
         self.assertEqual(user.to_dict()["fid"], "firebase-user-123")
+
+    @patch("controllers.user_controller.db")
+    def test_deletion_blockers_preserve_tournament_and_financial_records(self, mocked_db):
+        mocked_db.session.execute.return_value.mappings.return_value.one.return_value = {
+            "financial_history": True,
+            "community_host": False,
+            "community_registration": True,
+            "community_team": False,
+            "community_payout": True,
+            "event_team": False,
+        }
+
+        blockers = _user_deletion_blockers(42)
+
+        self.assertEqual(blockers, [
+            "financial_history",
+            "community_registration",
+            "community_payout",
+        ])
+
+    @patch("controllers.user_controller.db")
+    def test_delete_returns_conflict_before_mutating_protected_account(self, mocked_db):
+        user_row = {
+            "id": 42,
+            "fid": "firebase-user-123",
+            "referral_code": "U42",
+            "referred_by": None,
+            "email": "player@example.com",
+            "phone": "9999999999",
+        }
+        blocker_row = {
+            "financial_history": False,
+            "community_host": True,
+            "community_registration": False,
+            "community_team": False,
+            "community_payout": False,
+            "event_team": False,
+        }
+        mocked_db.session.execute.side_effect = [
+            MagicMock(mappings=lambda: MagicMock(first=lambda: user_row)),
+            MagicMock(mappings=lambda: MagicMock(one=lambda: blocker_row)),
+        ]
+
+        with self.app.test_request_context("/api/users", method="DELETE"):
+            g.auth_user_id = 42
+            response, status = delete_user_id.__wrapped__()
+
+        self.assertEqual(status, 409)
+        self.assertEqual(response.get_json()["blockers"], ["community_host"])
+        mocked_db.session.rollback.assert_called_once()
+        self.assertEqual(mocked_db.session.execute.call_count, 2)
 
 
 if __name__ == "__main__":
