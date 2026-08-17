@@ -76,6 +76,7 @@ class User(db.Model):
             return {}
 
         return {
+            "fid": self.fid or "",
             "avatar_path": self.avatar_path or "",
             "id": self.id or "",
             "name": self.name or "",

@@ -56,9 +56,31 @@ class UserService:
             game_username = data['gameUserName']
             email_to_check = data.get('contact', {}).get('electronicAddress', {}).get('emailId')
             normalized_email = str(email_to_check or "").strip().lower()
+            phone_to_check = str(
+                data.get('contact', {}).get('electronicAddress', {}).get('mobileNo') or ""
+            ).strip()
             has_email = bool(normalized_email)
 
+            # A deleted account can be identified by a phone number even when
+            # the client did not collect an email address. Do this before any
+            # insert work so phone-only signup cannot bypass the cooldown.
+            if UserService.is_in_cooldown(normalized_email, phone_to_check):
+                return {
+                    "status": "error",
+                    "state": "COOLDOWN_ACTIVE",
+                    "message": "This account identifier is in cooldown period.",
+                    "details": {"email": normalized_email, "phone": phone_to_check},
+                }
+
             # Fast duplicate check in a single DB roundtrip for fid + username (+ email ownership when provided).
+            # PostgreSQL does not have a uniqueness constraint on contact_info
+            # email in every deployed schema. Serialize same-email signups so
+            # two concurrent requests cannot both pass the duplicate check.
+            if has_email and db.session.get_bind().dialect.name == "postgresql":
+                db.session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:email_lock_key))"),
+                    {"email_lock_key": f"hfg-signup-email:{normalized_email}"},
+                )
             duplicate_row = db.session.execute(text("""
                 SELECT
                     EXISTS(SELECT 1 FROM users WHERE fid = :fid) AS fid_exists,
@@ -98,14 +120,6 @@ class UserService:
                         "state": "EMAIL_EXISTS",
                         "message": "This email is already in use.",
                         "details": {"email": normalized_email}
-                    }
-                phone_to_check = data.get('contact', {}).get('electronicAddress', {}).get('mobileNo')
-                if UserService.is_in_cooldown(email_to_check, phone_to_check):
-                    return {
-                        "status": "error",
-                        "state": "COOLDOWN_ACTIVE",
-                        "message": "This account identifier is in cooldown period.",
-                        "details": {"email": email_to_check}
                     }
                 # Clean stale/orphan contact rows that reference non-existent users so they do not
                 # cause perpetual EMAIL_EXISTS loops in signup flows.
@@ -260,7 +274,22 @@ class UserService:
                     referral_input=str(referral_input or "").strip() or None,
                 )
 
-        _USER_POST_CREATE_EXECUTOR.submit(_runner)
+        try:
+            _USER_POST_CREATE_EXECUTOR.submit(_runner)
+        except RuntimeError as exc:
+            # User creation has already committed. Do not turn a transient
+            # executor shutdown into a misleading signup failure. The work is
+            # idempotent, so finish it synchronously in this rare path.
+            current_app.logger.warning(
+                "enqueue_post_create_finalize unavailable user_id=%s err=%s",
+                user_id,
+                exc,
+            )
+            UserService.finalize_user_post_create(
+                user_id=int(user_id),
+                own_referral_code=str(own_referral_code or ""),
+                referral_input=str(referral_input or "").strip() or None,
+            )
 
     @staticmethod
     def finalize_user_post_create(user_id: int, own_referral_code: str, referral_input: str = None):

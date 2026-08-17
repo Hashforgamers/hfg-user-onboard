@@ -123,7 +123,7 @@ def _ensure_hash_wallet_row(user_id: int):
 
 
 def _sanitize_signup_payload(data):
-    payload = dict(data or {})
+    payload = dict(data) if isinstance(data, dict) else {}
     payload["fid"] = str(payload.get("fid") or "").strip()
     payload["gameUserName"] = str(payload.get("gameUserName") or "").strip()
     payload["name"] = str(payload.get("name") or "").strip()
@@ -149,6 +149,15 @@ def _sanitize_signup_payload(data):
     physical = contact.get("physicalAddress")
     if not isinstance(physical, dict):
         physical = {}
+    # The mobile apps historically send State/Country, while some clients send
+    # lowercase state/country. Keep the stored API contract stable and accept
+    # both forms during signup.
+    physical["address_type"] = str(physical.get("address_type") or "home").strip()
+    physical["addressLine1"] = str(physical.get("addressLine1") or "").strip()
+    physical["addressLine2"] = str(physical.get("addressLine2") or "").strip()
+    physical["pincode"] = str(physical.get("pincode") or "").strip()
+    physical["State"] = str(physical.get("State") or physical.get("state") or "").strip()
+    physical["Country"] = str(physical.get("Country") or physical.get("country") or "").strip()
     contact["physicalAddress"] = physical
     return payload
 
@@ -177,6 +186,30 @@ def _validate_signup_payload(data):
     if email:
         if len(email) > 254 or not _EMAIL_RE.match(str(email)):
             return "emailId is invalid"
+
+    electronic = (data.get("contact") or {}).get("electronicAddress", {})
+    phone = str(electronic.get("mobileNo") or "")
+    if len(phone) > 50:
+        return "mobileNo must be at most 50 characters"
+
+    if len(str(data.get("name") or "")) > 255:
+        return "name must be at most 255 characters"
+    if len(str(data.get("gender") or "")) > 50:
+        return "gender must be at most 50 characters"
+    if len(str(data.get("avatar_path") or "")) > 255:
+        return "avatar_path must be at most 255 characters"
+
+    physical = (data.get("contact") or {}).get("physicalAddress", {})
+    for field, maximum in (
+        ("address_type", 50),
+        ("addressLine1", 255),
+        ("addressLine2", 255),
+        ("pincode", 10),
+        ("State", 100),
+        ("Country", 100),
+    ):
+        if len(str(physical.get(field) or "")) > maximum:
+            return f"{field} must be at most {maximum} characters"
 
     referral_code = data.get("referral_code")
     if referral_code and len(str(referral_code)) > 20:
@@ -776,7 +809,10 @@ def unblock_notification_dispatch_failure(failure_id):
 
 @user_blueprint.route('/users', methods=['POST'])
 def create_user():
-    data = _sanitize_signup_payload(request.get_json(silent=True) or {})
+    raw_data = request.get_json(silent=True)
+    if raw_data is not None and not isinstance(raw_data, dict):
+        return jsonify({"message": "Validation error", "details": "request body must be a JSON object"}), 400
+    data = _sanitize_signup_payload(raw_data or {})
     required_fields = ("fid", "gameUserName")
     missing = [field for field in required_fields if not data.get(field)]
     if missing:
@@ -817,7 +853,7 @@ def create_user():
                     data.get("fid"),
                     recover_err,
                 )
-            elif state == "EMAIL_EXISTS":
+            elif state == "EMAIL_EXISTS" and bool(current_app.config.get("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", False)):
                 existing_email = (
                     str((result.get("details") or {}).get("email") or "")
                     .strip()
