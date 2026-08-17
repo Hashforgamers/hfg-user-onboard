@@ -3,12 +3,13 @@ from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import hmac
 import json
+import os
 import re
 import uuid
 from urllib.parse import urlparse
 
 from flask import current_app
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from db.extensions import db
@@ -32,6 +33,10 @@ from models.communityTournamentOperations import (
     CommunityTournamentPayout,
     CommunityPaymentSettlementJob,
     CommunityPaymentSettlementStatus,
+    CommunityPaymentAttempt,
+    CommunityPaymentAttemptStatus,
+    CommunityPaymentWebhookEvent,
+    CommunityPaymentWebhookStatus,
 )
 from models.hashWalletTransaction import HashWalletTransaction
 from models.hashWallet import HashWallet
@@ -905,6 +910,290 @@ def _queue_payment_settlement(registration, payment_id=None, order_id=None, payl
     return job
 
 
+def _payment_attempt_receipt(registration_id, attempt_id=None):
+    """Keep the Razorpay receipt unique, stable, and within its 40-character limit."""
+    suffix = str(attempt_id or uuid.uuid4()).replace("-", "")[:6]
+    return f"ctr_{str(registration_id).replace('-', '')[:29]}_{suffix}"
+
+
+def _payment_checkout_payload(attempt):
+    from services.payment_service import create_payment_intent
+
+    return create_payment_intent(
+        amount=float(attempt.amount),
+        currency=attempt.currency,
+        metadata={
+            "registration_id": str(attempt.registration_id),
+            "tournament_id": str(attempt.tournament_id),
+            "payment_attempt_id": str(attempt.id),
+            "receipt": attempt.receipt,
+            "source": "community_tournament",
+        },
+    )
+
+
+def create_community_payment_attempt(registration_id):
+    """Create or reuse the one active Razorpay checkout for a registration.
+
+    The public compatibility endpoint delegates here, so amount, currency and
+    ownership metadata are always read from the locked registration server-side.
+    """
+    registration = CommunityTournamentRegistration.query.filter_by(id=registration_id).with_for_update().first()
+    if not registration:
+        raise CommunityValidationError("community registration not found")
+    if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
+        raise CommunityConflictError("payment is not required for this registration")
+    tournament = CommunityTournament.query.filter_by(id=registration.tournament_id).first()
+    if not tournament or Decimal(tournament.entry_fee or 0) <= 0:
+        raise CommunityConflictError("payment is not required for this registration")
+
+    attempt = (
+        CommunityPaymentAttempt.query
+        .filter(
+            CommunityPaymentAttempt.registration_id == registration.id,
+            CommunityPaymentAttempt.status.in_({
+                CommunityPaymentAttemptStatus.CREATED,
+                CommunityPaymentAttemptStatus.PENDING,
+            }),
+        )
+        .order_by(CommunityPaymentAttempt.created_at.desc())
+        .with_for_update()
+        .first()
+    )
+    if attempt and attempt.provider_order_id:
+        return {
+            "provider": attempt.provider,
+            "order_id": attempt.provider_order_id,
+            "amount": float(attempt.amount),
+            "currency": attempt.currency,
+            "key": os.getenv("RAZORPAY_KEY_ID"),
+            "status": "requires_payment_method",
+        }
+
+    if not attempt:
+        attempt = CommunityPaymentAttempt(
+            registration_id=registration.id,
+            tournament_id=tournament.id,
+            user_id=registration.user_id,
+            provider="razorpay",
+            receipt=_payment_attempt_receipt(registration.id),
+            amount=tournament.entry_fee,
+            currency=str(tournament.currency or "INR").upper(),
+            status=CommunityPaymentAttemptStatus.CREATED,
+            expires_at=_now() + timedelta(minutes=int(current_app.config.get("COMMUNITY_PAYMENT_ATTEMPT_TTL_MINUTES", 30))),
+        )
+        db.session.add(attempt)
+        db.session.flush()
+
+    try:
+        checkout = _payment_checkout_payload(attempt)
+    except Exception:
+        attempt.status = CommunityPaymentAttemptStatus.FAILED
+        db.session.commit()
+        raise
+    if checkout.get("provider") != "razorpay" or not checkout.get("order_id"):
+        attempt.status = CommunityPaymentAttemptStatus.FAILED
+        db.session.commit()
+        raise CommunityConflictError("Razorpay checkout is not configured")
+    attempt.provider_order_id = str(checkout["order_id"])
+    attempt.status = CommunityPaymentAttemptStatus.PENDING
+    registration.razorpay_order_id = attempt.provider_order_id
+    _queue_payment_settlement(registration, order_id=attempt.provider_order_id)
+    db.session.commit()
+    return checkout
+
+
+def _bind_verified_payment_attempt(registration, payment_details):
+    """Attach a provider-verified payment to its registration exactly once."""
+    payment_id = str(payment_details.get("payment_id") or "").strip()
+    order_id = str(payment_details.get("order_id") or "").strip()
+    if not payment_id or not order_id:
+        raise CommunityValidationError("verified payment is missing its provider IDs")
+    attempt = CommunityPaymentAttempt.query.filter(
+        or_(
+            CommunityPaymentAttempt.provider_payment_id == payment_id,
+            CommunityPaymentAttempt.provider_order_id == order_id,
+        )
+    ).with_for_update().first()
+    if attempt and attempt.registration_id != registration.id:
+        raise CommunityConflictError("payment attempt belongs to another registration")
+    if not attempt:
+        # Compatibility for orders created before payment attempts existed. The
+        # provider fetch has already verified notes/receipt against this ID.
+        attempt = CommunityPaymentAttempt(
+            registration_id=registration.id,
+            tournament_id=registration.tournament_id,
+            user_id=registration.user_id,
+            provider=str(payment_details.get("provider") or "razorpay"),
+            receipt=str(payment_details.get("receipt") or _payment_attempt_receipt(registration.id)),
+            amount=payment_details.get("amount"),
+            currency=str(payment_details.get("currency") or "INR").upper(),
+            provider_order_id=order_id,
+            status=CommunityPaymentAttemptStatus.CAPTURED,
+        )
+        db.session.add(attempt)
+    elif attempt.provider_order_id and attempt.provider_order_id != order_id:
+        raise CommunityConflictError("payment attempt order does not match provider payment")
+    attempt.provider_order_id = order_id
+    attempt.provider_payment_id = payment_id
+    attempt.status = CommunityPaymentAttemptStatus.CAPTURED
+    return attempt
+
+
+def _queue_captured_payment_refund(registration, tournament, reason):
+    """Never leave a captured payment stranded when a slot is no longer usable."""
+    registration.amount_paid = tournament.entry_fee
+    registration.payment_verified_at = registration.payment_verified_at or _now()
+    registration.paid_at = registration.paid_at or _now()
+    registration.status = CommunityTournamentRegistrationStatus.REFUND_PENDING
+    registration.payment_status = "refund_pending"
+    registration.refund_status = "pending"
+    registration.refund_amount = tournament.entry_fee
+    registration.refund_requested_at = registration.refund_requested_at or _now()
+    registration.refund_error = reason
+    job = _queue_payment_settlement(registration, registration.razorpay_payment_id, registration.razorpay_order_id)
+    job.status = CommunityPaymentSettlementStatus.SETTLED
+    job.settled_at = job.settled_at or _now()
+    job.next_attempt_at = None
+    _audit(
+        "registration_payment_refund_required",
+        "community_tournament_registration",
+        registration.id,
+        registration.user_id,
+        metadata={"reason": reason},
+    )
+    db.session.commit()
+    return registration
+
+
+def enqueue_community_payment_webhook(event_id, event_type, payment_details, payload):
+    """Persist an already-authenticated provider event before acknowledging it."""
+    event_id = str(event_id or "").strip()
+    if not event_id:
+        raise CommunityValidationError("payment webhook event ID is required")
+    existing = CommunityPaymentWebhookEvent.query.filter_by(provider_event_id=event_id).first()
+    if existing:
+        return existing, False
+    registration_id = payment_details.get("registration_id")
+    try:
+        registration_id = uuid.UUID(str(registration_id)) if registration_id else None
+    except (TypeError, ValueError):
+        registration_id = None
+    event = CommunityPaymentWebhookEvent(
+        provider=str(payment_details.get("provider") or "razorpay"),
+        provider_event_id=event_id,
+        event_type=str(event_type or "unknown"),
+        registration_id=registration_id,
+        payment_id=payment_details.get("payment_id"),
+        order_id=payment_details.get("order_id"),
+        payload=payload if isinstance(payload, dict) else {},
+        status=CommunityPaymentWebhookStatus.PENDING,
+        next_attempt_at=_now(),
+    )
+    try:
+        db.session.add(event)
+        db.session.commit()
+        return event, True
+    except IntegrityError:
+        db.session.rollback()
+        return CommunityPaymentWebhookEvent.query.filter_by(provider_event_id=event_id).first(), False
+
+
+def _retry_webhook_event(event, error):
+    event.attempts = int(event.attempts or 0) + 1
+    max_attempts = int(current_app.config.get("COMMUNITY_PAYMENT_RECONCILIATION_MAX_ATTEMPTS", 12))
+    event.last_error = str(error)[:500]
+    if event.attempts >= max_attempts:
+        event.status = CommunityPaymentWebhookStatus.FAILED
+        event.next_attempt_at = None
+    else:
+        event.status = CommunityPaymentWebhookStatus.RETRY
+        event.next_attempt_at = _now() + timedelta(minutes=min(60, 2 ** min(event.attempts, 6)))
+
+
+def process_pending_community_payment_webhooks(limit=50):
+    """Reconcile durable Razorpay webhook events, including out-of-order delivery."""
+    from services.payment_service import fetch_tournament_payment
+
+    now = _now()
+    events = (
+        CommunityPaymentWebhookEvent.query
+        .filter(
+            or_(
+                and_(
+                    CommunityPaymentWebhookEvent.status.in_({
+                        CommunityPaymentWebhookStatus.PENDING,
+                        CommunityPaymentWebhookStatus.RETRY,
+                    }),
+                    or_(
+                        CommunityPaymentWebhookEvent.next_attempt_at.is_(None),
+                        CommunityPaymentWebhookEvent.next_attempt_at <= now,
+                    ),
+                ),
+                and_(
+                    CommunityPaymentWebhookEvent.status == CommunityPaymentWebhookStatus.PROCESSING,
+                    CommunityPaymentWebhookEvent.updated_at <= now - timedelta(minutes=10),
+                ),
+            )
+        )
+        .order_by(CommunityPaymentWebhookEvent.created_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(min(max(int(limit or 50), 1), 100))
+        .all()
+    )
+    summary = {"processed": 0, "settled": 0, "retried": 0, "failed": 0}
+    event_ids = []
+    for event in events:
+        event.status = CommunityPaymentWebhookStatus.PROCESSING
+        event.attempts = int(event.attempts or 0) + 1
+        event_ids.append(event.id)
+    if event_ids:
+        db.session.commit()
+    for event_id in event_ids:
+        summary["processed"] += 1
+        try:
+            event = CommunityPaymentWebhookEvent.query.filter_by(id=event_id).first()
+            registration = (
+                CommunityTournamentRegistration.query.filter_by(id=event.registration_id).first()
+                if event and event.registration_id else None
+            )
+            if not event or not registration:
+                raise CommunityValidationError("registration mapping is not available yet")
+            tournament = CommunityTournament.query.filter_by(id=registration.tournament_id).first()
+            if not tournament:
+                raise CommunityValidationError("tournament not found")
+            if event.event_type in {"payment.captured", "order.paid"}:
+                if not event.payment_id:
+                    raise CommunityValidationError("captured webhook has no payment ID")
+                payment_details = fetch_tournament_payment(
+                    event.payment_id,
+                    tournament.entry_fee,
+                    tournament.currency,
+                    event.order_id,
+                    expected_registration_id=registration.id,
+                )
+                settle_community_registration_payment(registration.id, payment_details)
+                summary["settled"] += 1
+            elif event.event_type == "payment.failed":
+                record_community_registration_payment(registration.id, "failed", payment_reference=event.payment_id)
+            # Authenticated non-payment events are retained but never mutate a registration.
+            event = CommunityPaymentWebhookEvent.query.filter_by(id=event_id).first()
+            event.status = CommunityPaymentWebhookStatus.PROCESSED
+            event.processed_at = _now()
+            event.next_attempt_at = None
+            event.last_error = None
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            event = CommunityPaymentWebhookEvent.query.filter_by(id=event_id).first()
+            if event:
+                _retry_webhook_event(event, exc)
+                db.session.commit()
+                key = "failed" if event.status == CommunityPaymentWebhookStatus.FAILED else "retried"
+                summary[key] += 1
+    return summary
+
+
 def register_for_tournament(user_id, tournament_id, payment_reference=None, payment_order_id=None, invite_code=None):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
@@ -936,8 +1225,6 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None, paym
     ).with_for_update().first()
     if existing:
         if existing.status == CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
-            if payment_reference and not existing.payment_reference:
-                existing.payment_reference = str(payment_reference).strip()[:120] or None
             _queue_payment_settlement(existing, payment_reference, payment_order_id)
             db.session.commit()
         return existing
@@ -948,10 +1235,12 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None, paym
         status=CommunityTournamentRegistrationStatus.CONFIRMED if tournament.entry_fee == 0 else CommunityTournamentRegistrationStatus.PENDING_PAYMENT,
         payment_status="not_required" if tournament.entry_fee == 0 else "unpaid",
         amount_paid=Decimal("0.00"),
-        payment_reference=payment_reference,
+        # Client-supplied IDs are queue hints only until Razorpay confirms and
+        # binds them to this registration's order metadata.
+        payment_reference=None,
         payment_provider="razorpay" if tournament.entry_fee > 0 else None,
-        razorpay_payment_id=str(payment_reference).strip()[:120] if payment_reference else None,
-        razorpay_order_id=str(payment_order_id).strip()[:120] if payment_order_id else None,
+        razorpay_payment_id=None,
+        razorpay_order_id=None,
         confirmed_at=_now() if tournament.entry_fee == 0 else None,
     )
     db.session.add(reg)
@@ -979,13 +1268,25 @@ def record_community_registration_payment(registration_id, status, payment_refer
     registration = CommunityTournamentRegistration.query.filter_by(id=registration_id).with_for_update().first()
     if not registration:
         raise CommunityValidationError("community registration not found")
-    if registration.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
-        raise CommunityConflictError("payment cannot be applied to a cancelled registration")
 
     payment_details = payment_details or {}
     payment_id = str(payment_details.get("payment_id") or payment_reference or "").strip() or None
     order_id = str(payment_details.get("order_id") or "").strip() or None
     provider = str(payment_details.get("provider") or registration.payment_provider or "razorpay").strip().lower()
+    if registration.status in {CommunityTournamentRegistrationStatus.CANCELLED, CommunityTournamentRegistrationStatus.REFUNDED}:
+        if status != "succeeded" or not payment_details:
+            raise CommunityConflictError("payment cannot be applied to a cancelled registration")
+        _bind_verified_payment_attempt(registration, payment_details)
+        registration.payment_reference = payment_id
+        registration.razorpay_payment_id = payment_id
+        registration.razorpay_order_id = order_id
+        registration.payment_provider = provider
+        tournament = CommunityTournament.query.filter_by(id=registration.tournament_id).first()
+        if not tournament:
+            raise CommunityValidationError("tournament not found")
+        return _queue_captured_payment_refund(registration, tournament, "payment captured after registration cancellation")
+    if status == "succeeded":
+        _bind_verified_payment_attempt(registration, payment_details)
     if (
         registration.status == CommunityTournamentRegistrationStatus.CONFIRMED
         and registration.payment_status == "paid"
@@ -1037,10 +1338,10 @@ def record_community_registration_payment(registration_id, status, payment_refer
         raise CommunityValidationError("tournament not found")
     sync_tournament_status(tournament)
     if tournament.status not in {CommunityTournamentStatus.REGISTRATION_OPEN, CommunityTournamentStatus.REGISTRATION_CLOSED}:
-        raise CommunityConflictError("registration is not open")
+        return _queue_captured_payment_refund(registration, tournament, "payment captured after registration closed")
     if tournament.registered_players_count >= tournament.max_players:
         tournament.status = CommunityTournamentStatus.REGISTRATION_CLOSED
-        raise CommunityConflictError("tournament is full")
+        return _queue_captured_payment_refund(registration, tournament, "payment captured after tournament reached capacity")
 
     registration.status = CommunityTournamentRegistrationStatus.CONFIRMED
     registration.payment_status = "paid"
@@ -1079,27 +1380,46 @@ def process_pending_community_payments(limit=50):
     from services.payment_service import fetch_tournament_payment
 
     limit = min(max(int(limit or 50), 1), 100)
+    webhook_summary = process_pending_community_payment_webhooks(limit)
     now = _now()
     jobs = (
         CommunityPaymentSettlementJob.query
         .filter(
-            CommunityPaymentSettlementJob.status.in_({
-                CommunityPaymentSettlementStatus.PENDING,
-                CommunityPaymentSettlementStatus.RETRY,
-            }),
             or_(
-                CommunityPaymentSettlementJob.next_attempt_at.is_(None),
-                CommunityPaymentSettlementJob.next_attempt_at <= now,
+                and_(
+                    CommunityPaymentSettlementJob.status.in_({
+                        CommunityPaymentSettlementStatus.PENDING,
+                        CommunityPaymentSettlementStatus.RETRY,
+                    }),
+                    or_(
+                        CommunityPaymentSettlementJob.next_attempt_at.is_(None),
+                        CommunityPaymentSettlementJob.next_attempt_at <= now,
+                    ),
+                ),
+                and_(
+                    CommunityPaymentSettlementJob.status == CommunityPaymentSettlementStatus.PROCESSING,
+                    CommunityPaymentSettlementJob.updated_at <= now - timedelta(minutes=10),
+                ),
             ),
         )
         .order_by(CommunityPaymentSettlementJob.created_at.asc())
+        .with_for_update(skip_locked=True)
         .limit(limit)
         .all()
     )
-    summary = {"processed": 0, "settled": 0, "retried": 0, "failed": 0, "items": []}
+    summary = {"processed": 0, "settled": 0, "retried": 0, "failed": 0, "items": [], "webhooks": webhook_summary}
+    job_ids = []
     for job in jobs:
+        job.status = CommunityPaymentSettlementStatus.PROCESSING
+        job.attempts = int(job.attempts or 0) + 1
+        job_ids.append(job.id)
+    if job_ids:
+        db.session.commit()
+    for job_id in job_ids:
+        job = CommunityPaymentSettlementJob.query.filter_by(id=job_id).first()
+        if not job:
+            continue
         summary["processed"] += 1
-        job.attempts += 1
         registration = CommunityTournamentRegistration.query.filter_by(id=job.registration_id).first()
         tournament = CommunityTournament.query.filter_by(id=job.tournament_id).first()
         if not registration or not tournament or registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
@@ -1114,7 +1434,13 @@ def process_pending_community_payments(limit=50):
             job.last_error = "Razorpay payment ID is not available yet"
         else:
             try:
-                payment_details = fetch_tournament_payment(job.payment_id, tournament.entry_fee, tournament.currency, job.order_id)
+                payment_details = fetch_tournament_payment(
+                    job.payment_id,
+                    tournament.entry_fee,
+                    tournament.currency,
+                    job.order_id,
+                    expected_registration_id=registration.id,
+                )
                 settle_community_registration_payment(registration.id, payment_details)
                 summary["settled"] += 1
                 summary["items"].append({"registration_id": str(registration.id), "status": "settled"})

@@ -9,6 +9,11 @@ from typing import Tuple, Dict, Any
 PROVIDER = os.getenv("PAYMENT_PROVIDER", "mock").lower()    # "mock" | "razorpay" | "stripe"
 CURRENCY_DEFAULT = os.getenv("PAYMENT_CURRENCY", "INR")
 
+
+def _mock_payments_allowed() -> bool:
+    """Mock settlement is opt-in so an unset production provider cannot credit money."""
+    return os.getenv("PAYMENT_ALLOW_MOCK", "false").lower() in {"1", "true", "yes"}
+
 # ---------------------------
 # Public interface
 # ---------------------------
@@ -59,6 +64,7 @@ def verified_webhook_payment_details(payload: bytes, signature: str) -> Dict[str
         "amount": Decimal(str(payment.get("amount") or 0)) / Decimal("100"),
         "currency": str(payment.get("currency") or order.get("currency") or "").upper(),
         "status": "captured" if status == "succeeded" else "failed",
+        "event_type": str(event.get("event") or "unknown"),
     }
 
 
@@ -76,7 +82,13 @@ def verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
         return bool(reg_id), reg_id, "succeeded" if reg_id else "failed"
 
 
-def verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_currency: str) -> Dict[str, Any]:
+def verify_tournament_payment(
+    data: Dict[str, Any],
+    expected_amount,
+    expected_currency: str,
+    expected_registration_id: str = None,
+    expected_order_id: str = None,
+) -> Dict[str, Any]:
     """Return provider-verified payment details for one tournament registration.
 
     This validates the client callback and then verifies the provider-side payment
@@ -84,8 +96,16 @@ def verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_cu
     the responsibility of the community tournament transaction.
     """
     if PROVIDER == "razorpay":
-        return _rzp_verify_tournament_payment(data, expected_amount, expected_currency)
+        return _rzp_verify_tournament_payment(
+            data,
+            expected_amount,
+            expected_currency,
+            expected_registration_id=expected_registration_id,
+            expected_order_id=expected_order_id,
+        )
     if PROVIDER == "mock":
+        if not _mock_payments_allowed():
+            raise ValueError("mock payment settlement is disabled")
         payment_id = str(data.get("razorpay_payment_id") or data.get("payment_id") or data.get("payment_reference") or "mock-payment")
         order_id = str(data.get("razorpay_order_id") or data.get("order_id") or "mock-order")
         return {
@@ -99,11 +119,23 @@ def verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_cu
     raise ValueError("tournament payment verification is not configured for this provider")
 
 
-def fetch_tournament_payment(payment_id: str, expected_amount, expected_currency: str, order_id: str = None) -> Dict[str, Any]:
+def fetch_tournament_payment(
+    payment_id: str,
+    expected_amount,
+    expected_currency: str,
+    order_id: str = None,
+    expected_registration_id: str = None,
+) -> Dict[str, Any]:
     """Fetch an already-created provider payment for cron/webhook settlement."""
     if PROVIDER != "razorpay":
         raise ValueError("payment queue requires PAYMENT_PROVIDER=razorpay")
-    return _rzp_fetch_tournament_payment(payment_id, expected_amount, expected_currency, order_id)
+    return _rzp_fetch_tournament_payment(
+        payment_id,
+        expected_amount,
+        expected_currency,
+        order_id,
+        expected_registration_id=expected_registration_id,
+    )
 
 
 def refund_tournament_payment(
@@ -200,7 +232,7 @@ def _rzp_create_order(amount: float, currency: str, metadata: Dict[str, Any]) ->
     payload = {
         "amount": smallest,
         "currency": currency,
-        "receipt": metadata.get("registration_id") or f"rcpt_{int(time.time())}",
+        "receipt": metadata.get("receipt") or metadata.get("registration_id") or f"rcpt_{int(time.time())}",
         "notes": metadata
     }
     resp = requests.post(
@@ -320,7 +352,13 @@ def _amount_in_paise(amount) -> int:
     return int((Decimal(str(amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def _rzp_verify_tournament_payment(data: Dict[str, Any], expected_amount, expected_currency: str) -> Dict[str, Any]:
+def _rzp_verify_tournament_payment(
+    data: Dict[str, Any],
+    expected_amount,
+    expected_currency: str,
+    expected_registration_id: str = None,
+    expected_order_id: str = None,
+) -> Dict[str, Any]:
     order_id = str(data.get("razorpay_order_id") or data.get("order_id") or "").strip()
     payment_id = str(data.get("razorpay_payment_id") or data.get("payment_id") or "").strip()
     signature = str(data.get("razorpay_signature") or data.get("signature") or "").strip()
@@ -335,10 +373,24 @@ def _rzp_verify_tournament_payment(data: Dict[str, Any], expected_amount, expect
     ).hexdigest()
     if not hmac.compare_digest(expected_signature, signature):
         raise ValueError("Razorpay signature verification failed")
-    return _rzp_fetch_tournament_payment(payment_id, expected_amount, expected_currency, order_id)
+    if expected_order_id and order_id != str(expected_order_id):
+        raise ValueError("Razorpay order does not match this payment attempt")
+    return _rzp_fetch_tournament_payment(
+        payment_id,
+        expected_amount,
+        expected_currency,
+        order_id,
+        expected_registration_id=expected_registration_id,
+    )
 
 
-def _rzp_fetch_tournament_payment(payment_id: str, expected_amount, expected_currency: str, order_id: str = None) -> Dict[str, Any]:
+def _rzp_fetch_tournament_payment(
+    payment_id: str,
+    expected_amount,
+    expected_currency: str,
+    order_id: str = None,
+    expected_registration_id: str = None,
+) -> Dict[str, Any]:
     import requests
 
     key_id, key_secret = _razorpay_credentials()
@@ -362,6 +414,12 @@ def _rzp_fetch_tournament_payment(payment_id: str, expected_amount, expected_cur
     )
     order_response.raise_for_status()
     order = order_response.json()
+    if expected_registration_id:
+        expected_registration_id = str(expected_registration_id)
+        notes = order.get("notes") or {}
+        receipt = str(order.get("receipt") or "")
+        if str(notes.get("registration_id") or "") != expected_registration_id and receipt != expected_registration_id and receipt != f"ctr_{expected_registration_id.replace('-', '')}":
+            raise ValueError("Razorpay order is not bound to this registration")
     expected_paise = _amount_in_paise(expected_amount)
     expected_currency = str(expected_currency or "INR").upper()
     if payment.get("status") == "authorized" and os.getenv("RAZORPAY_AUTO_CAPTURE_AUTHORIZED", "false").lower() in {"1", "true", "yes"}:
@@ -386,6 +444,8 @@ def _rzp_fetch_tournament_payment(payment_id: str, expected_amount, expected_cur
         "amount": Decimal(expected_paise) / Decimal("100"),
         "currency": expected_currency,
         "status": "captured",
+        "receipt": str(order.get("receipt") or "") or None,
+        "notes": order.get("notes") or {},
     }
 
 

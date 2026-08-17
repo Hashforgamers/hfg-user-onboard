@@ -36,6 +36,23 @@ class CommunityPaymentSettlementStatus:
     FAILED = "failed"
 
 
+class CommunityPaymentAttemptStatus:
+    CREATED = "created"
+    PENDING = "pending"
+    CAPTURED = "captured"
+    SETTLED = "settled"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class CommunityPaymentWebhookStatus:
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    RETRY = "retry"
+    FAILED = "failed"
+
+
 class CommunityTeamStatus:
     PENDING = "pending"
     APPROVED = "approved"
@@ -525,3 +542,56 @@ class CommunityPaymentSettlementJob(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class CommunityPaymentAttempt(db.Model):
+    """One immutable provider order for a community registration checkout."""
+
+    __tablename__ = "community_payment_attempts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    registration_id = Column(UUID(as_uuid=True), ForeignKey("community_tournament_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tournament_id = Column(UUID(as_uuid=True), ForeignKey("community_tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    provider = Column(String(32), nullable=False, default="razorpay", index=True)
+    receipt = Column(String(40), nullable=False, unique=True)
+    amount = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(8), nullable=False)
+    provider_order_id = Column(String(120), nullable=True, unique=True, index=True)
+    provider_payment_id = Column(String(120), nullable=True, unique=True, index=True)
+    status = Column(String(32), nullable=False, default=CommunityPaymentAttemptStatus.CREATED, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_community_payment_attempt_registration_status", "registration_id", "status"),
+    )
+
+
+class CommunityPaymentWebhookEvent(db.Model):
+    """Authenticated provider event inbox, retained for replay-safe reconciliation."""
+
+    __tablename__ = "community_payment_webhook_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(String(32), nullable=False, default="razorpay", index=True)
+    provider_event_id = Column(String(160), nullable=False, unique=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    # This is intentionally not a foreign key: Razorpay can deliver a capture
+    # before the registration transaction has committed.
+    registration_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    payment_id = Column(String(120), nullable=True, index=True)
+    order_id = Column(String(120), nullable=True, index=True)
+    payload = Column(JSONB, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default=CommunityPaymentWebhookStatus.PENDING, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_error = Column(Text, nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_community_payment_webhook_ready", "status", "next_attempt_at"),
+    )
