@@ -612,12 +612,12 @@ def notify_user():
 
 def _is_valid_cron_request():
     """
-    Optional shared-secret gate for cron endpoints.
-    If CRON_JOB_API_KEY is unset, requests are allowed.
+    Shared-secret gate for cron endpoints. It fails closed when the secret is
+    missing so a public deployment cannot trigger notification dispatches.
     """
     configured_key = str(os.getenv("CRON_JOB_API_KEY", "") or "").strip()
     if not configured_key:
-        return True
+        return False
 
     header_key = str(request.headers.get("X-Cron-Key", "") or "").strip()
     auth_header = str(request.headers.get("Authorization", "") or "").strip()
@@ -625,7 +625,10 @@ def _is_valid_cron_request():
     if auth_header.lower().startswith("bearer "):
         bearer_key = auth_header[7:].strip()
 
-    return header_key == configured_key or bearer_key == configured_key
+    return (
+        hmac.compare_digest(header_key, configured_key)
+        or hmac.compare_digest(bearer_key, configured_key)
+    )
 
 
 def _ensure_notification_tracking_tables():
