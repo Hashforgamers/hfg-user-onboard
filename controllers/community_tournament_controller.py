@@ -1,4 +1,5 @@
 from functools import wraps
+import hmac
 from threading import Lock
 import time
 
@@ -132,7 +133,7 @@ def _admin_required(fn):
     def wrapper(*args, **kwargs):
         configured = current_app.config.get("COMMUNITY_ADMIN_TOKEN")
         provided = request.headers.get("X-Admin-Token")
-        if not configured or provided != configured:
+        if not configured or not hmac.compare_digest(str(provided or ""), str(configured)):
             return _error("Admin authorization required", 403, "forbidden")
         try:
             g.admin_id = int(request.headers.get("X-Admin-Id") or 0) or None
@@ -147,7 +148,7 @@ def _payment_cron_required(fn):
     def wrapper(*args, **kwargs):
         configured = current_app.config.get("COMMUNITY_PAYMENT_CRON_TOKEN")
         provided = request.headers.get("X-Community-Payment-Cron-Token")
-        if not configured or provided != configured:
+        if not configured or not hmac.compare_digest(str(provided or ""), str(configured)):
             return _error("Payment cron authorization required", 403, "forbidden")
         return fn(*args, **kwargs)
     return wrapper

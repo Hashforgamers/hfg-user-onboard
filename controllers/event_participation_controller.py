@@ -4,6 +4,8 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
 import os
 import time
 from db.extensions import db
@@ -24,6 +26,9 @@ from models.communityTournament import (
 from services.community_tournament_service import (
     CommunityConflictError,
     CommunityValidationError,
+    create_community_payment_attempt,
+    enqueue_community_payment_webhook,
+    process_pending_community_payment_webhooks,
     record_community_registration_payment,
     register_for_tournament,
     settle_community_registration_payment,
@@ -734,14 +739,45 @@ def register_team(event_id):
 @event_participation_bp.post("/payments/intent")
 def make_payment_intent():
     body = _body()
-    amount = body.get("amount")
-    if amount is None:
-        return jsonify({"error": "amount required"}), 400
-
-    currency = body.get("currency", "INR")
     metadata = body.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return jsonify({"error": "metadata must be an object"}), 400
 
-    return jsonify(create_payment_intent(amount=float(amount), currency=currency, metadata=metadata)), 201
+    # Existing community clients already provide registration_id in metadata.
+    # Ignore their amount/currency and derive both from the locked registration.
+    community_registration_id = metadata.get("registration_id") or body.get("registration_id")
+    if community_registration_id:
+        try:
+            registration = CommunityTournamentRegistration.query.filter_by(id=community_registration_id).first()
+        except Exception:
+            registration = None
+        if registration:
+            try:
+                return jsonify(create_community_payment_attempt(registration.id)), 201
+            except (CommunityValidationError, CommunityConflictError) as exc:
+                return jsonify({"error": "payment_intent_unavailable", "message": str(exc)}), 409
+            except Exception:
+                return jsonify({"error": "payment_intent_unavailable"}), 503
+
+    # The legacy cafe path retains this endpoint, but it too must derive price
+    # from a server-owned registration instead of accepting a client amount.
+    registration_id = metadata.get("registration_id") or body.get("registration_id")
+    cafe_registration = Registration.query.filter_by(id=registration_id).first() if registration_id else None
+    if not cafe_registration:
+        return jsonify({"error": "registration_id required"}), 400
+    event = Event.query.filter_by(id=cafe_registration.event_id).first()
+    if not event or float(event.registration_fee or 0) <= 0:
+        return jsonify({"error": "payment is not required for this registration"}), 409
+    trusted_metadata = {
+        "event_id": str(event.id),
+        "registration_id": str(cafe_registration.id),
+        "team_id": str(cafe_registration.team_id),
+    }
+    return jsonify(create_payment_intent(
+        amount=float(event.registration_fee),
+        currency=event.currency or "INR",
+        metadata=trusted_metadata,
+    )), 201
 
 
 @event_participation_bp.post("/payments/webhook")
@@ -763,6 +799,26 @@ def payment_webhook():
     if reg:
         _mark_registration_payment(reg, status)
         return jsonify({"ok": True, "registration_id": str(reg.id), "payment_status": reg.payment_status, "status": reg.status, "source": "cafe"}), 200
+
+    # Razorpay may redeliver events and can send a capture before the app has
+    # completed its registration request. Persist it before responding either way.
+    try:
+        event_payload = json.loads(payload.decode("utf-8"))
+    except (TypeError, ValueError):
+        event_payload = {}
+    provider_event_id = (
+        request.headers.get("X-Razorpay-Event-Id")
+        or event_payload.get("id")
+        or hashlib.sha256(payload).hexdigest()
+    )
+    if webhook_details:
+        enqueue_community_payment_webhook(
+            provider_event_id,
+            webhook_details.get("event_type"),
+            webhook_details,
+            event_payload,
+        )
+
     community_registration = None
     if reg_id:
         community_registration = CommunityTournamentRegistration.query.filter_by(id=reg_id).first()
@@ -773,33 +829,19 @@ def payment_webhook():
             | (CommunityTournamentRegistration.payment_reference == payment_id)
         ).first()
     if not community_registration:
+        if webhook_details:
+            process_pending_community_payment_webhooks(10)
         return jsonify({"ok": True, "queued": True, "message": "Webhook received before its community registration mapping"}), 202
-    try:
-        tournament = CommunityTournament.query.filter_by(id=community_registration.tournament_id).first()
-        if not tournament:
-            return jsonify({"error": "tournament not found"}), 404
-        if not webhook_details or webhook_details.get("status") != "captured":
-            community_registration = record_community_registration_payment(community_registration.id, status)
-        else:
-            if (
-                webhook_details.get("currency") != str(tournament.currency or "INR").upper()
-                or float(webhook_details.get("amount") or 0) != float(tournament.entry_fee or 0)
-            ):
-                return jsonify({"error": "webhook payment does not match tournament entry fee"}), 400
-            community_registration = settle_community_registration_payment(community_registration.id, webhook_details)
-    except CommunityValidationError as exc:
-        if str(exc) == "community registration not found":
-            return jsonify({"error": "registration not found"}), 404
-        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 400
-    except CommunityConflictError as exc:
-        return jsonify({"error": "registration_payment_update_failed", "message": str(exc)}), 409
+    process_pending_community_payment_webhooks(10)
+    db.session.expire_all()
+    community_registration = CommunityTournamentRegistration.query.filter_by(id=community_registration.id).first()
     return jsonify({
         "ok": True,
         "registration_id": str(community_registration.id),
         "payment_status": community_registration.payment_status,
         "status": community_registration.status,
         "source": "community",
-    }), 200
+    }), 200 if community_registration.payment_status == "paid" else 202
 
 @event_participation_bp.post("/payments/verify")
 def verify_payment():
@@ -820,7 +862,13 @@ def verify_payment():
         if not tournament:
             return jsonify({"error": "tournament not found"}), 404
         try:
-            payment_details = verify_tournament_payment(body, tournament.entry_fee, tournament.currency)
+            payment_details = verify_tournament_payment(
+                body,
+                tournament.entry_fee,
+                tournament.currency,
+                expected_registration_id=community_registration.id,
+                expected_order_id=community_registration.razorpay_order_id,
+            )
             community_registration = settle_community_registration_payment(community_registration.id, payment_details)
         except (CommunityValidationError, CommunityConflictError, ValueError) as exc:
             return jsonify({"error": "payment verification failed", "message": str(exc)}), 400
