@@ -65,7 +65,10 @@ class Config:
     USER_CREATE_ASYNC_FINALIZE_ENABLED = os.getenv("USER_CREATE_ASYNC_FINALIZE_ENABLED", "true").lower() in ("true", "1", "t", "yes", "y")
     USER_SIGNUP_EMAIL_RECOVERY_ENABLED = os.getenv("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
     USER_SIGNUP_EMAIL_LINK_FID_ENABLED = os.getenv("USER_SIGNUP_EMAIL_LINK_FID_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
-    USER_DELETION_COOLDOWN_DAYS = int(os.getenv("USER_DELETION_COOLDOWN_DAYS", "30") or 30)
+    USER_DELETION_COOLDOWN_DAYS = int(os.getenv("USER_DELETION_COOLDOWN_DAYS", "7") or 7)
+    USER_DELETION_RETENTION_DAYS = int(os.getenv("USER_DELETION_RETENTION_DAYS", "7") or 7)
+    USER_DELETION_CRON_TOKEN = os.getenv("USER_DELETION_CRON_TOKEN", "")
+    AUTH_USER_STATUS_CACHE_TTL_SEC = int(os.getenv("AUTH_USER_STATUS_CACHE_TTL_SEC", "5") or 5)
 
     # Server-to-server authorization for wallet credits. There is deliberately
     # no development default: an unset token disables the credit endpoint.

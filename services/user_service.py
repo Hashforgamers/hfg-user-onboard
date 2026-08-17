@@ -426,7 +426,7 @@ class UserService:
             joinedload(User.physical_address),
             joinedload(User.contact_info),
             selectinload(User.vouchers)
-        ).filter_by(id=user_id).first()
+        ).filter(User.id == user_id, User.deleted_at.is_(None)).first()
         return user
 
     @staticmethod
@@ -454,7 +454,7 @@ class UserService:
                 Voucher.is_active,
                 Voucher.created_at,
             ),
-        ).filter_by(fid=fid).first()
+        ).filter(User.fid == fid, User.deleted_at.is_(None)).first()
 
     @staticmethod
     def get_user_auth_payload_by_fid(fid):
@@ -493,7 +493,7 @@ class UserService:
                 ContactInfo,
                 (ContactInfo.parent_id == User.id) & (ContactInfo.parent_type == "user"),
             )
-            .filter(User.fid == fid)
+            .filter(User.fid == fid, User.deleted_at.is_(None))
             .first()
         )
 
