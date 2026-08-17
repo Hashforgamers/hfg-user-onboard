@@ -61,6 +61,7 @@ class Config:
     COMMUNITY_PUBLIC_CACHE_TTL_SEC = int(os.getenv("COMMUNITY_PUBLIC_CACHE_TTL_SEC", "5") or 5)
     COMMUNITY_PUBLIC_STATUS_CACHE_TTL_SEC = int(os.getenv("COMMUNITY_PUBLIC_STATUS_CACHE_TTL_SEC", "5") or 5)
     USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC = int(os.getenv("USER_FID_AUTH_RESPONSE_CACHE_TTL_SEC", "20") or 20)
+    USER_FID_AUTH_TOKEN_TTL_HOURS = int(os.getenv("USER_FID_AUTH_TOKEN_TTL_HOURS", "2") or 2)
     USER_CREATE_TIMING_LOGS = os.getenv("USER_CREATE_TIMING_LOGS", "true").lower() in ("true", "1", "t", "yes", "y")
     USER_CREATE_ASYNC_FINALIZE_ENABLED = os.getenv("USER_CREATE_ASYNC_FINALIZE_ENABLED", "true").lower() in ("true", "1", "t", "yes", "y")
     USER_SIGNUP_EMAIL_RECOVERY_ENABLED = os.getenv("USER_SIGNUP_EMAIL_RECOVERY_ENABLED", "false").lower() in ("true", "1", "t", "yes", "y")
