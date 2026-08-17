@@ -124,12 +124,10 @@ def _ensure_hash_wallet_row(user_id: int):
 
 _USER_DELETION_BLOCKER_MESSAGES = {
     "financial_history": "Financial history exists for this account.",
-    "community_host_program": "A community host-program record exists for this account.",
     "community_host": "You host one or more community tournaments.",
-    "community_registration": "A community tournament registration record exists for this account.",
+    "community_registration": "You have an active community tournament registration.",
     "community_team": "You belong to a community tournament team.",
     "community_payout": "A community tournament payout record exists for this account.",
-    "community_review": "A community tournament review record exists for this account.",
     "event_team": "You belong to an event team.",
     "booking_or_pass": "A booking or pass record exists for this account.",
 }
@@ -147,15 +145,13 @@ def _user_deletion_blockers(user_id: int):
                     SELECT 1 FROM hash_wallet_transactions WHERE user_id = :user_id
                 ) AS financial_history,
                 EXISTS(
-                    SELECT 1 FROM community_host_verifications WHERE user_id = :user_id
-                ) AS community_host_program,
-                EXISTS(
                     SELECT 1 FROM community_tournaments WHERE host_user_id = :user_id
                 ) AS community_host,
                 EXISTS(
                     SELECT 1
                     FROM community_tournament_registrations
                     WHERE user_id = :user_id
+                      AND status NOT IN ('cancelled', 'refunded')
                 ) AS community_registration,
                 EXISTS(
                     SELECT 1 FROM community_tournament_teams WHERE captain_user_id = :user_id
@@ -165,11 +161,6 @@ def _user_deletion_blockers(user_id: int):
                 EXISTS(
                     SELECT 1 FROM community_tournament_payouts WHERE user_id = :user_id
                 ) AS community_payout,
-                EXISTS(
-                    SELECT 1
-                    FROM community_tournament_reviews
-                    WHERE host_user_id = :user_id OR reviewer_user_id = :user_id
-                ) AS community_review,
                 EXISTS(
                     SELECT 1 FROM teams WHERE created_by_user = :user_id
                     UNION ALL
@@ -1106,6 +1097,11 @@ def delete_user_id():
 
         blockers = _user_deletion_blockers(user_id)
         if blockers:
+            current_app.logger.info(
+                "User deletion blocked user_id=%s blockers=%s",
+                user_id,
+                ",".join(blockers),
+            )
             db.session.rollback()
             return jsonify({
                 "message": "Account cannot be deleted while protected records exist",
