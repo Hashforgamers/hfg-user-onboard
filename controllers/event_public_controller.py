@@ -277,6 +277,7 @@ def get_public_gamer_profile(user_id):
         ) results ON true
         WHERE u.id = :user_id
           AND u.parent_type = 'user'
+          AND u.deleted_at IS NULL
         LIMIT 1
     """), {"user_id": user_id}).mappings().first()
 

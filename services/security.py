@@ -3,6 +3,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 import base64
 import functools
 from flask import request, jsonify, g, current_app
+from db.extensions import db
+from sqlalchemy import text
 import jwt
 import time
 from threading import Lock
@@ -13,6 +15,35 @@ _PUBLIC_KEY_CACHE = {}
 _PUBLIC_KEY_CACHE_LOCK = Lock()
 _DECRYPTED_SUBJECT_CACHE = {}
 _DECRYPTED_SUBJECT_CACHE_LOCK = Lock()
+_USER_DELETION_STATUS_CACHE = {}
+_USER_DELETION_STATUS_CACHE_LOCK = Lock()
+
+
+def invalidate_user_auth_status(user_id):
+    with _USER_DELETION_STATUS_CACHE_LOCK:
+        _USER_DELETION_STATUS_CACHE.pop(int(user_id), None)
+
+
+def _is_soft_deleted_user(user_id):
+    now_ts = time.time()
+    with _USER_DELETION_STATUS_CACHE_LOCK:
+        cached = _USER_DELETION_STATUS_CACHE.get(int(user_id))
+        if cached and cached["expires_at"] > now_ts:
+            return cached["deleted"]
+    try:
+        deleted = bool(db.session.execute(
+            text("SELECT deleted_at IS NOT NULL FROM users WHERE id = :user_id"),
+            {"user_id": int(user_id)},
+        ).scalar())
+    except Exception:
+        # The migration is deployed before this code. Failing open here avoids
+        # an auth outage on an accidentally out-of-order rollout.
+        db.session.rollback()
+        return False
+    ttl = max(1, int(current_app.config.get("AUTH_USER_STATUS_CACHE_TTL_SEC", 30) or 30))
+    with _USER_DELETION_STATUS_CACHE_LOCK:
+        _USER_DELETION_STATUS_CACHE[int(user_id)] = {"deleted": deleted, "expires_at": now_ts + ttl}
+    return deleted
 
 def encode_user(user_id: str, public_key_pem: str) -> str:
     """
@@ -64,8 +95,8 @@ def decode_user(encoded_user: str, private_key_pem: str) -> str:
 
     return decrypted.decode()
 
-def auth_required_self(decrypt_user=False):
-    return auth_required(match_route_user=False, decrypt_user=decrypt_user)
+def auth_required_self(decrypt_user=False, allow_deleted=False):
+    return auth_required(match_route_user=False, decrypt_user=decrypt_user, allow_deleted=allow_deleted)
 
 def extract_bearer_token():
     auth = request.headers.get("Authorization", "")
@@ -76,7 +107,7 @@ def extract_bearer_token():
         return None
     return token
 
-def auth_required(match_route_user=True, decrypt_user=False):
+def auth_required(match_route_user=True, decrypt_user=False, allow_deleted=False):
     """
     - match_route_user: if True, ensure token user_id matches the user_id in the route.
     - decrypt_user: if True, apply decrypt_user_id() to the user_id claim before comparing.
@@ -174,6 +205,8 @@ def auth_required(match_route_user=True, decrypt_user=False):
 
             g.token_claims = claims
             g.auth_user_id = token_user_id_int
+            if not allow_deleted and _is_soft_deleted_user(token_user_id_int):
+                return jsonify({"message": "Account is scheduled for deletion"}), 403
             if auth_debug:
                 current_app.logger.debug(
                     "Stored auth context user_id=%s token_expired=%s",

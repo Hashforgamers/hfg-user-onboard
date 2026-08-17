@@ -27,6 +27,9 @@ class User(db.Model):
         onupdate=text("TIMEZONE('Asia/Kolkata', now())"),
         nullable=False
     )
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    purge_after = Column(DateTime(timezone=True), nullable=True, index=True)
+    deletion_status = Column(String(32), nullable=True, index=True)
 
     # Relationships
     physical_address = relationship(

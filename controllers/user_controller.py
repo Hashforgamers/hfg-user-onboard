@@ -8,6 +8,7 @@ from db.extensions import db
 from models.hashWallet import HashWallet
 from models.fcmToken import FCMToken
 from models.user import User
+from models.userDeletionArchive import UserDeletionArchive
 from models.hashWalletTransaction import HashWalletTransaction
 from services.firebase_service import send_notification, send_notification_with_result
 from models.vendor import Vendor
@@ -31,10 +32,11 @@ from models.notificationDispatch import NotificationDispatchJob, NotificationDis
 
 from models.voucher import Voucher
 
-from services.security import encode_user, auth_required_self
+from services.security import encode_user, auth_required_self, invalidate_user_auth_status
 
 import jwt
 import hmac
+import hashlib
 
 from datetime import datetime, timedelta
 import time
@@ -131,6 +133,12 @@ _USER_DELETION_BLOCKER_MESSAGES = {
     "event_team": "You belong to an event team.",
     "booking_or_pass": "A booking or pass record exists for this account.",
 }
+_USER_DELETION_REQUEST_BLOCKERS = {
+    "community_host",
+    "community_registration",
+    "community_team",
+    "event_team",
+}
 
 
 def _user_deletion_blockers(user_id: int):
@@ -176,6 +184,20 @@ def _user_deletion_blockers(user_id: int):
         {"user_id": int(user_id)},
     ).mappings().one()
     return [code for code in _USER_DELETION_BLOCKER_MESSAGES if bool(row.get(code))]
+
+
+def _clear_deleted_user_caches(user_id, fid):
+    _USER_CACHE.pop(int(user_id), None)
+    _USER_PHONE_CACHE.pop(int(user_id), None)
+    _invalidate_fid_caches(fid)
+    _USER_SEARCH_CACHE.clear()
+    _invalidate_user_microcache(
+        user_id,
+        prefixes=(
+            "users-wallet|", "users-hash-coins|", "users-notifications|",
+            "users-transactions|", "users-voucher|", "user-passes|",
+        ),
+    )
 
 
 def _sanitize_signup_payload(data):
@@ -1068,9 +1090,6 @@ def register_fcm_token():
 def delete_user_id():
     user_id = g.auth_user_id
     try:
-        cooldown_days_cfg = current_app.config.get("USER_DELETION_COOLDOWN_DAYS", 30)
-        cooldown_days = max(0, int(30 if cooldown_days_cfg is None else cooldown_days_cfg))
-        cooldown_expires_at = datetime.utcnow() + timedelta(days=cooldown_days)
         user_row = db.session.execute(text("""
             SELECT u.id, u.fid, u.referral_code, u.referred_by,
                    COALESCE((
@@ -1095,7 +1114,10 @@ def delete_user_id():
             db.session.rollback()
             return jsonify({"message": "User not found"}), 404
 
-        blockers = _user_deletion_blockers(user_id)
+        blockers = [
+            code for code in _user_deletion_blockers(user_id)
+            if code in _USER_DELETION_REQUEST_BLOCKERS
+        ]
         if blockers:
             current_app.logger.info(
                 "User deletion blocked user_id=%s blockers=%s",
@@ -1109,91 +1131,32 @@ def delete_user_id():
                 "details": [_USER_DELETION_BLOCKER_MESSAGES[code] for code in blockers],
             }), 409
 
-        if cooldown_days > 0 and (user_row.get("email") or user_row.get("phone")):
-            db.session.execute(text("""
-                INSERT INTO deleted_user_cooldown (email, phone, referred_by, created_at, expires_at)
-                VALUES (
-                    COALESCE(:email, ''),
-                    COALESCE(:phone, ''),
-                    :referred_by,
-                    NOW(),
-                    :expires_at
-                )
-            """), {
-                "email": str(user_row.get("email") or "").strip().lower(),
-                "phone": user_row.get("phone"),
-                "referred_by": user_row.get("referred_by"),
-                "expires_at": cooldown_expires_at,
-            })
-
-        db.session.execute(text("""
-            DELETE FROM monthly_credit_ledgers
-            WHERE account_id IN (
-                    SELECT id FROM monthly_credit_accounts WHERE user_id = :user_id
-                )
-               OR transaction_id IN (
-                    SELECT id FROM transactions WHERE user_id = :user_id OR
-                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
-               );
-            DELETE FROM monthly_credit_accounts WHERE user_id = :user_id;
-            DELETE FROM time_wallet_ledgers
-            WHERE account_id IN (
-                    SELECT id FROM time_wallet_accounts WHERE user_id = :user_id
-                )
-               OR transaction_id IN (
-                    SELECT id FROM transactions WHERE user_id = :user_id OR
-                        (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
-               );
-            DELETE FROM time_wallet_accounts WHERE user_id = :user_id;
-            DELETE FROM payment_transaction_mappings WHERE transaction_id IN (
-                SELECT id FROM transactions WHERE user_id = :user_id OR
-                    (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase')
-            );
-            DELETE FROM pass_redemption_logs
-            WHERE user_id = :user_id
-               OR user_pass_id IN (SELECT id FROM user_passes WHERE user_id = :user_id);
-            DELETE FROM team_invites WHERE inviter_user_id = :user_id OR invited_user_id = :user_id;
-            DELETE FROM team_members WHERE user_id = :user_id;
-            DELETE FROM teams WHERE created_by_user = :user_id;
-            UPDATE users SET referred_by = NULL WHERE referred_by = :referral_code;
-            DELETE FROM referral_tracking
-            WHERE referred_user_id = :user_id OR referrer_code = :referral_code;
-            DELETE FROM notifications WHERE user_id = :user_id;
-            DELETE FROM user_hash_coins WHERE user_id = :user_id;
-            DELETE FROM fcm_tokens WHERE user_id = :user_id;
-            DELETE FROM vouchers WHERE user_id = :user_id;
-            DELETE FROM transactions WHERE user_id = :user_id OR
-                (reference_id IN (SELECT id::text FROM user_passes WHERE user_id = :user_id) AND booking_type = 'pass_purchase');
-            DELETE FROM user_passes WHERE user_id = :user_id;
-            DELETE FROM password_manager WHERE parent_id = :user_id AND parent_type = 'user';
-            DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
-            DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
-            DELETE FROM hash_wallet_transactions WHERE user_id = :user_id;
-            DELETE FROM hash_wallets WHERE user_id = :user_id;
-            DELETE FROM users WHERE id = :user_id;
-        """), {
-            "user_id": user_id,
-            "referral_code": user_row.get("referral_code"),
-        })
-
-        db.session.commit()
-        _USER_CACHE.pop(user_id, None)
-        _USER_PHONE_CACHE.pop(user_id, None)
-        _invalidate_fid_caches(user_row.get("fid"))
-        _USER_SEARCH_CACHE.clear()
-        _invalidate_user_microcache(
-            user_id,
-            prefixes=(
-                "users-wallet|",
-                "users-hash-coins|",
-                "users-notifications|",
-                "users-transactions|",
-                "users-voucher|",
-                "user-passes|",
+        retention_days = max(1, int(current_app.config.get("USER_DELETION_RETENTION_DAYS", 7) or 7))
+        deleted_at = datetime.utcnow()
+        purge_after = deleted_at + timedelta(days=retention_days)
+        db.session.execute(
+            text(
+                """
+                UPDATE users
+                SET deleted_at = :deleted_at,
+                    purge_after = :purge_after,
+                    deletion_status = 'pending_purge'
+                WHERE id = :user_id
+                """
             ),
+            {"user_id": user_id, "deleted_at": deleted_at, "purge_after": purge_after},
         )
-
-        return jsonify({"message": "User deleted successfully"}), 200
+        # Disable push delivery immediately. Other personal records stay intact
+        # during the restore window and are handled only by the purge job.
+        db.session.execute(text("DELETE FROM fcm_tokens WHERE user_id = :user_id"), {"user_id": user_id})
+        db.session.commit()
+        _clear_deleted_user_caches(user_id, user_row.get("fid"))
+        invalidate_user_auth_status(user_id)
+        return jsonify({
+            "message": "Account scheduled for deletion",
+            "deletion_status": "pending_purge",
+            "restore_until": purge_after.isoformat() + "Z",
+        }), 200
 
     except Exception:
         db.session.rollback()
@@ -1202,6 +1165,150 @@ def delete_user_id():
             "message": "Failed to delete user",
             "error": "internal_server_error"
         }), 500
+
+
+@user_blueprint.route('/users/restore', methods=['POST'])
+@auth_required_self(decrypt_user=True, allow_deleted=True)
+def restore_deleted_user():
+    user_id = g.auth_user_id
+    try:
+        row = db.session.execute(text("""
+            SELECT id, fid, deleted_at, purge_after, deletion_status
+            FROM users
+            WHERE id = :user_id
+            FOR UPDATE
+        """), {"user_id": user_id}).mappings().first()
+        if not row:
+            db.session.rollback()
+            return jsonify({"message": "User not found"}), 404
+        if not row.get("deleted_at"):
+            db.session.rollback()
+            return jsonify({"message": "Account is already active"}), 200
+        if row.get("purge_after") and datetime.utcnow() >= row["purge_after"].replace(tzinfo=None):
+            db.session.rollback()
+            return jsonify({"message": "The restore window has expired"}), 409
+        db.session.execute(text("""
+            UPDATE users
+            SET deleted_at = NULL, purge_after = NULL, deletion_status = NULL
+            WHERE id = :user_id
+        """), {"user_id": user_id})
+        db.session.commit()
+        _clear_deleted_user_caches(user_id, row.get("fid"))
+        invalidate_user_auth_status(user_id)
+        return jsonify({"message": "Account restored successfully"}), 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to restore deleted user_id=%s", user_id)
+        return jsonify({"message": "Internal server error"}), 500
+
+
+def _is_valid_user_deletion_cron_request():
+    expected = str(current_app.config.get("USER_DELETION_CRON_TOKEN") or "").strip()
+    if not expected:
+        return False
+    supplied = str(request.headers.get("X-User-Deletion-Cron-Token") or "").strip()
+    authorization = str(request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        supplied = supplied or authorization[7:].strip()
+    return hmac.compare_digest(supplied, expected)
+
+
+def _purge_soft_deleted_user(row):
+    locked_row = db.session.execute(text("""
+        SELECT id, fid, referral_code, deleted_at, purge_after
+        FROM users
+        WHERE id = :user_id
+          AND deleted_at IS NOT NULL
+          AND deletion_status = 'pending_purge'
+        FOR UPDATE
+    """), {"user_id": int(row["id"])}).mappings().first()
+    if not locked_row:
+        db.session.rollback()
+        return {"user_id": int(row["id"]), "status": "skipped"}
+    row = locked_row
+    user_id = int(row["id"])
+    fid = str(row.get("fid") or "")
+    blockers = _user_deletion_blockers(user_id)
+    manifest = {
+        "retained_record_categories": blockers,
+        "contact_rows": int(db.session.execute(text(
+            "SELECT count(*) FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user'"
+        ), {"user_id": user_id}).scalar() or 0),
+        "address_rows": int(db.session.execute(text(
+            "SELECT count(*) FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user'"
+        ), {"user_id": user_id}).scalar() or 0),
+    }
+    archive = UserDeletionArchive(
+        original_user_id=user_id,
+        original_fid_hash=hashlib.sha256(fid.encode("utf-8")).hexdigest() if fid else None,
+        deletion_status="purged_anonymized",
+        deleted_at=row.get("deleted_at"),
+        purged_at=datetime.utcnow(),
+        record_manifest=manifest,
+    )
+    db.session.add(archive)
+
+    tombstone_fid = f"deleted:{user_id}"
+    tombstone_username = f"deleted-{user_id}"
+    db.session.execute(text("UPDATE users SET referred_by = NULL WHERE referred_by = :referral_code"), {
+        "referral_code": row.get("referral_code"),
+    })
+    db.session.execute(text("""
+        DELETE FROM referral_tracking
+        WHERE referred_user_id = :user_id OR referrer_code = :referral_code;
+        DELETE FROM fcm_tokens WHERE user_id = :user_id;
+        DELETE FROM password_manager WHERE parent_id = :user_id AND parent_type = 'user';
+        DELETE FROM physical_address WHERE parent_id = :user_id AND parent_type = 'user';
+        DELETE FROM contact_info WHERE parent_id = :user_id AND parent_type = 'user';
+        UPDATE users
+        SET fid = :tombstone_fid,
+            game_username = :tombstone_username,
+            name = 'Deleted user',
+            avatar_path = NULL,
+            gender = NULL,
+            dob = NULL,
+            referral_code = NULL,
+            referred_by = NULL,
+            deletion_status = 'purged_anonymized',
+            purge_after = NULL
+        WHERE id = :user_id;
+    """), {
+        "user_id": user_id,
+        "referral_code": row.get("referral_code"),
+        "tombstone_fid": tombstone_fid,
+        "tombstone_username": tombstone_username,
+    })
+    db.session.commit()
+    _clear_deleted_user_caches(user_id, fid)
+    invalidate_user_auth_status(user_id)
+    return {"user_id": user_id, "status": "purged_anonymized", "blockers": blockers}
+
+
+@user_blueprint.route('/internal/users/purge-deleted', methods=['POST'])
+def purge_soft_deleted_users():
+    if not _is_valid_user_deletion_cron_request():
+        return jsonify({"message": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    limit = min(max(int(payload.get("limit", 50) or 50), 1), 100)
+    rows = db.session.execute(text("""
+        SELECT id, fid, referral_code, deleted_at, purge_after
+        FROM users
+        WHERE deleted_at IS NOT NULL
+          AND deletion_status = 'pending_purge'
+          AND purge_after <= NOW()
+        ORDER BY purge_after ASC
+        LIMIT :limit
+        FOR UPDATE SKIP LOCKED
+    """), {"limit": limit}).mappings().all()
+    results = []
+    for row in rows:
+        try:
+            results.append(_purge_soft_deleted_user(row))
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("User purge failed user_id=%s", row.get("id"))
+            results.append({"user_id": int(row["id"]), "status": "failed", "error": str(exc)})
+    return jsonify({"processed": len(results), "items": results}), 200
 
 @user_blueprint.route('/users', methods=['GET'])
 @auth_required_self(decrypt_user=True)
@@ -1523,6 +1630,7 @@ def search_users():
                 u.fid
             FROM users u
             WHERE u.parent_type = 'user'
+              AND u.deleted_at IS NULL
               AND u.id <> :auth_user_id
               AND u.game_username >= :q_prefix
               AND u.game_username < :q_prefix_hi
@@ -1548,6 +1656,7 @@ def search_users():
                     u.fid
                 FROM users u
                 WHERE u.parent_type = 'user'
+                  AND u.deleted_at IS NULL
                   AND u.id <> :auth_user_id
                   AND lower(u.game_username) LIKE :pattern_prefix_ci
                 ORDER BY u.game_username ASC
@@ -1586,6 +1695,7 @@ def search_users():
                 SELECT COUNT(1)
                 FROM users u
                 WHERE u.parent_type = 'user'
+                  AND u.deleted_at IS NULL
                   AND u.id <> :auth_user_id
                   AND lower(u.game_username) LIKE :pattern_prefix_ci
             """), {
