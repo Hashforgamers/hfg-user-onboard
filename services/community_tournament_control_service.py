@@ -968,6 +968,95 @@ def _match_captain_team(user_id, tournament_id, match):
     return membership.team_id
 
 
+def _match_participant_membership(user_id, tournament_id, match):
+    membership = CommunityTournamentTeamMember.query.filter(
+        CommunityTournamentTeamMember.tournament_id == tournament_id,
+        CommunityTournamentTeamMember.user_id == int(user_id),
+        CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
+        CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
+    ).first()
+    if not membership:
+        raise CommunityForbiddenError("only assigned match participants can view result evidence")
+    return membership
+
+
+def _match_captain_user_ids(tournament_id, match):
+    if not match.team_a_id or not match.team_b_id:
+        return set()
+    return {
+        int(member.user_id)
+        for member in CommunityTournamentTeamMember.query.filter(
+            CommunityTournamentTeamMember.tournament_id == tournament_id,
+            CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
+            CommunityTournamentTeamMember.role == "captain",
+            CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
+        ).all()
+    }
+
+
+def _notify_match_captains(tournament, match, notification_type, title, message, excluded_user_ids=()):
+    excluded = {int(user_id) for user_id in excluded_user_ids if user_id}
+    for captain_user_id in _match_captain_user_ids(tournament.id, match):
+        if captain_user_id not in excluded:
+            _notify(captain_user_id, notification_type, title, message, tournament.id)
+
+
+def match_result_state(user_id, tournament_id, match_id):
+    """Return the single private read model used to preview and act on a result."""
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament_id).first()
+    if not tournament or not match:
+        raise CommunityValidationError("match not found")
+
+    is_host = int(tournament.host_user_id) == int(user_id)
+    membership = None if is_host else _match_participant_membership(user_id, tournament_id, match)
+    is_captain = bool(membership and membership.role == "captain")
+    viewer_team_id = str(membership.team_id) if membership else None
+    now = _now()
+    proposals = CommunityMatchResultProposal.query.filter_by(
+        tournament_id=tournament_id,
+        match_id=match_id,
+    ).order_by(CommunityMatchResultProposal.created_at.desc()).limit(20).all()
+    pending_proposal = next((proposal for proposal in proposals if proposal.status == "pending"), None)
+    submissions = CommunityMatchResultSubmission.query.filter_by(match_id=match_id).order_by(
+        CommunityMatchResultSubmission.created_at.asc()
+    ).all()
+    active_dispute = CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.tournament_id == tournament_id,
+        CommunityTournamentDispute.match_id == match_id,
+        CommunityTournamentDispute.status.in_({
+            CommunityDisputeStatus.OPEN,
+            CommunityDisputeStatus.UNDER_REVIEW,
+        }),
+    ).order_by(CommunityTournamentDispute.created_at.desc()).first()
+    accepted_team_ids = {str(team_id) for team_id in (pending_proposal.accepted_team_ids or [])} if pending_proposal else set()
+    proposal_open = bool(pending_proposal and pending_proposal.expires_at > now)
+
+    return {
+        "match": _match_payload(match, include_lobby=is_host or membership is not None),
+        "proposals": [proposal.to_dict() for proposal in proposals],
+        "captain_submissions": [submission.to_dict() for submission in submissions],
+        "active_dispute": active_dispute.to_dict() if active_dispute else None,
+        "viewer": {
+            "is_host": is_host,
+            "is_captain": is_captain,
+            "team_id": viewer_team_id,
+            "can_create_proposal": is_host and match.status in {
+                CommunityMatchStatus.IN_PROGRESS,
+                CommunityMatchStatus.AWAITING_RESULTS,
+                CommunityMatchStatus.DISPUTED,
+            },
+            "can_accept_pending_proposal": bool(
+                is_captain and proposal_open and viewer_team_id not in accepted_team_ids
+            ),
+            "can_dispute_pending_proposal": bool(
+                is_captain and proposal_open and viewer_team_id not in accepted_team_ids
+            ),
+        },
+        "server_time": now.isoformat(),
+    }
+
+
 def _finalize_result_proposal(proposal, match):
     match.team_a_score = proposal.team_a_score
     match.team_b_score = proposal.team_b_score
@@ -981,8 +1070,8 @@ def create_result_proposal(host_user_id, tournament_id, match_id, payload):
     match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).with_for_update().first()
     if not match:
         raise CommunityValidationError("match not found")
-    if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS, CommunityMatchStatus.DISPUTED}:
-        raise CommunityConflictError("result proposals are available only for active, awaiting, or disputed matches")
+    if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS}:
+        raise CommunityConflictError("result proposals are available only for active or awaiting-result matches")
     if not match.team_a_id or not match.team_b_id:
         raise CommunityConflictError("result proposals require two assigned teams")
     if CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").first():
@@ -1012,6 +1101,13 @@ def create_result_proposal(host_user_id, tournament_id, match_id, payload):
     db.session.flush()
     match.status = CommunityMatchStatus.RESULT_PENDING
     _audit("community_result_proposed", "community_match_result_proposal", proposal.id, host_user_id)
+    _notify_match_captains(
+        tournament,
+        match,
+        "community_result_proposal_pending",
+        "Match result needs your review",
+        f"Review the proposed result for match {match.match_number} before the deadline.",
+    )
     db.session.commit()
     return proposal
 
@@ -1030,6 +1126,23 @@ def accept_result_proposal(user_id, tournament_id, match_id, proposal_id):
     if {str(match.team_a_id), str(match.team_b_id)}.issubset(accepted):
         _finalize_result_proposal(proposal, match)
     _audit("community_result_proposal_accepted", "community_match_result_proposal", proposal.id, user_id)
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    if tournament:
+        _notify(
+            tournament.host_user_id,
+            "community_result_proposal_accepted",
+            "Result proposal accepted",
+            f"A captain accepted the proposed result for match {match.match_number}.",
+            tournament.id,
+        )
+        _notify_match_captains(
+            tournament,
+            match,
+            "community_result_proposal_accepted",
+            "Opponent responded to the match result",
+            f"A captain accepted the proposed result for match {match.match_number}.",
+            excluded_user_ids={user_id},
+        )
     db.session.commit()
     return proposal
 
@@ -1042,6 +1155,16 @@ def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, paylo
     if proposal.status != "pending" or proposal.expires_at <= _now():
         raise CommunityConflictError("result proposal is no longer pending")
     _match_captain_team(user_id, tournament_id, match)
+    existing_dispute = CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.tournament_id == tournament_id,
+        CommunityTournamentDispute.match_id == match_id,
+        CommunityTournamentDispute.status.in_({
+            CommunityDisputeStatus.OPEN,
+            CommunityDisputeStatus.UNDER_REVIEW,
+        }),
+    ).first()
+    if existing_dispute:
+        raise CommunityConflictError("an active dispute already exists for this match")
     proposal.status = "disputed"
     proposal.disputed_at = _now()
     match.status = CommunityMatchStatus.DISPUTED
@@ -1056,6 +1179,21 @@ def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, paylo
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     provision_dispute_chat_room(dispute, tournament)
     _audit("community_result_proposal_disputed", "community_match_result_proposal", proposal.id, user_id)
+    _notify(
+        tournament.host_user_id,
+        "community_result_proposal_disputed",
+        "Match result disputed",
+        f"A captain disputed the proposed result for match {match.match_number}.",
+        tournament.id,
+    )
+    _notify_match_captains(
+        tournament,
+        match,
+        "community_result_proposal_disputed",
+        "Match result is disputed",
+        f"Match {match.match_number} requires organizer review.",
+        excluded_user_ids={user_id},
+    )
     db.session.commit()
     return proposal
 
