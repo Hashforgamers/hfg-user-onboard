@@ -741,6 +741,18 @@ Request body:
 
 Validation:
 - `reason` and `description` are required.
+- Player-created disputes require `match_id`; the player must be an accepted or
+  verified member of one of that match's teams. A match can have one active dispute.
+
+### Preview Match Result State
+- **Method**: `GET`
+- **Path**: `/tournaments/<tournament_id>/matches/<match_id>/result-state`
+- **Auth**: Required host or assigned accepted/verified match member.
+
+Returns the private match payload, host result proposals and their evidence,
+captain submissions, the active dispute (including chat details), `server_time`,
+and viewer action permissions. Use its `can_accept_pending_proposal` and
+`can_dispute_pending_proposal` values instead of deriving approval access in the app.
 
 ### Create File Asset
 - **Method**: `POST`
@@ -771,6 +783,21 @@ Common purposes:
 - `government_id`
 - `result_evidence`
 - `dispute_evidence`
+
+### Cloudinary Evidence Upload
+- **Method**: `POST`
+- **Path**: `/tournaments/<tournament_id>/evidence/upload-signature`
+- **Auth**: Required host or confirmed participant.
+
+Request body:
+```json
+{"purpose": "result_evidence"}
+```
+
+Upload directly to the returned Cloudinary `upload_url`; then register the
+returned `secure_url` through `POST /files`. Supply the response's `storage_key`
+unchanged so the backend can mark the evidence temporary and delete it seven days
+after the tournament completes.
 
 ## Admin APIs
 

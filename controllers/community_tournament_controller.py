@@ -15,6 +15,7 @@ from services.community_tournament_service import (
     close_registration,
     create_dispute,
     create_file_asset,
+    create_temporary_evidence_upload,
     create_tournament,
     get_tournament,
     host_program_config,
@@ -31,6 +32,7 @@ from services.community_tournament_service import (
     my_tournaments,
     register_for_tournament,
     process_pending_community_payments,
+    purge_expired_community_evidence,
     review_dispute,
     review_host_verification,
     review_payout,
@@ -58,6 +60,7 @@ from services.community_tournament_control_service import (
     list_teams,
     leaderboard,
     manage_match,
+    match_result_state,
     manage_team,
     replace_team_roster,
     public_host_profile,
@@ -385,6 +388,15 @@ def process_pending_community_payment_queue():
         return _handle_service_error(exc)
 
 
+@community_tournament_bp.post("/internal/evidence/purge-expired")
+@_payment_cron_required
+def purge_expired_community_evidence_assets():
+    try:
+        return jsonify(purge_expired_community_evidence((_body()).get("limit", 50))), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @community_tournament_bp.patch("/tournaments/<uuid:tournament_id>/registrations/<uuid:registration_id>")
 @auth_required_self(decrypt_user=True)
 def manage_community_registration(tournament_id, registration_id):
@@ -525,6 +537,15 @@ def create_community_file_asset():
     try:
         asset = create_file_asset(g.auth_user_id, _body())
         return jsonify(asset.to_dict()), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/evidence/upload-signature")
+@auth_required_self(decrypt_user=True)
+def create_community_evidence_upload_signature(tournament_id):
+    try:
+        return jsonify(create_temporary_evidence_upload(g.auth_user_id, tournament_id, _body())), 201
     except Exception as exc:
         return _handle_service_error(exc)
 
@@ -671,6 +692,15 @@ def get_community_leaderboard(tournament_id):
 def manage_community_match(tournament_id, match_id):
     try:
         return jsonify(manage_match(g.auth_user_id, tournament_id, match_id, _body())), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-state")
+@auth_required_self(decrypt_user=True)
+def get_community_match_result_state(tournament_id, match_id):
+    try:
+        return jsonify(match_result_state(g.auth_user_id, tournament_id, match_id)), 200
     except Exception as exc:
         return _handle_service_error(exc)
 

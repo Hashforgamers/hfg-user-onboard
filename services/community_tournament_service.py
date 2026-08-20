@@ -5,12 +5,14 @@ import hmac
 import json
 import os
 import re
+import time
 import uuid
 from urllib.parse import urlparse
 
 from flask import current_app
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
+import requests
 
 from db.extensions import db
 from models.communityTournament import (
@@ -30,7 +32,10 @@ from models.communityTournamentOperations import (
     CommunityPayoutStatus,
     CommunityResultStatus,
     CommunityTournamentDispute,
+    CommunityTournamentMatch,
+    CommunityMatchResultProposal,
     CommunityTournamentPayout,
+    CommunityTournamentTeamMember,
     CommunityPaymentSettlementJob,
     CommunityPaymentSettlementStatus,
     CommunityPaymentAttempt,
@@ -92,6 +97,8 @@ TERMINAL_STATUSES = {
     CommunityTournamentStatus.COMPLETED,
     CommunityTournamentStatus.CANCELLED,
 }
+CLOUDINARY_EVIDENCE_PURPOSES = {"result_evidence", "dispute_evidence"}
+CLOUDINARY_EVIDENCE_FORMATS = "jpg,jpeg,png,webp"
 TOURNAMENT_FORMATS = {
     "single_elimination",
     "round_robin",
@@ -295,6 +302,153 @@ def _notify(user_id, notification_type, title, message, reference_id=None):
                 is_read=False,
             )
         )
+
+
+def _cloudinary_evidence_config():
+    cloud_name = str(current_app.config.get("CLOUDINARY_CLOUD_NAME") or "").strip()
+    api_key = str(current_app.config.get("CLOUDINARY_API_KEY") or "").strip()
+    api_secret = str(current_app.config.get("CLOUDINARY_API_SECRET") or "").strip()
+    if not cloud_name or not api_key or not api_secret:
+        raise CommunityValidationError("Cloudinary evidence storage is not configured")
+    return cloud_name, api_key, api_secret
+
+
+def _cloudinary_signature(params, api_secret):
+    encoded = "&".join(
+        f"{key}={value}"
+        for key, value in sorted(params.items())
+        if value is not None and value != ""
+    )
+    return hashlib.sha1(f"{encoded}{api_secret}".encode("utf-8")).hexdigest()
+
+
+def create_temporary_evidence_upload(user_id, tournament_id, payload):
+    """Issue a short-lived direct-upload signature; evidence bytes bypass Render."""
+    purpose = str(payload.get("purpose") or "").strip().lower()
+    if purpose not in CLOUDINARY_EVIDENCE_PURPOSES:
+        raise CommunityValidationError("purpose must be result_evidence or dispute_evidence")
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    if not tournament:
+        raise CommunityValidationError("tournament not found")
+    is_host = int(tournament.host_user_id) == int(user_id)
+    registration = CommunityTournamentRegistration.query.filter_by(
+        tournament_id=tournament.id,
+        user_id=int(user_id),
+        status=CommunityTournamentRegistrationStatus.CONFIRMED,
+    ).first()
+    if not is_host and not registration:
+        raise CommunityForbiddenError("only the host or confirmed participants can upload evidence")
+    if tournament.status in TERMINAL_STATUSES:
+        raise CommunityConflictError("evidence uploads are closed for completed or cancelled tournaments")
+
+    cloud_name, api_key, api_secret = _cloudinary_evidence_config()
+    timestamp = int(time.time())
+    folder = f"hfg/community/{tournament.id}/evidence"
+    public_id = f"{purpose}-{uuid.uuid4().hex}"
+    params = {
+        "allowed_formats": CLOUDINARY_EVIDENCE_FORMATS,
+        "folder": folder,
+        "public_id": public_id,
+        "timestamp": timestamp,
+    }
+    _audit(
+        "community_evidence_upload_signature_issued",
+        "community_tournament",
+        tournament.id,
+        user_id,
+        metadata={"purpose": purpose, "storage_key": f"{folder}/{public_id}"},
+    )
+    db.session.commit()
+    return {
+        "upload_url": f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload",
+        "api_key": api_key,
+        "timestamp": timestamp,
+        "signature": _cloudinary_signature(params, api_secret),
+        "folder": folder,
+        "public_id": public_id,
+        "allowed_formats": CLOUDINARY_EVIDENCE_FORMATS,
+        "storage_key": f"{folder}/{public_id}",
+        "purpose": purpose,
+    }
+
+
+def _is_cloudinary_evidence_asset(asset, cloud_name):
+    metadata = asset.meta or {}
+    expected_prefix = f"hfg/community/{asset.tournament_id}/evidence/"
+    parsed_url = urlparse(str(asset.file_url or ""))
+    return (
+        metadata.get("storage_provider") == "cloudinary"
+        and str(asset.storage_key or "").startswith(expected_prefix)
+        and parsed_url.netloc == "res.cloudinary.com"
+        and f"/{cloud_name}/" in parsed_url.path
+    )
+
+
+def purge_expired_community_evidence(limit=50):
+    """Delete retained Cloudinary evidence while keeping an audit tombstone."""
+    limit = min(max(int(limit or 50), 1), 100)
+    cloud_name, api_key, api_secret = _cloudinary_evidence_config()
+    retention_days = min(max(int(current_app.config.get("COMMUNITY_EVIDENCE_RETENTION_DAYS", 7) or 7), 1), 365)
+    cutoff = _now() - timedelta(days=retention_days)
+    assets = CommunityFileAsset.query.join(
+        CommunityTournament,
+        CommunityFileAsset.tournament_id == CommunityTournament.id,
+    ).filter(
+        CommunityFileAsset.purpose.in_(CLOUDINARY_EVIDENCE_PURPOSES),
+        CommunityTournament.status == CommunityTournamentStatus.COMPLETED,
+        CommunityTournament.completed_at.isnot(None),
+        CommunityTournament.completed_at <= cutoff,
+    ).order_by(CommunityTournament.completed_at.asc(), CommunityFileAsset.created_at.asc()).limit(limit).all()
+    summary = {"processed": 0, "deleted": 0, "failed": 0, "skipped": 0, "items": []}
+    for asset in assets:
+        metadata = dict(asset.meta or {})
+        if metadata.get("cleanup_status") == "deleted" or not _is_cloudinary_evidence_asset(asset, cloud_name):
+            summary["skipped"] += 1
+            continue
+        timestamp = int(time.time())
+        params = {"invalidate": "true", "public_id": asset.storage_key, "timestamp": timestamp}
+        try:
+            response = requests.post(
+                f"https://api.cloudinary.com/v1_1/{cloud_name}/image/destroy",
+                data={
+                    "api_key": api_key,
+                    "timestamp": timestamp,
+                    "public_id": asset.storage_key,
+                    "signature": _cloudinary_signature(params, api_secret),
+                    "invalidate": "true",
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = str((response.json() or {}).get("result") or "").lower()
+            if result not in {"ok", "not found"}:
+                raise RuntimeError(f"Cloudinary destroy returned {result or 'an empty result'}")
+            metadata.update({
+                "cleanup_status": "deleted",
+                "cloudinary_deleted_at": _now().isoformat(),
+                "cloudinary_destroy_result": result,
+            })
+            asset.meta = metadata
+            _audit("community_evidence_deleted", "community_file_asset", asset.id, actor_type="system")
+            db.session.commit()
+            summary["deleted"] += 1
+            summary["items"].append({"asset_id": str(asset.id), "status": "deleted"})
+        except Exception as exc:
+            db.session.rollback()
+            asset = CommunityFileAsset.query.filter_by(id=asset.id).with_for_update().first()
+            if asset:
+                retry_metadata = dict(asset.meta or {})
+                retry_metadata.update({
+                    "cleanup_status": "retry_pending",
+                    "cleanup_last_error": str(exc)[:500],
+                    "cleanup_last_attempt_at": _now().isoformat(),
+                })
+                asset.meta = retry_metadata
+                db.session.commit()
+            summary["failed"] += 1
+            summary["items"].append({"asset_id": str(asset.id) if asset else None, "status": "failed"})
+        summary["processed"] += 1
+    return summary
 
 
 def _apply_wallet_transaction(user_id, amount, transaction_type, reference_id):
@@ -1994,21 +2148,49 @@ def create_dispute(user_id, tournament_id, payload):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
-    registration = CommunityTournamentRegistration.query.filter_by(
-        tournament_id=tournament.id,
-        user_id=int(user_id),
-        status=CommunityTournamentRegistrationStatus.CONFIRMED,
-    ).first()
-    if int(tournament.host_user_id) != int(user_id) and not registration:
-        raise CommunityForbiddenError("only the host or confirmed participants can open disputes")
     result_id = uuid.UUID(str(payload["result_id"])) if payload.get("result_id") else None
     match_id = uuid.UUID(str(payload["match_id"])) if payload.get("match_id") else None
     if result_id and not CommunityMatchResult.query.filter_by(id=result_id, tournament_id=tournament.id).first():
         raise CommunityValidationError("result_id does not belong to this tournament")
+    match = None
     if match_id:
-        from models.communityTournamentOperations import CommunityTournamentMatch
-        if not CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).first():
+        match = CommunityTournamentMatch.query.filter_by(
+            id=match_id,
+            tournament_id=tournament.id,
+        ).with_for_update().first()
+        if not match:
             raise CommunityValidationError("match_id does not belong to this tournament")
+    elif int(tournament.host_user_id) != int(user_id):
+        raise CommunityValidationError("match_id is required when a participant opens a dispute")
+
+    if match and int(tournament.host_user_id) != int(user_id):
+        participant = CommunityTournamentTeamMember.query.filter(
+            CommunityTournamentTeamMember.tournament_id == tournament.id,
+            CommunityTournamentTeamMember.user_id == int(user_id),
+            CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
+            CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
+        ).first()
+        if not participant:
+            raise CommunityForbiddenError("only assigned match participants or the host can open this dispute")
+
+    if match:
+        existing = CommunityTournamentDispute.query.filter(
+            CommunityTournamentDispute.tournament_id == tournament.id,
+            CommunityTournamentDispute.match_id == match.id,
+            CommunityTournamentDispute.status.in_({
+                CommunityDisputeStatus.OPEN,
+                CommunityDisputeStatus.UNDER_REVIEW,
+            }),
+        ).first()
+        if existing:
+            raise CommunityConflictError("an active dispute already exists for this match")
+        if match.status not in {
+            "in_progress",
+            "awaiting_results",
+            "result_pending",
+            "disputed",
+        }:
+            raise CommunityConflictError("only an unresolved match can be disputed")
     dispute = CommunityTournamentDispute(
         tournament_id=tournament.id,
         result_id=result_id,
@@ -2027,6 +2209,14 @@ def create_dispute(user_id, tournament_id, payload):
     db.session.add(dispute)
     db.session.flush()
     provision_dispute_chat_room(dispute, tournament)
+    if match:
+        match.status = "disputed"
+        for proposal in CommunityMatchResultProposal.query.filter_by(
+            match_id=match.id,
+            status="pending",
+        ).all():
+            proposal.status = "disputed"
+            proposal.disputed_at = _now()
     _audit("dispute_created", "community_tournament_dispute", dispute.id, user_id)
     _notify(tournament.host_user_id, "community_dispute_created", "Tournament dispute opened", f"A dispute was opened for {tournament.title}.", tournament.id)
     db.session.commit()
@@ -2045,6 +2235,14 @@ def review_dispute(dispute_id, payload, admin_id=None):
         CommunityDisputeStatus.CLOSED,
     }:
         raise CommunityValidationError("invalid dispute status")
+    if dispute.match_id and status in {
+        CommunityDisputeStatus.APPROVED,
+        CommunityDisputeStatus.REJECTED,
+        CommunityDisputeStatus.CLOSED,
+    }:
+        raise CommunityConflictError(
+            "match disputes require a referee decision through the resolve-result endpoint"
+        )
     dispute.status = status
     dispute.admin_comment = str(payload.get("admin_comment") or "").strip() or None
     dispute.resolution_action = str(payload.get("resolution_action") or "").strip().lower() or None
@@ -2146,6 +2344,7 @@ def submit_winners(host_user_id, tournament_id, winners):
             )
         )
     tournament.status = CommunityTournamentStatus.COMPLETED
+    tournament.completed_at = _now()
     _audit("winners_submitted", "community_tournament", tournament.id, host_user_id, metadata={"winner_count": len(winners)})
     db.session.commit()
     return CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).order_by(CommunityTournamentPayout.rank.asc().nullslast()).all()
@@ -2187,16 +2386,32 @@ def create_file_asset(user_id, payload):
             raise CommunityForbiddenError("only the tournament host can create banner assets")
         if purpose in {"result_evidence", "dispute_evidence"} and not is_host and not registration:
             raise CommunityForbiddenError("only the host or confirmed participants can create evidence assets")
+    metadata = payload.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise CommunityValidationError("metadata must be an object")
+    storage_key = str(payload.get("storage_key") or "").strip() or None
+    if purpose in CLOUDINARY_EVIDENCE_PURPOSES and storage_key:
+        cloud_name = str(current_app.config.get("CLOUDINARY_CLOUD_NAME") or "").strip()
+        expected_prefix = f"hfg/community/{tournament_id}/evidence/"
+        if cloud_name and storage_key.startswith(expected_prefix):
+            if parsed_url.netloc != "res.cloudinary.com" or f"/{cloud_name}/" not in parsed_url.path:
+                raise CommunityValidationError("Cloudinary evidence URL does not match configured storage")
+            metadata = {
+                **metadata,
+                "storage_provider": "cloudinary",
+                "temporary": True,
+                "cleanup_status": "pending",
+            }
     asset = CommunityFileAsset(
         owner_user_id=int(user_id),
         tournament_id=tournament_id,
         purpose=purpose,
         file_url=file_url,
-        storage_key=str(payload.get("storage_key") or "").strip() or None,
+        storage_key=storage_key,
         mime_type=str(payload.get("mime_type") or "").strip() or None,
         file_size_bytes=file_size_bytes,
         checksum=str(payload.get("checksum") or "").strip() or None,
-        meta=payload.get("metadata") or {},
+        meta=metadata,
     )
     db.session.add(asset)
     db.session.flush()

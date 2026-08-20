@@ -401,10 +401,22 @@ Each match team's accepted captain can respond:
 - `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/accept`
 - `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals/<proposal_id>/dispute`
 
+Before rendering a review action, load the authenticated match state from:
+
+`GET /tournaments/<tournament_id>/matches/<match_id>/result-state`
+
+It returns proposal evidence, captain submissions, any active dispute, the server
+time, and the viewer's `can_accept_pending_proposal` / `can_dispute_pending_proposal`
+permissions. Only the host and assigned accepted/verified match members can read it.
+
 Both captains accepting finalizes the match immediately and advances the winner.
 A dispute marks the proposal disputed and opens the normal organizer/admin
 dispute record. If nobody disputes, the deadline processor finalizes the pending
 proposal once its 15-minute server deadline has elapsed.
+
+An open match dispute blocks further host proposals. A platform referee resolves
+the match through `resolve-result`; changing a dispute to `closed` alone is not a
+result decision and is intentionally rejected.
 
 ### Admin Referee Resolution
 
@@ -428,6 +440,29 @@ support staff only for escalated disputes. The dispute response exposes
 `chat_room_id` and `chat_room_status: ready`; the backend owns the room roster
 and initial system message. Clients obtain a Firebase custom token from
 `POST /chat/firebase-token` before opening the returned room.
+
+### Temporary Result Evidence (Cloudinary)
+
+1. Request a signed image upload using
+   `POST /tournaments/<tournament_id>/evidence/upload-signature` with
+   `{ "purpose": "result_evidence" }` or `{ "purpose": "dispute_evidence" }`.
+2. Upload the screenshot directly to the returned `upload_url`, sending the
+   returned `api_key`, `timestamp`, `signature`, `folder`, `public_id`, and
+   `allowed_formats` fields.
+3. Register Cloudinary's `secure_url` using `POST /files`, with the returned
+   `storage_key`, purpose, tournament ID, and upload metadata. Use the returned
+   asset ID in result proposals, captain submissions, or disputes.
+
+Only the host or a confirmed participant can request a signature. Cloudinary
+evidence is retained until the tournament completes, then deleted by the evidence
+cleanup cron after `COMMUNITY_EVIDENCE_RETENTION_DAYS` (default: seven days).
+The database retains a deletion tombstone for audit purposes.
+
+Schedule:
+
+`POST /internal/evidence/purge-expired`
+
+Use `X-Community-Payment-Cron-Token` and optional `{ "limit": 50 }`.
 
 ### Captain Result Agreement
 

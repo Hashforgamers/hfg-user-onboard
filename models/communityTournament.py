@@ -161,6 +161,7 @@ class CommunityTournament(db.Model):
     organizer_commission_amount = Column(Numeric(12, 2), nullable=False, default=0)
     prize_pool = Column(Numeric(12, 2), nullable=False, default=0)
     registered_players_count = Column(Integer, nullable=False, default=0)
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -240,6 +241,7 @@ class CommunityTournament(db.Model):
             "organizer_commission_amount": float(self.organizer_commission_amount or 0),
             "prize_pool": float(self.prize_pool or 0),
             "registered_players_count": int(self.registered_players_count or 0),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

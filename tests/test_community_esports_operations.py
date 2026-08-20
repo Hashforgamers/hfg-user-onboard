@@ -26,6 +26,7 @@ from services.community_tournament_service import (
     CommunityForbiddenError,
     CommunityValidationError,
     _derive_status,
+    _cloudinary_signature,
     _invite_code_hash,
     _recalculate_prize_pool,
     _validated_evidence_asset_ids,
@@ -36,6 +37,17 @@ from models.communityTournament import CommunityTournamentStatus
 
 
 class CommunityEsportsOperationTests(unittest.TestCase):
+    def test_cloudinary_signature_uses_sorted_non_empty_parameters(self):
+        signature = _cloudinary_signature(
+            {"timestamp": 123, "folder": "evidence", "ignored": ""},
+            "secret",
+        )
+
+        self.assertEqual(
+            signature,
+            "85170e50df00622ff3cc7123bc41750f921c17a8",
+        )
+
     def test_bracket_size_uses_next_power_of_two(self):
         self.assertEqual(_next_power_of_two(2), 2)
         self.assertEqual(_next_power_of_two(5), 8)
