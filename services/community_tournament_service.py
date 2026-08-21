@@ -9,10 +9,11 @@ import time
 import uuid
 from urllib.parse import urlparse
 
+import cloudinary
+import cloudinary.uploader
 from flask import current_app
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
-import requests
 
 from db.extensions import db
 from models.communityTournament import (
@@ -99,6 +100,7 @@ TERMINAL_STATUSES = {
 }
 CLOUDINARY_EVIDENCE_PURPOSES = {"result_evidence", "dispute_evidence"}
 CLOUDINARY_EVIDENCE_FORMATS = "jpg,jpeg,png,webp"
+CLOUDINARY_EVIDENCE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 TOURNAMENT_FORMATS = {
     "single_elimination",
     "round_robin",
@@ -121,6 +123,10 @@ class CommunityForbiddenError(PermissionError):
 
 
 class CommunityConflictError(RuntimeError):
+    pass
+
+
+class CommunityStorageError(RuntimeError):
     pass
 
 
@@ -313,18 +319,18 @@ def _cloudinary_evidence_config():
     return cloud_name, api_key, api_secret
 
 
-def _cloudinary_signature(params, api_secret):
-    encoded = "&".join(
-        f"{key}={value}"
-        for key, value in sorted(params.items())
-        if value is not None and value != ""
-    )
-    return hashlib.sha1(f"{encoded}{api_secret}".encode("utf-8")).hexdigest()
+def _configure_cloudinary_evidence():
+    cloud_name, api_key, api_secret = _cloudinary_evidence_config()
+    try:
+        cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret)
+    except Exception as exc:
+        current_app.logger.exception("Cloudinary evidence configuration failed")
+        raise CommunityStorageError("Cloudinary evidence storage is unavailable") from exc
+    return cloud_name
 
 
-def create_temporary_evidence_upload(user_id, tournament_id, payload):
-    """Issue a short-lived direct-upload signature; evidence bytes bypass Render."""
-    purpose = str(payload.get("purpose") or "").strip().lower()
+def _evidence_upload_access(user_id, tournament_id, purpose):
+    purpose = str(purpose or "").strip().lower()
     if purpose not in CLOUDINARY_EVIDENCE_PURPOSES:
         raise CommunityValidationError("purpose must be result_evidence or dispute_evidence")
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
@@ -340,6 +346,21 @@ def create_temporary_evidence_upload(user_id, tournament_id, payload):
         raise CommunityForbiddenError("only the host or confirmed participants can upload evidence")
     if tournament.status in TERMINAL_STATUSES:
         raise CommunityConflictError("evidence uploads are closed for completed or cancelled tournaments")
+    return tournament, purpose
+
+
+def _cloudinary_signature(params, api_secret):
+    encoded = "&".join(
+        f"{key}={value}"
+        for key, value in sorted(params.items())
+        if value is not None and value != ""
+    )
+    return hashlib.sha1(f"{encoded}{api_secret}".encode("utf-8")).hexdigest()
+
+
+def create_temporary_evidence_upload(user_id, tournament_id, payload):
+    """Issue a short-lived direct-upload signature; evidence bytes bypass Render."""
+    tournament, purpose = _evidence_upload_access(user_id, tournament_id, payload.get("purpose"))
 
     cloud_name, api_key, api_secret = _cloudinary_evidence_config()
     timestamp = int(time.time())
@@ -372,6 +393,94 @@ def create_temporary_evidence_upload(user_id, tournament_id, payload):
     }
 
 
+def upload_temporary_evidence(user_id, tournament_id, purpose, image_file):
+    """Upload a screenshot through Hash and register it as temporary evidence."""
+    tournament, purpose = _evidence_upload_access(user_id, tournament_id, purpose)
+    if not image_file or not str(getattr(image_file, "filename", "") or "").strip():
+        raise CommunityValidationError("file is required")
+
+    mime_type = str(getattr(image_file, "mimetype", "") or "").lower().strip()
+    filename = str(getattr(image_file, "filename", "") or "")
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if mime_type not in CLOUDINARY_EVIDENCE_MIME_TYPES or extension not in CLOUDINARY_EVIDENCE_FORMATS.split(","):
+        raise CommunityValidationError("file must be a jpg, jpeg, png, or webp image")
+
+    stream = getattr(image_file, "stream", image_file)
+    try:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(0)
+    except (AttributeError, OSError):
+        raise CommunityValidationError("file must be a seekable upload")
+    max_bytes = min(max(int(current_app.config.get("COMMUNITY_EVIDENCE_MAX_BYTES", 10 * 1024 * 1024) or 0), 1), 100 * 1024 * 1024)
+    if size <= 0 or size > max_bytes:
+        raise CommunityValidationError(f"file must be between 1 byte and {max_bytes} bytes")
+
+    _configure_cloudinary_evidence()
+    folder = f"hfg/community/{tournament.id}/evidence"
+    public_id = f"{purpose}-{uuid.uuid4().hex}"
+    try:
+        result = cloudinary.uploader.upload(
+            stream,
+            folder=folder,
+            public_id=public_id,
+            resource_type="image",
+            overwrite=False,
+            allowed_formats=CLOUDINARY_EVIDENCE_FORMATS,
+        )
+        secure_url = str(result.get("secure_url") or "").strip()
+        storage_key = str(result.get("public_id") or "").strip()
+        if not secure_url or not storage_key:
+            raise RuntimeError("Cloudinary returned no secure_url or public_id")
+    except CommunityStorageError:
+        raise
+    except Exception as exc:
+        current_app.logger.exception("Community evidence upload failed", extra={"tournament_id": str(tournament.id)})
+        raise CommunityStorageError("evidence upload failed; please retry") from exc
+
+    asset = CommunityFileAsset(
+        owner_user_id=int(user_id),
+        tournament_id=tournament.id,
+        purpose=purpose,
+        file_url=secure_url,
+        storage_key=storage_key,
+        mime_type=mime_type,
+        file_size_bytes=int(result.get("bytes") or size),
+        checksum=str(result.get("etag") or "").strip() or None,
+        meta={
+            "storage_provider": "cloudinary",
+            "temporary": True,
+            "cleanup_status": "pending",
+            "cloudinary_resource_type": "image",
+            "width": result.get("width"),
+            "height": result.get("height"),
+            "format": result.get("format"),
+        },
+    )
+    db.session.add(asset)
+    try:
+        db.session.flush()
+        _audit(
+            "community_evidence_uploaded",
+            "community_file_asset",
+            asset.id,
+            user_id,
+            metadata={"purpose": purpose, "storage_key": storage_key},
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        try:
+            cloudinary.uploader.destroy(storage_key, resource_type="image", invalidate=True)
+        except Exception:
+            current_app.logger.exception(
+                "Could not remove unregistered Cloudinary evidence",
+                extra={"tournament_id": str(tournament.id), "storage_key": storage_key},
+            )
+        raise
+    return asset
+
+
 def _is_cloudinary_evidence_asset(asset, cloud_name):
     metadata = asset.meta or {}
     expected_prefix = f"hfg/community/{asset.tournament_id}/evidence/"
@@ -387,7 +496,7 @@ def _is_cloudinary_evidence_asset(asset, cloud_name):
 def purge_expired_community_evidence(limit=50):
     """Delete retained Cloudinary evidence while keeping an audit tombstone."""
     limit = min(max(int(limit or 50), 1), 100)
-    cloud_name, api_key, api_secret = _cloudinary_evidence_config()
+    cloud_name = _configure_cloudinary_evidence()
     retention_days = min(max(int(current_app.config.get("COMMUNITY_EVIDENCE_RETENTION_DAYS", 7) or 7), 1), 365)
     cutoff = _now() - timedelta(days=retention_days)
     assets = CommunityFileAsset.query.join(
@@ -405,22 +514,9 @@ def purge_expired_community_evidence(limit=50):
         if metadata.get("cleanup_status") == "deleted" or not _is_cloudinary_evidence_asset(asset, cloud_name):
             summary["skipped"] += 1
             continue
-        timestamp = int(time.time())
-        params = {"invalidate": "true", "public_id": asset.storage_key, "timestamp": timestamp}
         try:
-            response = requests.post(
-                f"https://api.cloudinary.com/v1_1/{cloud_name}/image/destroy",
-                data={
-                    "api_key": api_key,
-                    "timestamp": timestamp,
-                    "public_id": asset.storage_key,
-                    "signature": _cloudinary_signature(params, api_secret),
-                    "invalidate": "true",
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-            result = str((response.json() or {}).get("result") or "").lower()
+            response = cloudinary.uploader.destroy(asset.storage_key, resource_type="image", invalidate=True)
+            result = str((response or {}).get("result") or "").lower()
             if result not in {"ok", "not found"}:
                 raise RuntimeError(f"Cloudinary destroy returned {result or 'an empty result'}")
             metadata.update({
