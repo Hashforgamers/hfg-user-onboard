@@ -9,6 +9,7 @@ from sqlalchemy import func, or_
 
 from db.extensions import db
 from models.communityTournament import (
+    CommunityFileAsset,
     CommunityHostStatus,
     CommunityHostVerification,
     CommunityTournament,
@@ -1054,6 +1055,139 @@ def match_result_state(user_id, tournament_id, match_id):
             ),
         },
         "server_time": now.isoformat(),
+    }
+
+
+def host_results_overview(host_user_id, tournament_id, filters):
+    """Operational result-tab payload for the tournament manager."""
+    tournament = _owned_tournament(host_user_id, tournament_id)
+    page, per_page = _pagination(filters)
+    query = CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id)
+    status = str(filters.get("status") or "").strip().lower()
+    valid_statuses = {
+        CommunityMatchStatus.SCHEDULED,
+        CommunityMatchStatus.READY,
+        CommunityMatchStatus.IN_PROGRESS,
+        CommunityMatchStatus.AWAITING_RESULTS,
+        CommunityMatchStatus.RESULT_PENDING,
+        CommunityMatchStatus.DISPUTED,
+        CommunityMatchStatus.COMPLETED,
+        CommunityMatchStatus.CANCELLED,
+    }
+    if status:
+        if status not in valid_statuses:
+            raise CommunityValidationError("invalid match result status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    matches = query.order_by(
+        CommunityTournamentMatch.round_number.asc(),
+        CommunityTournamentMatch.match_number.asc(),
+    ).offset((page - 1) * per_page).limit(per_page).all()
+    match_ids = [match.id for match in matches]
+    team_ids = {
+        team_id
+        for match in matches
+        for team_id in (match.team_a_id, match.team_b_id, match.winner_team_id)
+        if team_id
+    }
+    team_names = {
+        str(team.id): team.name
+        for team in CommunityTournamentTeam.query.filter(CommunityTournamentTeam.id.in_(team_ids)).all()
+    } if team_ids else {}
+    proposals = CommunityMatchResultProposal.query.filter(
+        CommunityMatchResultProposal.match_id.in_(match_ids or [uuid.uuid4()])
+    ).order_by(CommunityMatchResultProposal.created_at.desc()).all()
+    submissions = CommunityMatchResultSubmission.query.filter(
+        CommunityMatchResultSubmission.match_id.in_(match_ids or [uuid.uuid4()])
+    ).order_by(CommunityMatchResultSubmission.created_at.asc()).all()
+    disputes = CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.match_id.in_(match_ids or [uuid.uuid4()])
+    ).order_by(CommunityTournamentDispute.created_at.desc()).all()
+    proposal_by_match = {}
+    for proposal in proposals:
+        proposal_by_match.setdefault(proposal.match_id, []).append(proposal)
+    submissions_by_match = {}
+    for submission in submissions:
+        submissions_by_match.setdefault(submission.match_id, []).append(submission)
+    disputes_by_match = {}
+    for dispute in disputes:
+        disputes_by_match.setdefault(dispute.match_id, []).append(dispute)
+    evidence_ids = set()
+    for row in [*proposals, *submissions, *disputes]:
+        for asset_id in row.evidence_asset_ids or []:
+            try:
+                evidence_ids.add(uuid.UUID(str(asset_id)))
+            except (TypeError, ValueError):
+                continue
+    assets = CommunityFileAsset.query.filter(CommunityFileAsset.id.in_(evidence_ids)).all() if evidence_ids else []
+    assets_by_id = {str(asset.id): asset.to_dict() for asset in assets}
+
+    def serialize_evidence(asset_ids):
+        return [assets_by_id[str(asset_id)] for asset_id in (asset_ids or []) if str(asset_id) in assets_by_id]
+
+    now = _now()
+    rows = []
+    for match in matches:
+        match_proposals = proposal_by_match.get(match.id, [])
+        match_submissions = submissions_by_match.get(match.id, [])
+        match_disputes = disputes_by_match.get(match.id, [])
+        pending = next((proposal for proposal in match_proposals if proposal.status == "pending"), None)
+        rows.append({
+            "match": _match_payload(match, include_lobby=True, team_names=team_names),
+            "pending_proposal": pending.to_dict() if pending else None,
+            "proposals": [
+                {**proposal.to_dict(), "evidence": serialize_evidence(proposal.evidence_asset_ids)}
+                for proposal in match_proposals
+            ],
+            "captain_submissions": [
+                {**submission.to_dict(), "evidence": serialize_evidence(submission.evidence_asset_ids)}
+                for submission in match_submissions
+            ],
+            "disputes": [
+                {**dispute.to_dict(), "evidence": serialize_evidence(dispute.evidence_asset_ids)}
+                for dispute in match_disputes
+            ],
+            "actions": {
+                "can_create_proposal": match.status in {
+                    CommunityMatchStatus.IN_PROGRESS,
+                    CommunityMatchStatus.AWAITING_RESULTS,
+                },
+                "requires_referee": match.status == CommunityMatchStatus.DISPUTED,
+                "proposal_expires_at": pending.expires_at.isoformat() if pending else None,
+                "proposal_is_expired": bool(pending and pending.expires_at <= now),
+            },
+        })
+    all_matches = CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).all()
+    all_match_ids = [match.id for match in all_matches]
+    return {
+        "tournament_id": str(tournament.id),
+        "server_time": now.isoformat(),
+        "summary": {
+            "total_matches": len(all_matches),
+            "completed_matches": sum(match.status == CommunityMatchStatus.COMPLETED for match in all_matches),
+            "awaiting_results": sum(match.status == CommunityMatchStatus.AWAITING_RESULTS for match in all_matches),
+            "pending_proposals": CommunityMatchResultProposal.query.filter(
+                CommunityMatchResultProposal.match_id.in_(all_match_ids or [uuid.uuid4()]),
+                CommunityMatchResultProposal.status == "pending",
+            ).count(),
+            "captain_submissions": CommunityMatchResultSubmission.query.filter(
+                CommunityMatchResultSubmission.match_id.in_(all_match_ids or [uuid.uuid4()]),
+            ).count(),
+            "open_disputes": CommunityTournamentDispute.query.filter(
+                CommunityTournamentDispute.match_id.in_(all_match_ids or [uuid.uuid4()]),
+                CommunityTournamentDispute.status.in_({
+                    CommunityDisputeStatus.OPEN,
+                    CommunityDisputeStatus.UNDER_REVIEW,
+                }),
+            ).count(),
+        },
+        "items": rows,
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page,
+        },
     }
 
 

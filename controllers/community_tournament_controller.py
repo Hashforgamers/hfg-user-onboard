@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from services.community_tournament_service import (
     CommunityConflictError,
     CommunityForbiddenError,
+    CommunityStorageError,
     CommunityValidationError,
     cancel_registration,
     cancel_tournament,
@@ -39,6 +40,7 @@ from services.community_tournament_service import (
     submit_host_verification,
     submit_match_result,
     submit_winners,
+    upload_temporary_evidence,
     update_tournament,
     verify_match_result,
 )
@@ -52,6 +54,7 @@ from services.community_tournament_control_service import (
     create_tournament_review,
     generate_matches,
     host_dashboard,
+    host_results_overview,
     invite_team_member,
     list_announcements,
     list_audit_log,
@@ -160,6 +163,8 @@ def _payment_cron_required(fn):
 def _handle_service_error(exc):
     if isinstance(exc, CommunityDisputeChatError):
         return _error(str(exc), 503, "dispute_chat_unavailable")
+    if isinstance(exc, CommunityStorageError):
+        return _error(str(exc), 503, "storage_unavailable")
     if isinstance(exc, CommunityForbiddenError):
         return _error(str(exc), 403, "forbidden")
     if isinstance(exc, CommunityConflictError):
@@ -435,6 +440,15 @@ def list_managed_community_results(tournament_id):
         return _handle_service_error(exc)
 
 
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/results/overview")
+@auth_required_self(decrypt_user=True)
+def get_community_results_overview(tournament_id):
+    try:
+        return jsonify(host_results_overview(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/winners")
 @auth_required_self(decrypt_user=True)
 def submit_community_winners(tournament_id):
@@ -546,6 +560,21 @@ def create_community_file_asset():
 def create_community_evidence_upload_signature(tournament_id):
     try:
         return jsonify(create_temporary_evidence_upload(g.auth_user_id, tournament_id, _body())), 201
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/evidence/upload")
+@auth_required_self(decrypt_user=True)
+def upload_community_evidence(tournament_id):
+    try:
+        asset = upload_temporary_evidence(
+            g.auth_user_id,
+            tournament_id,
+            request.form.get("purpose"),
+            request.files.get("file"),
+        )
+        return jsonify(asset.to_dict()), 201
     except Exception as exc:
         return _handle_service_error(exc)
 

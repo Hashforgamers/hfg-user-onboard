@@ -10,3 +10,4 @@ pyjwt
 cryptography
 google-genai
 requests
+cloudinary==1.36.0

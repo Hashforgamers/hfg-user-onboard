@@ -1,8 +1,9 @@
 # Cloudinary Community Evidence Setup
 
 This guide configures temporary result and dispute screenshots for community
-tournaments. Evidence uploads go directly from the app to Cloudinary; the Hash
-backend only issues a signed upload request and stores evidence metadata.
+tournaments. The app uploads the screenshot to Hash; Hash uploads it to
+Cloudinary using the same Python SDK configuration as `hfg-dashboard-service`
+and registers the evidence asset automatically.
 
 ## 1. Cloudinary Configuration
 
@@ -19,6 +20,7 @@ CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
 COMMUNITY_EVIDENCE_RETENTION_DAYS=7
+COMMUNITY_EVIDENCE_MAX_BYTES=10485760
 ```
 
 `CLOUDINARY_API_SECRET` is backend-only. Never place it in the mobile app or
@@ -40,16 +42,20 @@ timestamp, rather than from the evidence upload date.
 
 ## 3. App Upload Flow
 
-### Step A: Request a signed upload
+Submit the selected image as multipart form data. The app does not call
+Cloudinary, does not need a signed URL, and does not call `/files` afterward.
 
 ```http
-POST /api/v1/community/tournaments/{tournament_id}/evidence/upload-signature
+POST /api/v1/community/tournaments/{tournament_id}/evidence/upload
 Authorization: Bearer <user-token>
-Content-Type: application/json
+Content-Type: multipart/form-data
+```
 
-{
-  "purpose": "result_evidence"
-}
+Form fields:
+
+```text
+file=<image binary>
+purpose=result_evidence
 ```
 
 Allowed values for `purpose`:
@@ -57,59 +63,25 @@ Allowed values for `purpose`:
 - `result_evidence`
 - `dispute_evidence`
 
-Only the tournament host or a confirmed participant can request a signature.
+Only the tournament host or a confirmed participant can upload evidence. The
+image must be JPG, JPEG, PNG, or WebP and may not exceed
+`COMMUNITY_EVIDENCE_MAX_BYTES` (10 MB by default).
 
 Example response:
 
 ```json
 {
-  "upload_url": "https://api.cloudinary.com/v1_1/your-cloud/image/upload",
-  "api_key": "123456789",
-  "timestamp": 1780000000,
-  "signature": "server-generated-signature",
-  "folder": "hfg/community/{tournament_id}/evidence",
-  "public_id": "result_evidence-unique-id",
-  "allowed_formats": "jpg,jpeg,png,webp",
-  "storage_key": "hfg/community/{tournament_id}/evidence/result_evidence-unique-id",
-  "purpose": "result_evidence"
-}
-```
-
-### Step B: Upload directly to Cloudinary
-
-Use multipart form data to call `upload_url`. Send every returned signing field
-unchanged:
-
-```text
-file=<screenshot>
-api_key=<api_key>
-timestamp=<timestamp>
-signature=<signature>
-folder=<folder>
-public_id=<public_id>
-allowed_formats=<allowed_formats>
-```
-
-Use Cloudinary's returned `secure_url`, `bytes`, `public_id`, and `format`.
-The returned `public_id` should equal the supplied `storage_key`.
-
-### Step C: Register the asset with Hash
-
-```http
-POST /api/v1/community/files
-Authorization: Bearer <user-token>
-Content-Type: application/json
-
-{
-  "purpose": "result_evidence",
+  "id": "evidence-asset-uuid",
   "tournament_id": "{tournament_id}",
+  "purpose": "result_evidence",
   "file_url": "https://res.cloudinary.com/your-cloud/image/upload/...",
   "storage_key": "hfg/community/{tournament_id}/evidence/result_evidence-unique-id",
   "mime_type": "image/png",
   "file_size_bytes": 204800,
   "metadata": {
-    "width": 1080,
-    "height": 1920
+    "storage_provider": "cloudinary",
+    "temporary": true,
+    "cleanup_status": "pending"
   }
 }
 ```
@@ -190,8 +162,8 @@ are retried by the next cron run.
 ## 6. Security Rules
 
 - Never expose `CLOUDINARY_API_SECRET` to the app.
-- Do not upload through Render; use only the signed direct Cloudinary upload.
-- Use only the supplied folder and `storage_key`.
+- The app sends the original image only to the authenticated Hash endpoint.
+- Hash owns the Cloudinary folder and `storage_key`.
 - Accept only screenshots: `jpg`, `jpeg`, `png`, and `webp`.
 - Always register `secure_url`, never a client-created arbitrary URL.
 - Do not delete evidence rows from PostgreSQL; the Cloudinary object is deleted,
@@ -202,7 +174,7 @@ are retried by the next cron run.
 | Problem | Likely Cause | Resolution |
 | --- | --- | --- |
 | `Cloudinary evidence storage is not configured` | Missing Cloudinary environment variable | Set all three Cloudinary variables and redeploy. |
-| Cloudinary upload returns invalid signature | A signed field changed in the app | Send `timestamp`, `folder`, `public_id`, and `allowed_formats` exactly as returned. |
-| `/files` rejects the URL | URL or storage key does not match the configured Cloudinary account/folder | Use `secure_url` and the exact `storage_key` returned by the signature endpoint. |
+| `storage_unavailable` | Cloudinary credentials are absent or Cloudinary is temporarily unavailable | Set all three Cloudinary variables, redeploy, then retry the multipart upload. |
+| `file must be a jpg, jpeg, png, or webp image` | The app sent an unsupported MIME type or filename | Use an image file and retain its original extension. |
 | Evidence is not deleted | Tournament has no `completed_at`, retention has not elapsed, or job has not run | Run the SQL migration, complete the tournament, then run the daily cleanup cron. |
 | Cleanup retries | Cloudinary outage or temporary API error | Leave the asset record unchanged; the next cron invocation retries it. |
