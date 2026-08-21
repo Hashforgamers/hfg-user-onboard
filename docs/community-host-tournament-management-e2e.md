@@ -371,6 +371,18 @@ legacy `override_result` action is rejected to prevent bypassing captain review.
 
 ### Host Result Proposal and 15-Minute Review
 
+### Results Tab Overview
+
+Use this host-only endpoint to populate the tournament-management Results tab:
+
+`GET /tournaments/<tournament_id>/results/overview?page=1&per_page=25`
+
+It returns summary counters, every requested match's final scores, host proposals,
+captain submissions, open disputes, Cloudinary evidence metadata/URLs, and action
+flags. This is the operational endpoint for the Results tab; the older
+`GET /tournaments/<tournament_id>/results` endpoint remains available for legacy
+tournament-level winner submissions.
+
 `POST /tournaments/<tournament_id>/matches/<match_id>/result-proposals`
 
 ```json

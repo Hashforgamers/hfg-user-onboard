@@ -52,6 +52,7 @@ from services.community_tournament_control_service import (
     create_tournament_review,
     generate_matches,
     host_dashboard,
+    host_results_overview,
     invite_team_member,
     list_announcements,
     list_audit_log,
@@ -431,6 +432,15 @@ def verify_community_result(tournament_id, result_id):
 def list_managed_community_results(tournament_id):
     try:
         return jsonify(list_host_results(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/results/overview")
+@auth_required_self(decrypt_user=True)
+def get_community_results_overview(tournament_id):
+    try:
+        return jsonify(host_results_overview(g.auth_user_id, tournament_id, request.args)), 200
     except Exception as exc:
         return _handle_service_error(exc)
 
