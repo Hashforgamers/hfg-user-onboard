@@ -80,9 +80,13 @@ def _team_payload(team, include_members=True):
             CommunityTournamentTeamMember.role.asc(),
             CommunityTournamentTeamMember.joined_at.asc(),
         ).all()
-        gamers = _gamer_summaries(member.user_id for member in members)
+        gamers = _gamer_summaries((member.user_id for member in members), include_fid=True)
         payload["members"] = [
-            {**member.to_dict(), "gamer": gamers.get(int(member.user_id))}
+            {
+                **member.to_dict(),
+                "fid": (gamers.get(int(member.user_id)) or {}).get("fid"),
+                "gamer": gamers.get(int(member.user_id)),
+            }
             for member in members
         ]
     return payload
