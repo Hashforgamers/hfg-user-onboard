@@ -1940,17 +1940,21 @@ def _pagination(filters):
     return page, per_page
 
 
-def _gamer_summaries(user_ids):
+def _gamer_summaries(user_ids, include_fid=False):
     ids = {int(user_id) for user_id in user_ids if user_id is not None}
     if not ids:
         return {}
-    rows = User.query.with_entities(User.id, User.name, User.game_username, User.avatar_path).filter(User.id.in_(ids)).all()
+    columns = [User.id, User.name, User.game_username, User.avatar_path]
+    if include_fid:
+        columns.append(User.fid)
+    rows = User.query.with_entities(*columns).filter(User.id.in_(ids)).all()
     return {
         int(row.id): {
             "id": int(row.id),
             "display_name": row.name or "",
             "game_username": row.game_username or "",
             "avatar_url": row.avatar_path or None,
+            **({"fid": row.fid} if include_fid else {}),
         }
         for row in rows
     }
