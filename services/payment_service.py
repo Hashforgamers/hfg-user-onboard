@@ -140,6 +140,7 @@ def fetch_tournament_payment(
     expected_currency: str,
     order_id: str = None,
     expected_registration_id: str = None,
+    expected_user_id: str = None,
 ) -> Dict[str, Any]:
     """Fetch an already-created provider payment for cron/webhook settlement."""
     if PROVIDER != "razorpay":
@@ -150,6 +151,26 @@ def fetch_tournament_payment(
         expected_currency,
         order_id,
         expected_registration_id=expected_registration_id,
+        expected_user_id=expected_user_id,
+    )
+
+
+def fetch_tournament_payment_for_order(
+    order_id: str,
+    expected_amount,
+    expected_currency: str,
+    expected_registration_id: str = None,
+    expected_user_id: str = None,
+) -> Dict[str, Any]:
+    """Find and validate a captured/authorized Razorpay payment for an order."""
+    if PROVIDER != "razorpay":
+        raise ValueError("payment queue requires PAYMENT_PROVIDER=razorpay")
+    return _rzp_fetch_tournament_payment_for_order(
+        order_id,
+        expected_amount,
+        expected_currency,
+        expected_registration_id=expected_registration_id,
+        expected_user_id=expected_user_id,
     )
 
 
@@ -408,6 +429,7 @@ def _rzp_fetch_tournament_payment(
     expected_currency: str,
     order_id: str = None,
     expected_registration_id: str = None,
+    expected_user_id: str = None,
 ) -> Dict[str, Any]:
     import requests
 
@@ -436,7 +458,14 @@ def _rzp_fetch_tournament_payment(
         expected_registration_id = str(expected_registration_id)
         notes = _razorpay_notes(order)
         receipt = str(order.get("receipt") or "")
-        if str(notes.get("registration_id") or "") != expected_registration_id and receipt != expected_registration_id and receipt != f"ctr_{expected_registration_id.replace('-', '')}":
+        order_user_id = str(notes.get("user_id") or _razorpay_notes(payment).get("user_id") or "")
+        bound_to_registration = (
+            str(notes.get("registration_id") or "") == expected_registration_id
+            or receipt == expected_registration_id
+            or receipt == f"ctr_{expected_registration_id.replace('-', '')}"
+        )
+        bound_to_user = expected_user_id and order_user_id == str(expected_user_id)
+        if not bound_to_registration and not bound_to_user:
             raise ValueError("Razorpay order is not bound to this registration")
     expected_paise = _amount_in_paise(expected_amount)
     expected_currency = str(expected_currency or "INR").upper()
@@ -465,6 +494,48 @@ def _rzp_fetch_tournament_payment(
         "receipt": str(order.get("receipt") or "") or None,
         "notes": order.get("notes") or {},
     }
+
+
+def _rzp_fetch_tournament_payment_for_order(
+    order_id: str,
+    expected_amount,
+    expected_currency: str,
+    expected_registration_id: str = None,
+    expected_user_id: str = None,
+) -> Dict[str, Any]:
+    import requests
+
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        raise ValueError("Razorpay order ID is required")
+
+    key_id, key_secret = _razorpay_credentials()
+    response = requests.get(
+        f"https://api.razorpay.com/v1/orders/{order_id}/payments",
+        auth=(key_id, key_secret),
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    payments = payload.get("items") or []
+    preferred_statuses = {"captured": 0, "authorized": 1}
+    candidates = sorted(
+        (
+            payment for payment in payments
+            if str(payment.get("status") or "").lower() in preferred_statuses
+        ),
+        key=lambda payment: preferred_statuses[str(payment.get("status") or "").lower()],
+    )
+    if not candidates:
+        raise ValueError("Razorpay order has no captured payment yet")
+    return _rzp_fetch_tournament_payment(
+        str(candidates[0].get("id") or ""),
+        expected_amount,
+        expected_currency,
+        order_id,
+        expected_registration_id=expected_registration_id,
+        expected_user_id=expected_user_id,
+    )
 
 
 def _validated_refund(refund, payment_id: str, expected_amount, expected_currency: str) -> Dict[str, Any]:

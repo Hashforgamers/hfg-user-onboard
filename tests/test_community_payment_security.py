@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from services.payment_service import (
     _rzp_create_order,
     _rzp_fetch_tournament_payment,
+    fetch_tournament_payment_for_order,
     verify_tournament_payment,
 )
 
@@ -119,3 +120,45 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
             json={"amount": 10000, "currency": "INR"},
             timeout=10,
         )
+
+    @patch("services.payment_service.PROVIDER", "razorpay")
+    @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
+    def test_order_reconciliation_finds_captured_payment(self, _credentials):
+        get = unittest.mock.Mock(side_effect=[
+            _Response({
+                "items": [{
+                    "id": "pay_123",
+                    "order_id": "order_123",
+                    "status": "captured",
+                    "amount": 100,
+                    "currency": "INR",
+                }],
+            }),
+            _Response({
+                "id": "pay_123",
+                "order_id": "order_123",
+                "status": "captured",
+                "amount": 100,
+                "currency": "INR",
+            }),
+            _Response({
+                "id": "order_123",
+                "receipt": "bk_638_abc",
+                "notes": {"source": "hfg_booking", "user_id": "638"},
+                "amount": 100,
+                "currency": "INR",
+            }),
+        ])
+
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}):
+            result = fetch_tournament_payment_for_order(
+                "order_123",
+                1,
+                "INR",
+                expected_registration_id="registration-1",
+                expected_user_id=638,
+            )
+
+        self.assertEqual(result["payment_id"], "pay_123")
+        self.assertEqual(result["status"], "captured")
+        self.assertEqual(get.call_args_list[0].args[0], "https://api.razorpay.com/v1/orders/order_123/payments")
