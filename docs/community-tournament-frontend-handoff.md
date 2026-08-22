@@ -638,6 +638,94 @@ Then call Firebase `signInWithCustomToken` and open
 `communityDisputeRooms/<chat_room_id>`. The backend issues deterministic Firebase
 UIDs in the form `hfg-user-<Hash user ID>` with a `hash_user_id` custom claim.
 
+### Open a Dispute Chat from a Result Proposal
+
+Use the dispute action on the currently pending host proposal. This is the
+preferred match-result dispute API and creates the room before returning.
+
+```http
+POST /api/v1/community/tournaments/{tournament_id}/matches/{match_id}/result-proposals/{proposal_id}/dispute
+Authorization: Bearer <user-token>
+Content-Type: application/json
+
+{
+  "description": "The scoreboard shows a different final score.",
+  "evidence_asset_ids": ["optional-dispute-evidence-asset-uuid"]
+}
+```
+
+The response is the dispute object. Open chat only when
+`chat_room_status` is `ready`:
+
+```json
+{
+  "id": "dispute-uuid",
+  "match_id": "match-uuid",
+  "chat_room_id": "community-dispute-dispute-uuid",
+  "chat_room_status": "ready",
+  "status": "open"
+}
+```
+
+Then obtain the Firebase token:
+
+```http
+POST /api/v1/community/chat/firebase-token
+Authorization: Bearer <user-token>
+```
+
+After Firebase `signInWithCustomToken`, open:
+
+```text
+communityDisputeRooms/{chat_room_id}
+```
+
+The backend creates `messages/system-opened`. Do not create or overwrite this
+document in the app. It is an immutable system record and contains the dispute
+initiator, source result, matchup, status, raised time, and image preview:
+
+```json
+{
+  "message_type": "system",
+  "immutable": true,
+  "text": "Dispute opened by: Player A\nResult submitted by: host\nSubmitted Result: Team B • 2-1\nTournament: Community Cup\nMatch: Round 2 • Match #14\nDispute status: Open",
+  "tournament_name": "Community Cup",
+  "dispute_initiator": {
+    "user_id": 456,
+    "role": "team_representative",
+    "display_name": "Player A",
+    "team_name": "Team Alpha"
+  },
+  "dispute_status": "open",
+  "raised_at": "Firestore server timestamp",
+  "submitted_result_summary": "Team B • 2-1",
+  "preview_image_url": "https://res.cloudinary.com/...",
+  "match_details": {
+    "label": "Round 2 • Match #14",
+    "team_a": {"name": "Team Alpha"},
+    "team_b": {"name": "Team Bravo"}
+  },
+  "result_contexts": [
+    {
+      "source_type": "host_result_proposal",
+      "submitter": {"user_id": 123, "role": "host", "display_name": "Host"},
+      "winner_team_id": "team-uuid",
+      "team_a_score": 2,
+      "team_b_score": 1,
+      "evidence": [{"asset_id": "asset-uuid", "file_url": "https://res.cloudinary.com/..."}]
+    }
+  ]
+}
+```
+
+Render the first image as the evidence preview. Open `file_url` or
+`preview_image_url` in a full-screen image viewer when tapped; do not mutate the
+message document to track that UI state.
+
+For conflicting captain submissions, `result_contexts` has one entry for each
+submission, with `submitter.role: "participant"`, so both screenshots can be
+shown in the same opening message.
+
 Firestore rules must restrict access using that claim. The room document should
 not be client-writable. A safe baseline is:
 
