@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from services.payment_service import _rzp_fetch_tournament_payment, verify_tournament_payment
+from services.payment_service import (
+    _rzp_create_order,
+    _rzp_fetch_tournament_payment,
+    verify_tournament_payment,
+)
 
 
 class _Response:
@@ -52,3 +56,66 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
                     "order_123",
                     expected_registration_id="target-registration",
                 )
+
+    @patch.dict(os.environ, {"RAZORPAY_KEY_ID": "key", "RAZORPAY_KEY_SECRET": "secret"})
+    def test_razorpay_order_requests_auto_capture(self):
+        post = unittest.mock.Mock(return_value=_Response({
+            "id": "order_123",
+            "amount": 10000,
+            "currency": "INR",
+        }))
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(post=post)}):
+            result = _rzp_create_order(
+                100,
+                "INR",
+                {"registration_id": "registration-1", "receipt": "ctr_registration"},
+            )
+
+        self.assertEqual(result["order_id"], "order_123")
+        post.assert_called_once()
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["payment_capture"], 1)
+        self.assertEqual(payload["notes"]["registration_id"], "registration-1")
+
+    @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
+    def test_authorized_payment_is_captured_before_settlement(self, _credentials):
+        get = unittest.mock.Mock(side_effect=[
+            _Response({
+                "id": "pay_123",
+                "order_id": "order_123",
+                "status": "authorized",
+                "amount": 10000,
+                "currency": "INR",
+            }),
+            _Response({
+                "id": "order_123",
+                "receipt": "ctr_registration",
+                "notes": {"registration_id": "registration-1"},
+                "amount": 10000,
+                "currency": "INR",
+            }),
+        ])
+        post = unittest.mock.Mock(return_value=_Response({
+            "id": "pay_123",
+            "order_id": "order_123",
+            "status": "captured",
+            "amount": 10000,
+            "currency": "INR",
+        }))
+
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get, post=post)}):
+            result = _rzp_fetch_tournament_payment(
+                "pay_123",
+                100,
+                "INR",
+                "order_123",
+                expected_registration_id="registration-1",
+            )
+
+        self.assertEqual(result["status"], "captured")
+        post.assert_called_once_with(
+            "https://api.razorpay.com/v1/payments/pay_123/capture",
+            auth=("key", "secret"),
+            json={"amount": 10000, "currency": "INR"},
+            timeout=10,
+        )
