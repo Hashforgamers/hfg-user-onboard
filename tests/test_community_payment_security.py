@@ -58,6 +58,37 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
                     expected_registration_id="target-registration",
                 )
 
+    @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
+    def test_booking_receipt_can_bind_legacy_order_to_registration_user(self, _credentials):
+        get = unittest.mock.Mock(side_effect=[
+            _Response({
+                "id": "pay_123",
+                "order_id": "order_123",
+                "status": "captured",
+                "amount": 100,
+                "currency": "INR",
+            }),
+            _Response({
+                "id": "order_123",
+                "receipt": "bk_638_abc",
+                "notes": {"source": "hfg_booking"},
+                "amount": 100,
+                "currency": "INR",
+            }),
+        ])
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}):
+            result = _rzp_fetch_tournament_payment(
+                "pay_123",
+                1,
+                "INR",
+                "order_123",
+                expected_registration_id="registration-1",
+                expected_user_id=638,
+            )
+
+        self.assertEqual(result["payment_id"], "pay_123")
+        self.assertEqual(result["status"], "captured")
+
     @patch.dict(os.environ, {"RAZORPAY_KEY_ID": "key", "RAZORPAY_KEY_SECRET": "secret"})
     def test_razorpay_order_requests_auto_capture(self):
         post = unittest.mock.Mock(return_value=_Response({
