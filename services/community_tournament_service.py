@@ -1321,14 +1321,28 @@ def enqueue_community_payment_webhook(event_id, event_type, payment_details, pay
     event_id = str(event_id or "").strip()
     if not event_id:
         raise CommunityValidationError("payment webhook event ID is required")
-    existing = CommunityPaymentWebhookEvent.query.filter_by(provider_event_id=event_id).first()
-    if existing:
-        return existing, False
     registration_id = payment_details.get("registration_id")
     try:
         registration_id = uuid.UUID(str(registration_id)) if registration_id else None
     except (TypeError, ValueError):
         registration_id = None
+    if not registration_id:
+        payment_id = str(payment_details.get("payment_id") or "").strip()
+        order_id = str(payment_details.get("order_id") or "").strip()
+        registration = CommunityTournamentRegistration.query.filter(
+            or_(
+                CommunityTournamentRegistration.razorpay_order_id == order_id,
+                CommunityTournamentRegistration.razorpay_payment_id == payment_id,
+                CommunityTournamentRegistration.payment_reference == payment_id,
+            )
+        ).first()
+        registration_id = registration.id if registration else None
+    existing = CommunityPaymentWebhookEvent.query.filter_by(provider_event_id=event_id).first()
+    if existing:
+        if not existing.registration_id and registration_id:
+            existing.registration_id = registration_id
+            db.session.commit()
+        return existing, False
     event = CommunityPaymentWebhookEvent(
         provider=str(payment_details.get("provider") or "razorpay"),
         provider_event_id=event_id,
