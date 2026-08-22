@@ -10,6 +10,19 @@ PROVIDER = os.getenv("PAYMENT_PROVIDER", "mock").lower()    # "mock" | "razorpay
 CURRENCY_DEFAULT = os.getenv("PAYMENT_CURRENCY", "INR")
 
 
+def _as_dict(value) -> Dict[str, Any]:
+    """Provider webhooks are untrusted JSON; only mappings support metadata lookup."""
+    return value if isinstance(value, dict) else {}
+
+
+def _razorpay_entity(payload_data, entity_name: str) -> Dict[str, Any]:
+    return _as_dict(_as_dict(_as_dict(payload_data).get(entity_name)).get("entity"))
+
+
+def _razorpay_notes(entity) -> Dict[str, Any]:
+    return _as_dict(_as_dict(entity).get("notes"))
+
+
 def _mock_payments_allowed() -> bool:
     """Mock settlement is opt-in so an unset production provider cannot credit money."""
     return os.getenv("PAYMENT_ALLOW_MOCK", "false").lower() in {"1", "true", "yes"}
@@ -52,10 +65,12 @@ def verified_webhook_payment_details(payload: bytes, signature: str) -> Dict[str
         raise ValueError("invalid payment webhook signature")
     if PROVIDER != "razorpay":
         return {"registration_id": registration_id, "status": "captured" if status == "succeeded" else "failed"}
-    event = json.loads(payload.decode("utf-8"))
-    payload_data = event.get("payload", {})
-    payment = payload_data.get("payment", {}).get("entity", {}) or {}
-    order = payload_data.get("order", {}).get("entity", {}) or {}
+    event = _as_dict(json.loads(payload.decode("utf-8")))
+    if not event:
+        raise ValueError("invalid Razorpay webhook payload")
+    payload_data = _as_dict(event.get("payload"))
+    payment = _razorpay_entity(payload_data, "payment")
+    order = _razorpay_entity(payload_data, "order")
     return {
         "registration_id": registration_id,
         "provider": "razorpay",
@@ -269,20 +284,22 @@ def _rzp_verify_webhook(payload: bytes, signature: str) -> Tuple[bool, str, str]
         return False, None, "failed"
 
     try:
-        event = json.loads(payload.decode("utf-8"))
+        event = _as_dict(json.loads(payload.decode("utf-8")))
     except Exception:
+        return False, None, "failed"
+    if not event:
         return False, None, "failed"
 
     # Map event types -> registration_id, status
     # Expect registration_id in notes/metadata
-    payload_data = event.get("payload", {})
-    payment_entity = payload_data.get("payment", {}).get("entity", {}) or {}
-    order_entity = payload_data.get("order", {}).get("entity", {}) or {}
+    payload_data = _as_dict(event.get("payload"))
+    payment_entity = _razorpay_entity(payload_data, "payment")
+    order_entity = _razorpay_entity(payload_data, "order")
     entity = payment_entity or order_entity
-    notes = entity.get("notes", {}) if isinstance(entity, dict) else {}
+    notes = _razorpay_notes(entity)
     reg_id = (
         notes.get("registration_id")
-        or order_entity.get("notes", {}).get("registration_id")
+        or _razorpay_notes(order_entity).get("registration_id")
         or order_entity.get("receipt")
         or entity.get("receipt")
     )
@@ -331,7 +348,7 @@ def _rzp_verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
             )
             resp.raise_for_status()
             order = resp.json()
-            notes = order.get("notes") or {}
+            notes = _razorpay_notes(order)
             if str(order.get("receipt") or notes.get("registration_id") or "") != registration_id:
                 return False, None, "failed"
     except Exception:
@@ -416,7 +433,7 @@ def _rzp_fetch_tournament_payment(
     order = order_response.json()
     if expected_registration_id:
         expected_registration_id = str(expected_registration_id)
-        notes = order.get("notes") or {}
+        notes = _razorpay_notes(order)
         receipt = str(order.get("receipt") or "")
         if str(notes.get("registration_id") or "") != expected_registration_id and receipt != expected_registration_id and receipt != f"ctr_{expected_registration_id.replace('-', '')}":
             raise ValueError("Razorpay order is not bound to this registration")
