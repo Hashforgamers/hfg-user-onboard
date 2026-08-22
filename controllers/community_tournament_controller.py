@@ -16,6 +16,7 @@ from services.community_tournament_service import (
     close_registration,
     create_dispute,
     create_file_asset,
+    create_community_payment_attempt,
     create_temporary_evidence_upload,
     create_tournament,
     get_tournament,
