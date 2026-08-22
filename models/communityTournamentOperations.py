@@ -53,6 +53,14 @@ class CommunityPaymentWebhookStatus:
     FAILED = "failed"
 
 
+class CommunityDuplicatePaymentRecoveryStatus:
+    PENDING_REFUND = "pending_refund"
+    PROCESSING = "processing"
+    REFUND_PENDING = "refund_pending"
+    REFUNDED = "refunded"
+    FAILED = "failed"
+
+
 class CommunityTeamStatus:
     PENDING = "pending"
     APPROVED = "approved"
@@ -595,3 +603,64 @@ class CommunityPaymentWebhookEvent(db.Model):
     __table_args__ = (
         Index("ix_community_payment_webhook_ready", "status", "next_attempt_at"),
     )
+
+
+class CommunityDuplicatePaymentRecovery(db.Model):
+    """A captured extra payment that must be refunded without changing entry state."""
+
+    __tablename__ = "community_duplicate_payment_recoveries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    registration_id = Column(UUID(as_uuid=True), ForeignKey("community_tournament_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tournament_id = Column(UUID(as_uuid=True), ForeignKey("community_tournaments.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    provider = Column(String(32), nullable=False, default="razorpay", index=True)
+    payment_id = Column(String(120), nullable=False, unique=True, index=True)
+    order_id = Column(String(120), nullable=True, index=True)
+    amount = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(8), nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String(32), nullable=False, default=CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND, index=True)
+    refund_id = Column(String(120), nullable=True, unique=True, index=True)
+    refund_status = Column(String(32), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_error = Column(Text, nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_community_duplicate_payment_recovery_ready", "status", "next_attempt_at"),
+    )
+
+    def to_dict(self):
+        state_text = {
+            CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND: "Duplicate captured payment detected. Automatic refund is queued.",
+            CommunityDuplicatePaymentRecoveryStatus.PROCESSING: "Duplicate payment refund is being processed.",
+            CommunityDuplicatePaymentRecoveryStatus.REFUND_PENDING: "Refund was requested from Razorpay and is pending completion.",
+            CommunityDuplicatePaymentRecoveryStatus.REFUNDED: "Duplicate payment was refunded to the player.",
+            CommunityDuplicatePaymentRecoveryStatus.FAILED: "Automatic refund needs super-admin review.",
+        }.get(self.status, "Duplicate payment recovery is being reviewed.")
+        return {
+            "id": str(self.id),
+            "registration_id": str(self.registration_id),
+            "tournament_id": str(self.tournament_id),
+            "user_id": int(self.user_id),
+            "provider": self.provider,
+            "payment_id": self.payment_id,
+            "order_id": self.order_id,
+            "amount": float(self.amount),
+            "currency": self.currency,
+            "reason": self.reason,
+            "status": self.status,
+            "refund_id": self.refund_id,
+            "refund_status": self.refund_status,
+            "admin_summary": state_text,
+            "attempts": int(self.attempts or 0),
+            "next_attempt_at": self.next_attempt_at.isoformat() if self.next_attempt_at else None,
+            "last_error": self.last_error,
+            "refunded_at": self.refunded_at.isoformat() if self.refunded_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

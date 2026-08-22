@@ -41,6 +41,8 @@ from models.communityTournamentOperations import (
     CommunityPaymentSettlementStatus,
     CommunityPaymentAttempt,
     CommunityPaymentAttemptStatus,
+    CommunityDuplicatePaymentRecovery,
+    CommunityDuplicatePaymentRecoveryStatus,
     CommunityPaymentWebhookEvent,
     CommunityPaymentWebhookStatus,
 )
@@ -1316,6 +1318,74 @@ def _queue_captured_payment_refund(registration, tournament, reason):
     return registration
 
 
+def _queue_duplicate_payment_refund(registration, tournament, payment_details):
+    """Record an extra verified charge without touching the paid registration."""
+    payment_id = str(payment_details.get("payment_id") or "").strip()
+    if not payment_id:
+        raise CommunityValidationError("duplicate payment is missing its provider payment ID")
+    recovery = CommunityDuplicatePaymentRecovery.query.filter_by(
+        payment_id=payment_id
+    ).with_for_update().first()
+    if recovery:
+        return recovery
+    recovery = CommunityDuplicatePaymentRecovery(
+        registration_id=registration.id,
+        tournament_id=tournament.id,
+        user_id=registration.user_id,
+        provider=str(payment_details.get("provider") or "razorpay").lower(),
+        payment_id=payment_id,
+        order_id=str(payment_details.get("order_id") or "").strip() or None,
+        amount=payment_details.get("amount") or tournament.entry_fee,
+        currency=str(payment_details.get("currency") or tournament.currency or "INR").upper(),
+        reason="A second captured payment was received after this tournament registration was already confirmed.",
+        status=CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND,
+        next_attempt_at=_now(),
+    )
+    db.session.add(recovery)
+    _audit(
+        "duplicate_payment_refund_queued",
+        "community_duplicate_payment_recovery",
+        recovery.id,
+        registration.user_id,
+        metadata={
+            "registration_id": str(registration.id),
+            "payment_id": payment_id,
+            "amount": float(recovery.amount),
+        },
+    )
+    _notify(
+        registration.user_id,
+        "community_duplicate_payment_detected",
+        "Duplicate tournament payment detected",
+        f"Your registration for {tournament.title} is already confirmed. The extra payment is queued for refund.",
+        tournament.id,
+    )
+    return recovery
+
+
+def _find_community_registration_for_provider_ids(payment_id=None, order_id=None):
+    payment_id = str(payment_id or "").strip()
+    order_id = str(order_id or "").strip()
+    registration = CommunityTournamentRegistration.query.filter(
+        or_(
+            CommunityTournamentRegistration.razorpay_order_id == order_id,
+            CommunityTournamentRegistration.razorpay_payment_id == payment_id,
+            CommunityTournamentRegistration.payment_reference == payment_id,
+        )
+    ).first()
+    if registration:
+        return registration
+    attempt = CommunityPaymentAttempt.query.filter(
+        or_(
+            CommunityPaymentAttempt.provider_order_id == order_id,
+            CommunityPaymentAttempt.provider_payment_id == payment_id,
+        )
+    ).first()
+    return CommunityTournamentRegistration.query.filter_by(
+        id=attempt.registration_id
+    ).first() if attempt else None
+
+
 def enqueue_community_payment_webhook(event_id, event_type, payment_details, payload):
     """Persist an already-authenticated provider event before acknowledging it."""
     event_id = str(event_id or "").strip()
@@ -1327,15 +1397,9 @@ def enqueue_community_payment_webhook(event_id, event_type, payment_details, pay
     except (TypeError, ValueError):
         registration_id = None
     if not registration_id:
-        payment_id = str(payment_details.get("payment_id") or "").strip()
-        order_id = str(payment_details.get("order_id") or "").strip()
-        registration = CommunityTournamentRegistration.query.filter(
-            or_(
-                CommunityTournamentRegistration.razorpay_order_id == order_id,
-                CommunityTournamentRegistration.razorpay_payment_id == payment_id,
-                CommunityTournamentRegistration.payment_reference == payment_id,
-            )
-        ).first()
+        registration = _find_community_registration_for_provider_ids(
+            payment_details.get("payment_id"), payment_details.get("order_id")
+        )
         registration_id = registration.id if registration else None
     existing = CommunityPaymentWebhookEvent.query.filter_by(provider_event_id=event_id).first()
     if existing:
@@ -1417,6 +1481,13 @@ def process_pending_community_payment_webhooks(limit=50):
         summary["processed"] += 1
         try:
             event = CommunityPaymentWebhookEvent.query.filter_by(id=event_id).first()
+            if event and not event.registration_id:
+                registration = _find_community_registration_for_provider_ids(
+                    event.payment_id, event.order_id
+                )
+                if registration:
+                    event.registration_id = registration.id
+                    db.session.commit()
             registration = (
                 CommunityTournamentRegistration.query.filter_by(id=event.registration_id).first()
                 if event and event.registration_id else None
@@ -1558,7 +1629,14 @@ def record_community_registration_payment(registration_id, status, payment_refer
         and registration.razorpay_payment_id
         and registration.razorpay_payment_id != payment_id
     ):
-        raise CommunityConflictError("registration is already settled with a different payment")
+        tournament = CommunityTournament.query.filter_by(
+            id=registration.tournament_id
+        ).with_for_update().first()
+        if not tournament:
+            raise CommunityValidationError("tournament not found")
+        _queue_duplicate_payment_refund(registration, tournament, payment_details)
+        db.session.commit()
+        return registration
     if payment_id:
         duplicate = CommunityTournamentRegistration.query.filter(
             or_(
@@ -1645,6 +1723,7 @@ def process_pending_community_payments(limit=50):
 
     limit = min(max(int(limit or 50), 1), 100)
     webhook_summary = process_pending_community_payment_webhooks(limit)
+    recovery_summary = process_pending_duplicate_payment_refunds(limit)
     now = _now()
     jobs = (
         CommunityPaymentSettlementJob.query
@@ -1671,7 +1750,15 @@ def process_pending_community_payments(limit=50):
         .limit(limit)
         .all()
     )
-    summary = {"processed": 0, "settled": 0, "retried": 0, "failed": 0, "items": [], "webhooks": webhook_summary}
+    summary = {
+        "processed": 0,
+        "settled": 0,
+        "retried": 0,
+        "failed": 0,
+        "items": [],
+        "webhooks": webhook_summary,
+        "duplicate_payment_refunds": recovery_summary,
+    }
     job_ids = []
     for job in jobs:
         job.status = CommunityPaymentSettlementStatus.PROCESSING
@@ -1861,6 +1948,127 @@ def process_pending_community_refunds(limit=50):
     return summary
 
 
+def process_pending_duplicate_payment_refunds(limit=50):
+    """Refund captured duplicate payments without altering tournament registration state."""
+    from services.payment_service import refund_tournament_payment
+
+    limit = min(max(int(limit or 50), 1), 100)
+    now = _now()
+    recoveries = (
+        CommunityDuplicatePaymentRecovery.query
+        .filter(
+            or_(
+                and_(
+                    CommunityDuplicatePaymentRecovery.status.in_({
+                        CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND,
+                        CommunityDuplicatePaymentRecoveryStatus.REFUND_PENDING,
+                    }),
+                    or_(
+                        CommunityDuplicatePaymentRecovery.next_attempt_at.is_(None),
+                        CommunityDuplicatePaymentRecovery.next_attempt_at <= now,
+                    ),
+                ),
+                and_(
+                    CommunityDuplicatePaymentRecovery.status == CommunityDuplicatePaymentRecoveryStatus.PROCESSING,
+                    CommunityDuplicatePaymentRecovery.updated_at <= now - timedelta(minutes=10),
+                ),
+            )
+        )
+        .order_by(CommunityDuplicatePaymentRecovery.created_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+    summary = {"processed": 0, "refunded": 0, "pending": 0, "retried": 0, "failed": 0, "items": []}
+    recovery_ids = []
+    for recovery in recoveries:
+        recovery.status = CommunityDuplicatePaymentRecoveryStatus.PROCESSING
+        recovery.attempts = int(recovery.attempts or 0) + 1
+        recovery_ids.append(recovery.id)
+    if recovery_ids:
+        db.session.commit()
+
+    max_attempts = int(current_app.config.get("COMMUNITY_PAYMENT_RECONCILIATION_MAX_ATTEMPTS", 12) or 12)
+    for recovery_id in recovery_ids:
+        summary["processed"] += 1
+        try:
+            recovery = CommunityDuplicatePaymentRecovery.query.filter_by(id=recovery_id).first()
+            if not recovery:
+                continue
+            refund = refund_tournament_payment(
+                recovery.payment_id,
+                recovery.amount,
+                recovery.currency,
+                f"cdp_{str(recovery.id).replace('-', '')}",
+                existing_refund_id=recovery.refund_id,
+                provider=recovery.provider,
+            )
+            recovery.refund_id = str(refund.get("refund_id") or "").strip() or recovery.refund_id
+            recovery.refund_status = str(refund.get("status") or "").lower() or None
+            recovery.last_error = None
+            if recovery.refund_status == "processed":
+                recovery.status = CommunityDuplicatePaymentRecoveryStatus.REFUNDED
+                recovery.refunded_at = recovery.refunded_at or _now()
+                recovery.next_attempt_at = None
+                _audit(
+                    "duplicate_payment_refunded",
+                    "community_duplicate_payment_recovery",
+                    recovery.id,
+                    actor_type="system",
+                    metadata={"payment_id": recovery.payment_id, "refund_id": recovery.refund_id},
+                )
+                _notify(
+                    recovery.user_id,
+                    "community_duplicate_payment_refunded",
+                    "Duplicate tournament payment refunded",
+                    "Your extra tournament payment has been refunded. Your original registration remains confirmed.",
+                    recovery.tournament_id,
+                )
+                summary["refunded"] += 1
+            elif recovery.refund_status == "failed":
+                recovery.status = CommunityDuplicatePaymentRecoveryStatus.FAILED
+                recovery.next_attempt_at = None
+                recovery.last_error = "Razorpay reported duplicate payment refund failure"
+                _audit(
+                    "duplicate_payment_refund_failed",
+                    "community_duplicate_payment_recovery",
+                    recovery.id,
+                    actor_type="system",
+                    metadata={"payment_id": recovery.payment_id, "refund_id": recovery.refund_id},
+                )
+                summary["failed"] += 1
+            else:
+                recovery.status = CommunityDuplicatePaymentRecoveryStatus.REFUND_PENDING
+                recovery.next_attempt_at = _now() + timedelta(minutes=5)
+                summary["pending"] += 1
+            db.session.commit()
+            summary["items"].append(recovery.to_dict())
+        except Exception as exc:
+            db.session.rollback()
+            recovery = CommunityDuplicatePaymentRecovery.query.filter_by(id=recovery_id).first()
+            if not recovery:
+                continue
+            recovery.last_error = str(exc)[:500]
+            if int(recovery.attempts or 0) >= max_attempts:
+                recovery.status = CommunityDuplicatePaymentRecoveryStatus.FAILED
+                recovery.next_attempt_at = None
+                summary["failed"] += 1
+                _audit(
+                    "duplicate_payment_refund_failed",
+                    "community_duplicate_payment_recovery",
+                    recovery.id,
+                    actor_type="system",
+                    metadata={"error": recovery.last_error},
+                )
+            else:
+                recovery.status = CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND
+                recovery.next_attempt_at = _now() + timedelta(minutes=min(60, 2 ** min(recovery.attempts, 6)))
+                summary["retried"] += 1
+            db.session.commit()
+            summary["items"].append(recovery.to_dict())
+    return summary
+
+
 def list_pending_community_payments(filters):
     page, per_page = _pagination(filters)
     status = str(filters.get("status") or "").strip().lower()
@@ -1880,6 +2088,31 @@ def list_pending_community_payments(filters):
     jobs = query.order_by(CommunityPaymentSettlementJob.created_at.asc()).offset((page - 1) * per_page).limit(per_page).all()
     return {
         "items": [job.to_dict() for job in jobs],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
+    }
+
+
+def list_duplicate_payment_recoveries(filters):
+    page, per_page = _pagination(filters)
+    status = str(filters.get("status") or "").strip().lower()
+    query = CommunityDuplicatePaymentRecovery.query
+    if status:
+        valid = {
+            CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND,
+            CommunityDuplicatePaymentRecoveryStatus.PROCESSING,
+            CommunityDuplicatePaymentRecoveryStatus.REFUND_PENDING,
+            CommunityDuplicatePaymentRecoveryStatus.REFUNDED,
+            CommunityDuplicatePaymentRecoveryStatus.FAILED,
+        }
+        if status not in valid:
+            raise CommunityValidationError("invalid duplicate payment recovery status")
+        query = query.filter_by(status=status)
+    total = query.count()
+    items = query.order_by(
+        CommunityDuplicatePaymentRecovery.created_at.desc()
+    ).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": [item.to_dict() for item in items],
         "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
     }
 
