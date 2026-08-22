@@ -33,6 +33,19 @@ def _razorpay_order_bound_to_user(order, payment, expected_user_id) -> bool:
     return notes_user_id == expected_user_id or bool(re.match(rf"^bk_{re.escape(expected_user_id)}_", receipt))
 
 
+def _raise_for_razorpay_status(response, context: str):
+    try:
+        response.raise_for_status()
+    except Exception as exc:
+        detail = ""
+        try:
+            payload = response.json()
+            detail = json.dumps(payload, separators=(",", ":"), sort_keys=True)[:500]
+        except Exception:
+            detail = str(getattr(response, "text", "") or "")[:500]
+        raise ValueError(f"{context}: {exc}; response={detail}") from exc
+
+
 def _mock_payments_allowed() -> bool:
     """Mock settlement is opt-in so an unset production provider cannot credit money."""
     return os.getenv("PAYMENT_ALLOW_MOCK", "false").lower() in {"1", "true", "yes"}
@@ -288,7 +301,7 @@ def _rzp_create_order(amount: float, currency: str, metadata: Dict[str, Any]) ->
         json=payload,
         timeout=10
     )
-    resp.raise_for_status()
+    _raise_for_razorpay_status(resp, "Razorpay order creation failed")
     order = resp.json()
     return {
         "provider": "razorpay",
@@ -378,7 +391,7 @@ def _rzp_verify_payment_success(data: Dict[str, Any]) -> Tuple[bool, str, str]:
                 auth=(key_id, key_secret),
                 timeout=10,
             )
-            resp.raise_for_status()
+            _raise_for_razorpay_status(resp, "Razorpay order lookup failed")
             order = resp.json()
             notes = _razorpay_notes(order)
             if str(order.get("receipt") or notes.get("registration_id") or "") != registration_id:
@@ -449,7 +462,7 @@ def _rzp_fetch_tournament_payment(
         auth=(key_id, key_secret),
         timeout=10,
     )
-    payment_response.raise_for_status()
+    _raise_for_razorpay_status(payment_response, "Razorpay payment lookup failed")
     payment = payment_response.json()
     actual_order_id = str(payment.get("order_id") or "")
     if order_id and actual_order_id != str(order_id):
@@ -462,7 +475,7 @@ def _rzp_fetch_tournament_payment(
         auth=(key_id, key_secret),
         timeout=10,
     )
-    order_response.raise_for_status()
+    _raise_for_razorpay_status(order_response, "Razorpay order lookup failed")
     order = order_response.json()
     if expected_registration_id:
         expected_registration_id = str(expected_registration_id)
@@ -485,7 +498,7 @@ def _rzp_fetch_tournament_payment(
             json={"amount": expected_paise, "currency": expected_currency},
             timeout=10,
         )
-        capture_response.raise_for_status()
+        _raise_for_razorpay_status(capture_response, "Razorpay payment capture failed")
         payment = capture_response.json()
     if payment.get("status") != "captured":
         raise ValueError(f"Razorpay payment is not captured (status: {payment.get('status') or 'unknown'})")
@@ -524,7 +537,7 @@ def _rzp_fetch_tournament_payment_for_order(
         auth=(key_id, key_secret),
         timeout=10,
     )
-    response.raise_for_status()
+    _raise_for_razorpay_status(response, "Razorpay order payments lookup failed")
     payload = response.json()
     payments = payload.get("items") or []
     preferred_statuses = {"captured": 0, "authorized": 1}
