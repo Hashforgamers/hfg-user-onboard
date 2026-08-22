@@ -1793,14 +1793,25 @@ def process_pending_community_payments(limit=50):
             continue
         try:
             if job.payment_id:
-                payment_details = fetch_tournament_payment(
-                    job.payment_id,
-                    tournament.entry_fee,
-                    tournament.currency,
-                    job.order_id,
-                    expected_registration_id=registration.id,
-                    expected_user_id=registration.user_id,
-                )
+                try:
+                    payment_details = fetch_tournament_payment(
+                        job.payment_id,
+                        tournament.entry_fee,
+                        tournament.currency,
+                        job.order_id,
+                        expected_registration_id=registration.id,
+                        expected_user_id=registration.user_id,
+                    )
+                except Exception:
+                    if not job.order_id:
+                        raise
+                    payment_details = fetch_tournament_payment_for_order(
+                        job.order_id,
+                        tournament.entry_fee,
+                        tournament.currency,
+                        expected_registration_id=registration.id,
+                        expected_user_id=registration.user_id,
+                    )
             elif job.order_id:
                 payment_details = fetch_tournament_payment_for_order(
                     job.order_id,

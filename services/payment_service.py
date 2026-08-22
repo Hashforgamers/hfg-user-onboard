@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import json
 import time
+import re
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Tuple, Dict, Any
 
@@ -21,6 +22,15 @@ def _razorpay_entity(payload_data, entity_name: str) -> Dict[str, Any]:
 
 def _razorpay_notes(entity) -> Dict[str, Any]:
     return _as_dict(_as_dict(entity).get("notes"))
+
+
+def _razorpay_order_bound_to_user(order, payment, expected_user_id) -> bool:
+    if not expected_user_id:
+        return False
+    expected_user_id = str(expected_user_id)
+    notes_user_id = str(_razorpay_notes(order).get("user_id") or _razorpay_notes(payment).get("user_id") or "")
+    receipt = str(_as_dict(order).get("receipt") or "")
+    return notes_user_id == expected_user_id or bool(re.match(rf"^bk_{re.escape(expected_user_id)}_", receipt))
 
 
 def _mock_payments_allowed() -> bool:
@@ -458,13 +468,12 @@ def _rzp_fetch_tournament_payment(
         expected_registration_id = str(expected_registration_id)
         notes = _razorpay_notes(order)
         receipt = str(order.get("receipt") or "")
-        order_user_id = str(notes.get("user_id") or _razorpay_notes(payment).get("user_id") or "")
         bound_to_registration = (
             str(notes.get("registration_id") or "") == expected_registration_id
             or receipt == expected_registration_id
             or receipt == f"ctr_{expected_registration_id.replace('-', '')}"
         )
-        bound_to_user = expected_user_id and order_user_id == str(expected_user_id)
+        bound_to_user = _razorpay_order_bound_to_user(order, payment, expected_user_id)
         if not bound_to_registration and not bound_to_user:
             raise ValueError("Razorpay order is not bound to this registration")
     expected_paise = _amount_in_paise(expected_amount)
