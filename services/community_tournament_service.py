@@ -1381,9 +1381,19 @@ def _find_community_registration_for_provider_ids(payment_id=None, order_id=None
             CommunityPaymentAttempt.provider_payment_id == payment_id,
         )
     ).first()
+    if attempt:
+        return CommunityTournamentRegistration.query.filter_by(
+            id=attempt.registration_id
+        ).first()
+    job = CommunityPaymentSettlementJob.query.filter(
+        or_(
+            CommunityPaymentSettlementJob.order_id == order_id,
+            CommunityPaymentSettlementJob.payment_id == payment_id,
+        )
+    ).first()
     return CommunityTournamentRegistration.query.filter_by(
-        id=attempt.registration_id
-    ).first() if attempt else None
+        id=job.registration_id
+    ).first() if job else None
 
 
 def enqueue_community_payment_webhook(event_id, event_type, payment_details, payload):
@@ -1506,6 +1516,7 @@ def process_pending_community_payment_webhooks(limit=50):
                     tournament.currency,
                     event.order_id,
                     expected_registration_id=registration.id,
+                    expected_user_id=registration.user_id,
                 )
                 settle_community_registration_payment(registration.id, payment_details)
                 summary["settled"] += 1
@@ -1719,7 +1730,7 @@ def settle_community_registration_payment(registration_id, payment_details):
 
 def process_pending_community_payments(limit=50):
     """Cron worker: fetch pending Razorpay payments and settle captured ones."""
-    from services.payment_service import fetch_tournament_payment
+    from services.payment_service import fetch_tournament_payment, fetch_tournament_payment_for_order
 
     limit = min(max(int(limit or 50), 1), 100)
     webhook_summary = process_pending_community_payment_webhooks(limit)
@@ -1780,35 +1791,43 @@ def process_pending_community_payments(limit=50):
             summary["failed"] += 1
             summary["items"].append(job.to_dict())
             continue
-        if not job.payment_id:
-            job.status = CommunityPaymentSettlementStatus.RETRY
-            job.last_error = "Razorpay payment ID is not available yet"
-        else:
-            try:
+        try:
+            if job.payment_id:
                 payment_details = fetch_tournament_payment(
                     job.payment_id,
                     tournament.entry_fee,
                     tournament.currency,
                     job.order_id,
                     expected_registration_id=registration.id,
+                    expected_user_id=registration.user_id,
                 )
-                settle_community_registration_payment(registration.id, payment_details)
-                summary["settled"] += 1
-                summary["items"].append({"registration_id": str(registration.id), "status": "settled"})
-                continue
-            except Exception as exc:
-                error_text = str(exc)[:500]
-                if "status: failed" in error_text.lower():
-                    record_community_registration_payment(registration.id, "failed", payment_reference=job.payment_id)
-                    job.status = CommunityPaymentSettlementStatus.FAILED
-                    job.last_error = error_text
-                    job.next_attempt_at = None
-                    db.session.commit()
-                    summary["failed"] += 1
-                    summary["items"].append(job.to_dict())
-                    continue
-                job.status = CommunityPaymentSettlementStatus.RETRY
+            elif job.order_id:
+                payment_details = fetch_tournament_payment_for_order(
+                    job.order_id,
+                    tournament.entry_fee,
+                    tournament.currency,
+                    expected_registration_id=registration.id,
+                    expected_user_id=registration.user_id,
+                )
+            else:
+                raise CommunityValidationError("Razorpay payment ID is not available yet")
+            settle_community_registration_payment(registration.id, payment_details)
+            summary["settled"] += 1
+            summary["items"].append({"registration_id": str(registration.id), "status": "settled"})
+            continue
+        except Exception as exc:
+            error_text = str(exc)[:500]
+            if "status: failed" in error_text.lower():
+                record_community_registration_payment(registration.id, "failed", payment_reference=job.payment_id)
+                job.status = CommunityPaymentSettlementStatus.FAILED
                 job.last_error = error_text
+                job.next_attempt_at = None
+                db.session.commit()
+                summary["failed"] += 1
+                summary["items"].append(job.to_dict())
+                continue
+            job.status = CommunityPaymentSettlementStatus.RETRY
+            job.last_error = error_text
         delay_minutes = min(60, max(1, 2 ** min(job.attempts, 6)))
         job.next_attempt_at = _now() + timedelta(minutes=delay_minutes)
         db.session.commit()
