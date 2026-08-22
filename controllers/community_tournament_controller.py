@@ -23,6 +23,7 @@ from services.community_tournament_service import (
     list_admin_disputes,
     list_admin_host_verifications,
     list_admin_payouts,
+    list_duplicate_payment_recoveries,
     list_pending_community_payments,
     list_host_disputes,
     list_host_payouts,
@@ -380,6 +381,15 @@ def list_managed_community_registrations(tournament_id):
 def admin_list_pending_community_payments():
     try:
         return jsonify(list_pending_community_payments(request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/admin/payments/duplicate-recoveries")
+@_admin_required
+def admin_list_duplicate_payment_recoveries():
+    try:
+        return jsonify(list_duplicate_payment_recoveries(request.args)), 200
     except Exception as exc:
         return _handle_service_error(exc)
 

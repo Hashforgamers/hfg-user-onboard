@@ -24,6 +24,7 @@ from models.communityTournament import (
     CommunityTournamentRegistrationStatus,
     CommunityTournamentStatus,
 )
+from models.communityTournamentOperations import CommunityPaymentAttempt
 from services.community_tournament_service import (
     CommunityConflictError,
     CommunityValidationError,
@@ -841,6 +842,14 @@ def payment_webhook():
             | (CommunityTournamentRegistration.razorpay_payment_id == payment_id)
             | (CommunityTournamentRegistration.payment_reference == payment_id)
         ).first()
+        if not community_registration:
+            attempt = CommunityPaymentAttempt.query.filter(
+                (CommunityPaymentAttempt.provider_order_id == order_id)
+                | (CommunityPaymentAttempt.provider_payment_id == payment_id)
+            ).first()
+            community_registration = CommunityTournamentRegistration.query.filter_by(
+                id=attempt.registration_id
+            ).first() if attempt else None
     if not community_registration:
         if webhook_details:
             process_pending_community_payment_webhooks(10)

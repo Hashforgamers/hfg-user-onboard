@@ -248,6 +248,7 @@ def _rzp_create_order(amount: float, currency: str, metadata: Dict[str, Any]) ->
         "amount": smallest,
         "currency": currency,
         "receipt": metadata.get("receipt") or metadata.get("registration_id") or f"rcpt_{int(time.time())}",
+        "payment_capture": 1,
         "notes": metadata
     }
     resp = requests.post(
@@ -439,7 +440,7 @@ def _rzp_fetch_tournament_payment(
             raise ValueError("Razorpay order is not bound to this registration")
     expected_paise = _amount_in_paise(expected_amount)
     expected_currency = str(expected_currency or "INR").upper()
-    if payment.get("status") == "authorized" and os.getenv("RAZORPAY_AUTO_CAPTURE_AUTHORIZED", "false").lower() in {"1", "true", "yes"}:
+    if payment.get("status") == "authorized" and os.getenv("RAZORPAY_AUTO_CAPTURE_AUTHORIZED", "true").lower() in {"1", "true", "yes"}:
         capture_response = requests.post(
             f"https://api.razorpay.com/v1/payments/{payment_id}/capture",
             auth=(key_id, key_secret),

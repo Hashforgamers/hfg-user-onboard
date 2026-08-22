@@ -554,6 +554,29 @@ Action rules:
 
 `POST /internal/payments/process-pending` runs the cron batch and requires `X-Community-Payment-Cron-Token`. Optional body: `{ "limit": 50 }`. Schedule it every 1-2 minutes. The worker fetches each Razorpay payment, confirms that it is captured and matches the tournament amount/currency, then settles the same registration transaction used by `/api/payments/verify`.
 
+### Captured Payment Recovery and Duplicate Refunds
+
+A player can safely retry or reopen a tournament after an interrupted payment.
+The backend keeps the original pending registration and reconciles a later
+captured Razorpay webhook against the registration's current or historical
+payment-attempt order. A verified first payment confirms that same registration;
+it does not create a second slot or require the player to join again.
+
+If Razorpay confirms more than one payment for the same registration, the first
+captured payment remains the tournament entry payment. Every additional captured
+payment creates a durable duplicate-payment recovery record and is automatically
+refunded by the existing `POST /internal/payments/process-pending` cron. It never
+changes registration state, player counts, collection totals, or prize pool.
+
+Super admins can monitor these records through:
+
+`GET /admin/payments/duplicate-recoveries?status=pending_refund&page=1&per_page=50`
+
+The response includes `admin_summary`, payment/refund IDs, attempts, retry time,
+and provider error text. Status values are `pending_refund`, `processing`,
+`refund_pending`, `refunded`, and `failed`. `failed` means the automatic Razorpay
+refund needs super-admin follow-up; it is never silently discarded.
+
 ## 4. Results and Disputes
 
 ### Submit a Result
