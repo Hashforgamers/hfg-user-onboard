@@ -126,7 +126,7 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
                 1,
                 "INR",
                 expected_registration_id="registration-1",
-                expected_order_id="order_123",
+                expected_order_id="order_created_for_registration",
                 expected_user_id=638,
             )
 
