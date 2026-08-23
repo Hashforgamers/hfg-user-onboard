@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
@@ -46,6 +47,7 @@ from services.firebase_service import send_notification
 
 
 event_participation_bp = Blueprint("event_participation", __name__, url_prefix="/api")
+logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
 _PUSH_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("FCM_PUSH_WORKERS", "16")))
 _EVENT_PARTICIPATION_CACHE = {}
@@ -149,6 +151,15 @@ def _event_flag(start_at, end_at):
 # Helpers: no JWT, read user_id from body
 def _body():
     return request.get_json(silent=True) or {}
+
+
+def _short(value, keep=8):
+    value = str(value or "")
+    if not value:
+        return ""
+    if len(value) <= keep * 2:
+        return value
+    return f"{value[:keep]}...{value[-keep:]}"
 
 
 def _send_notifications_batch(tokens, title, message, data):
@@ -868,19 +879,73 @@ def payment_webhook():
 @event_participation_bp.post("/payments/verify")
 def verify_payment():
     body = _body()
+    request_id = getattr(request, "request_id", None) or request.headers.get("X-Request-ID") or request.headers.get("X-Render-Request-ID")
     # Community registrations use registration_id. team_id is only a legacy
     # alias for old app clients, so never let it override registration_id.
     community_registration_id = body.get("registration_id") or body.get("team_id")
+    logger.info(
+        "payments_verify start request_id=%s registration_id=%s team_id=%s tournament_id=%s "
+        "razorpay_order_id=%s razorpay_payment_id=%s signature_present=%s content_length=%s",
+        request_id,
+        community_registration_id,
+        body.get("team_id"),
+        body.get("tournament_id"),
+        _short(body.get("razorpay_order_id") or body.get("order_id")),
+        _short(body.get("razorpay_payment_id") or body.get("payment_id")),
+        bool(body.get("razorpay_signature") or body.get("signature")),
+        request.content_length,
+    )
     community_registration = None
     community_registration_uuid = _uuid_or_none(community_registration_id)
     if community_registration_uuid:
         community_registration = CommunityTournamentRegistration.query.filter_by(id=community_registration_uuid).first()
+        logger.info(
+            "payments_verify community_registration_lookup request_id=%s registration_id=%s found=%s",
+            request_id,
+            community_registration_id,
+            bool(community_registration),
+        )
+    elif community_registration_id:
+        logger.warning(
+            "payments_verify invalid_community_registration_id request_id=%s registration_id=%s",
+            request_id,
+            community_registration_id,
+        )
     if community_registration:
         if body.get("tournament_id") and str(community_registration.tournament_id) != str(body.get("tournament_id")):
+            logger.warning(
+                "payments_verify tournament_mismatch request_id=%s registration_id=%s body_tournament_id=%s "
+                "registration_tournament_id=%s user_id=%s",
+                request_id,
+                community_registration.id,
+                body.get("tournament_id"),
+                community_registration.tournament_id,
+                community_registration.user_id,
+            )
             return jsonify({"error": "tournament_id does not match registration"}), 400
         tournament = CommunityTournament.query.filter_by(id=community_registration.tournament_id).first()
         if not tournament:
+            logger.error(
+                "payments_verify tournament_missing request_id=%s registration_id=%s tournament_id=%s user_id=%s",
+                request_id,
+                community_registration.id,
+                community_registration.tournament_id,
+                community_registration.user_id,
+            )
             return jsonify({"error": "tournament not found"}), 404
+        logger.info(
+            "payments_verify community_registration_loaded request_id=%s registration_id=%s tournament_id=%s "
+            "user_id=%s current_status=%s current_payment_status=%s expected_order_id=%s entry_fee=%s currency=%s",
+            request_id,
+            community_registration.id,
+            community_registration.tournament_id,
+            community_registration.user_id,
+            community_registration.status,
+            community_registration.payment_status,
+            _short(community_registration.razorpay_order_id),
+            tournament.entry_fee,
+            tournament.currency,
+        )
         try:
             payment_details = verify_tournament_payment(
                 body,
@@ -888,11 +953,61 @@ def verify_payment():
                 tournament.currency,
                 expected_registration_id=community_registration.id,
                 expected_order_id=community_registration.razorpay_order_id,
+                expected_user_id=community_registration.user_id,
+            )
+            logger.info(
+                "payments_verify provider_verified request_id=%s registration_id=%s tournament_id=%s user_id=%s "
+                "provider=%s provider_status=%s order_id=%s payment_id=%s amount=%s currency=%s receipt=%s",
+                request_id,
+                community_registration.id,
+                community_registration.tournament_id,
+                community_registration.user_id,
+                payment_details.get("provider"),
+                payment_details.get("status"),
+                _short(payment_details.get("order_id")),
+                _short(payment_details.get("payment_id")),
+                payment_details.get("amount"),
+                payment_details.get("currency"),
+                _short(payment_details.get("receipt")),
             )
             community_registration = settle_community_registration_payment(community_registration.id, payment_details)
+            logger.info(
+                "payments_verify community_settled request_id=%s registration_id=%s tournament_id=%s user_id=%s "
+                "status=%s payment_status=%s payment_reference=%s amount_paid=%s",
+                request_id,
+                community_registration.id,
+                community_registration.tournament_id,
+                community_registration.user_id,
+                community_registration.status,
+                community_registration.payment_status,
+                _short(community_registration.payment_reference),
+                community_registration.amount_paid,
+            )
         except (CommunityValidationError, CommunityConflictError, ValueError) as exc:
+            logger.warning(
+                "payments_verify community_failed request_id=%s registration_id=%s tournament_id=%s user_id=%s "
+                "current_status=%s current_payment_status=%s error_type=%s error=%s",
+                request_id,
+                community_registration.id,
+                community_registration.tournament_id,
+                community_registration.user_id,
+                community_registration.status,
+                community_registration.payment_status,
+                exc.__class__.__name__,
+                str(exc),
+            )
             return jsonify({"error": "payment verification failed", "message": str(exc)}), 400
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "payments_verify unavailable request_id=%s registration_id=%s tournament_id=%s user_id=%s "
+                "error_type=%s error=%s",
+                request_id,
+                community_registration.id,
+                community_registration.tournament_id,
+                community_registration.user_id,
+                exc.__class__.__name__,
+                str(exc),
+            )
             return jsonify({"error": "payment verification unavailable"}), 503
         return jsonify({
             "success": True,
@@ -909,6 +1024,13 @@ def verify_payment():
 
     ok, reg_id, status = verify_payment_success(body)
     if not ok:
+        logger.warning(
+            "payments_verify legacy_failed request_id=%s registration_id=%s order_id=%s payment_id=%s",
+            request_id,
+            community_registration_id,
+            _short(body.get("razorpay_order_id") or body.get("order_id")),
+            _short(body.get("razorpay_payment_id") or body.get("payment_id")),
+        )
         return jsonify({"error": "payment verification failed"}), 400
 
     cafe_registration_id = _uuid_or_none(reg_id)
