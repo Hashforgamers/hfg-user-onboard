@@ -483,12 +483,13 @@ def _rzp_verify_tournament_payment(
         raise ValueError("Razorpay signature verification failed")
     if expected_order_id and order_id != str(expected_order_id):
         logger.warning(
-            "razorpay_tournament_verify order_mismatch registration_id=%s expected_order_id=%s actual_order_id=%s",
+            "razorpay_tournament_verify order_mismatch_deferred registration_id=%s expected_order_id=%s "
+            "actual_order_id=%s expected_user_id=%s",
             expected_registration_id,
             _short(expected_order_id),
             _short(order_id),
+            expected_user_id,
         )
-        raise ValueError("Razorpay order does not match this payment attempt")
     logger.info(
         "razorpay_tournament_verify signature_ok registration_id=%s order_id=%s payment_id=%s",
         expected_registration_id,
@@ -546,14 +547,16 @@ def _rzp_fetch_tournament_payment(
     )
     if order_id and actual_order_id != str(order_id):
         logger.warning(
-            "razorpay_tournament_fetch payment_order_mismatch registration_id=%s payment_id=%s expected_order_id=%s "
-            "actual_order_id=%s",
+            "razorpay_tournament_fetch payment_order_mismatch_deferred registration_id=%s payment_id=%s "
+            "expected_order_id=%s actual_order_id=%s expected_user_id=%s",
             expected_registration_id,
             _short(payment_id),
             _short(order_id),
             _short(actual_order_id),
+            expected_user_id,
         )
-        raise ValueError("payment does not belong to the supplied Razorpay order")
+        if not expected_registration_id and not expected_user_id:
+            raise ValueError("payment does not belong to the supplied Razorpay order")
     if not actual_order_id:
         logger.warning(
             "razorpay_tournament_fetch payment_missing_order registration_id=%s payment_id=%s",
