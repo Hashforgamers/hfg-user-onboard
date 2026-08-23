@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import sys
 import unittest
@@ -83,6 +85,48 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
                 "INR",
                 "order_123",
                 expected_registration_id="registration-1",
+                expected_user_id=638,
+            )
+
+        self.assertEqual(result["payment_id"], "pay_123")
+        self.assertEqual(result["status"], "captured")
+
+    @patch("services.payment_service.PROVIDER", "razorpay")
+    @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
+    def test_verify_callback_accepts_legacy_booking_order_for_same_user(self, _credentials):
+        signature = hmac.new(
+            b"secret",
+            b"order_123|pay_123",
+            hashlib.sha256,
+        ).hexdigest()
+        get = unittest.mock.Mock(side_effect=[
+            _Response({
+                "id": "pay_123",
+                "order_id": "order_123",
+                "status": "captured",
+                "amount": 100,
+                "currency": "INR",
+            }),
+            _Response({
+                "id": "order_123",
+                "receipt": "bk_638_abc",
+                "notes": {"source": "hfg_booking"},
+                "amount": 100,
+                "currency": "INR",
+            }),
+        ])
+
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}):
+            result = verify_tournament_payment(
+                {
+                    "razorpay_payment_id": "pay_123",
+                    "razorpay_order_id": "order_123",
+                    "razorpay_signature": signature,
+                },
+                1,
+                "INR",
+                expected_registration_id="registration-1",
+                expected_order_id="order_123",
                 expected_user_id=638,
             )
 
