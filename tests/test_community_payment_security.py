@@ -91,6 +91,38 @@ class CommunityPaymentSecurityTests(unittest.TestCase):
         self.assertEqual(result["payment_id"], "pay_123")
         self.assertEqual(result["status"], "captured")
 
+    @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
+    def test_fetch_accepts_stale_expected_order_when_payment_order_binds_to_same_user(self, _credentials):
+        get = unittest.mock.Mock(side_effect=[
+            _Response({
+                "id": "pay_123",
+                "order_id": "order_paid",
+                "status": "captured",
+                "amount": 100,
+                "currency": "INR",
+            }),
+            _Response({
+                "id": "order_paid",
+                "receipt": "bk_2421_abc",
+                "notes": {"source": "hfg_booking", "user_id": "2421"},
+                "amount": 100,
+                "currency": "INR",
+            }),
+        ])
+        with patch.dict(sys.modules, {"requests": SimpleNamespace(get=get)}):
+            result = _rzp_fetch_tournament_payment(
+                "pay_123",
+                1,
+                "INR",
+                "order_created_for_registration",
+                expected_registration_id="registration-1",
+                expected_user_id=2421,
+            )
+
+        self.assertEqual(result["order_id"], "order_paid")
+        self.assertEqual(result["payment_id"], "pay_123")
+        self.assertEqual(result["status"], "captured")
+
     @patch("services.payment_service.PROVIDER", "razorpay")
     @patch("services.payment_service._razorpay_credentials", return_value=("key", "secret"))
     def test_verify_callback_accepts_legacy_booking_order_for_same_user(self, _credentials):

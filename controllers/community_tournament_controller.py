@@ -326,19 +326,33 @@ def list_my_community_tournaments():
 def register_community_tournament(tournament_id):
     try:
         body = _body()
+        client_payment_reference = body.get("payment_reference") or body.get("razorpay_payment_id")
+        client_payment_order_id = body.get("razorpay_order_id") or body.get("payment_order_id")
         registration = register_for_tournament(
             g.auth_user_id,
             tournament_id,
-            payment_reference=body.get("payment_reference") or body.get("razorpay_payment_id"),
-            payment_order_id=body.get("razorpay_order_id") or body.get("payment_order_id"),
+            payment_reference=client_payment_reference,
+            payment_order_id=client_payment_order_id,
             invite_code=body.get("invite_code"),
         )
         payload = registration.to_dict()
         if registration.status == "pending_payment" and registration.payment_status == "unpaid":
-            payment = create_community_payment_attempt(registration.id)
             payload["payment_required"] = True
-            payload["payment"] = payment
-            payload["razorpay_order_id"] = payment.get("order_id") or payload.get("razorpay_order_id")
+            if client_payment_reference or client_payment_order_id:
+                payload["payment"] = {
+                    "provider": "razorpay",
+                    "order_id": client_payment_order_id,
+                    "payment_id": client_payment_reference,
+                    "amount": float(registration.tournament.entry_fee) if registration.tournament else None,
+                    "currency": str(registration.tournament.currency or "INR").upper() if registration.tournament else "INR",
+                    "status": "external_payment_pending_verification",
+                }
+                payload["razorpay_order_id"] = client_payment_order_id or payload.get("razorpay_order_id")
+                payload["razorpay_payment_id"] = client_payment_reference or payload.get("razorpay_payment_id")
+            else:
+                payment = create_community_payment_attempt(registration.id)
+                payload["payment"] = payment
+                payload["razorpay_order_id"] = payment.get("order_id") or payload.get("razorpay_order_id")
         else:
             payload["payment_required"] = False
         return jsonify(payload), 201
