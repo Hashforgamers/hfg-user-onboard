@@ -1890,6 +1890,59 @@ def get_wallet_balance_auth():
     )
     return jsonify(payload), 200
 
+@user_blueprint.route('/users/wallet/drop-crate/claim', methods=['POST'])
+@auth_required_self(decrypt_user=True)
+def claim_drop_crate():
+    """Credit the fixed welcome reward once per authenticated account."""
+    if getattr(g, "token_expired", False):
+        return jsonify({"message": "Token expired"}), 401
+    # No client-controlled amount, recipient, type, or idempotency key.
+    if request.get_data() and request.get_json(silent=True) != {}:
+        return jsonify({"message": "Send an empty JSON object or no request body"}), 400
+
+    user_id = int(g.auth_user_id)
+    try:
+        user = db.session.query(User).filter_by(id=user_id).first()
+        if not user or getattr(user, "deleted_at", None) is not None:
+            db.session.rollback()
+            return jsonify({"message": "User not found"}), 404
+
+        # Keep wallet creation, locking, eligibility, and credit in ONE transaction.
+        # The existing helper commits early and must not be used here.
+        db.session.execute(text("""
+            INSERT INTO hash_wallets (user_id, balance)
+            VALUES (:user_id, 0)
+            ON CONFLICT (user_id) DO NOTHING
+        """), {"user_id": user_id})
+        wallet = HashWallet.query.filter_by(user_id=user_id).with_for_update().first()
+        existing = HashWalletTransaction.query.filter_by(
+            user_id=user_id, type="drop_crate"
+        ).first()
+        already_claimed = existing is not None
+        if not already_claimed:
+            wallet.balance = int(wallet.balance or 0) + 10
+            db.session.add(HashWalletTransaction(
+                user_id=user_id, amount=10, type="drop_crate",
+                reference_id=f"drop_crate:{user_id}",
+            ))
+        balance = int(wallet.balance or 0)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Drop crate claim failed for user_id=%s", user_id)
+        return jsonify({"message": "Failed to claim drop crate"}), 500
+
+    _invalidate_user_microcache(user_id, ["users-wallet", "users-transactions"])
+    return jsonify({
+        "message": "Drop crate already claimed" if already_claimed else "Drop crate claimed",
+        "amount": 10,
+        "credited_amount": 0 if already_claimed else 10,
+        "new_balance": balance,
+        "already_claimed": already_claimed,
+        "idempotent": already_claimed,
+    }), 200
+
+
 @user_blueprint.route('/users/wallet', methods=['POST'])
 @auth_required_self(decrypt_user=True) 
 def add_wallet_balance():
