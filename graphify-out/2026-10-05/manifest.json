@@ -50,8 +50,8 @@
     "semantic_hash": "20e060fa54eaa53131a61ee708c8c8c3"
   },
   "controllers/user_controller.py": {
-    "mtime": 1791190323.9693666,
-    "ast_hash": "1b7811acb2e85cf04d2e2b4105a9f7d6",
+    "mtime": 1786963238.8897877,
+    "ast_hash": "89daeac603d2af883cdbf3884f32b0e6",
     "semantic_hash": ""
   },
   "db/__init__.py": {
@@ -70,9 +70,9 @@
     "semantic_hash": "e9add6d6397aaf97098a859abe479183"
   },
   "job/daily_notifier.py": {
-    "mtime": 1791190401.1660025,
-    "ast_hash": "57d22512f4e23f64bd2dfe8a17e89b46",
-    "semantic_hash": ""
+    "mtime": 1779725632.7741494,
+    "ast_hash": "6cb0bd456fc797a3127cb1de20545c46",
+    "semantic_hash": "6cb0bd456fc797a3127cb1de20545c46"
   },
   "models/booking.py": {
     "mtime": 1756653935.020761,
@@ -537,36 +537,6 @@
   "requirements.txt": {
     "mtime": 1787341076.1709495,
     "ast_hash": "85022ebd02f7013b51f972a9dfebc931",
-    "semantic_hash": ""
-  },
-  "services/notification_context.py": {
-    "mtime": 1791190323.911191,
-    "ast_hash": "c42662a2c8d008098b8a7034cab4085a",
-    "semantic_hash": ""
-  },
-  "sql/20261005_notification_context.sql": {
-    "mtime": 1791190323.913852,
-    "ast_hash": "625ef1423d60b8719c9634e5e112051b",
-    "semantic_hash": ""
-  },
-  "tests/test_drop_crate_claim.py": {
-    "mtime": 1790622725.486972,
-    "ast_hash": "0d1008d66d3610705e022dd0f2b2cf22",
-    "semantic_hash": ""
-  },
-  "tests/test_notification_campaign.py": {
-    "mtime": 1791191071.6935375,
-    "ast_hash": "cd1742237173968ca1c5c8633b4b5393",
-    "semantic_hash": ""
-  },
-  "docs/drop-crate-claim.md": {
-    "mtime": 1790622725.4892256,
-    "ast_hash": "196ee992d35edbdc9911aa7c527c70cc",
-    "semantic_hash": ""
-  },
-  "docs/notification-context.md": {
-    "mtime": 1791191072.0764663,
-    "ast_hash": "15d4a63939948a8fbb682b74eb904941",
     "semantic_hash": ""
   }
 }
