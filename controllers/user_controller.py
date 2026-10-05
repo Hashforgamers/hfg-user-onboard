@@ -686,6 +686,15 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
                 db.session.commit()
                 return
 
+            from services.notification_context import load_notification_context
+            campaign=load_notification_context()
+            if not campaign['enabled']:
+                job.status='completed'
+                job.completed_at=datetime.utcnow()
+                job.error_message='Skipped: notifications paused by super admin'
+                db.session.commit()
+                return
+
             tokens_rows = (
                 db.session.query(FCMToken.token)
                 .filter(FCMToken.token.isnot(None))
@@ -705,7 +714,7 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
             job.tokens_blocked = len([t for t in token_list if t in blocked_tokens])
 
             if not job.notification_title or not job.notification_message:
-                generated = generate_notification()
+                generated = generate_notification(campaign)
                 job.notification_title = generated.get("title")
                 job.notification_message = generated.get("message")
                 db.session.commit()
@@ -764,6 +773,15 @@ def _run_notification_dispatch_job(app_obj, job_id: int):
 def cron_trigger_daily_notifications():
     if not _is_valid_cron_request():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+    try:
+        from services.notification_context import load_notification_context
+        if not load_notification_context()['enabled']:
+            return jsonify(success=True,skipped=True,message='Notifications paused by super admin'),200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('Notification settings unavailable')
+        return jsonify(success=False,message='Notification settings unavailable; nothing queued.'),503
 
     payload = request.get_json(silent=True) or {}
     force = bool(payload.get("force", False))
@@ -2827,3 +2845,20 @@ def trigger_demo_notification():
         db.session.rollback()
         current_app.logger.exception("Failed to trigger demo notification for target_user_id=%s", raw_user_id)
         return jsonify({"message": "Internal server error"}), 500
+
+
+@user_blueprint.route('/admin/notification-context/preview',methods=['POST'])
+def preview_campaign_notification():
+    import os,hmac
+    expected=os.getenv('SUPER_ADMIN_API_KEY','').strip()
+    provided=request.headers.get('X-Admin-Key','').strip()
+    if not expected or not hmac.compare_digest(expected,provided):
+        return jsonify(success=False,message='Unauthorized'),401
+    from services.notification_context import validate_notification_context
+    try:
+        settings=validate_notification_context(request.get_json(silent=True))
+        return jsonify(success=True,data=generate_notification(settings))
+    except ValueError as error:
+        return jsonify(success=False,message=str(error)),400
+    except Exception:
+        return jsonify(success=False,message='AI preview could not be generated.'),503

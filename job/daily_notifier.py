@@ -87,9 +87,28 @@ FALLBACK_MESSAGES = [
 def gemini_agent():
     return _GENAI_CLIENT
 
-def generate_notification():
+def generate_notification(settings=None):
     logger = logging.getLogger(__name__)
     client = gemini_agent()
+    if settings is None:
+        from flask import has_app_context
+        from services.notification_context import load_notification_context
+        if has_app_context():
+            settings=load_notification_context()
+        else:
+            from app import create_app
+            with create_app().app_context():
+                settings=load_notification_context()
+    prompt=HASH_AGENT_PROMPT
+    if settings.get('context'):
+        prompt = """You write push notifications for HASH for Gamers.
+Generate one notification based on the campaign context below.
+Use a friendly, concise app notification tone. Title: max 6 words.
+Message: one sentence, max 14 words. No invented offers or urgency.
+Output only two lines: Title: <title> and Message: <message>.
+Campaign context:
+""" + settings['context']
+    prompt += "\nDo not invent prices, discounts, availability or deadlines absent from the campaign context. Keep the Title:/Message: format."
 
     logger.info("Generating notification with HASH agent...")
 
@@ -99,7 +118,7 @@ def generate_notification():
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=HASH_AGENT_PROMPT,
+            contents=prompt,
         )
         raw_text = str(getattr(response, "text", "") or "").strip()
         logger.info(f"Gemini raw response:\n{raw_text}")
@@ -115,11 +134,11 @@ def generate_notification():
         if not title or not message:
             raise ValueError("Missing title or message")
 
-        return {"title": title, "message": message}
+        return {"title": title, "message": message, "source":"ai"}
 
     except Exception as e:
         logger.error(f"Gemini error: {e}")
-        notif = random.choice(FALLBACK_MESSAGES)
+        notif = {"title":settings['fallback_title'],"message":settings['fallback_message'],"source":"fallback"}
         logger.info(f"Using fallback notification: {notif}")
         return notif
 

@@ -1,16 +1,16 @@
-# Graph Report - hfg-user-onboard  (2026-10-05)
+# Graph Report - hfg-user-onboard  (2026-09-18)
 
 ## Corpus Check
-- 111 files · ~70,450 words
+- 105 files · ~69,074 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1077 nodes · 2988 edges · 72 communities (58 shown, 14 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 185 edges (avg confidence: 0.55)
+- 1048 nodes · 2937 edges · 76 communities (62 shown, 14 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 184 edges (avg confidence: 0.55)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f5ecf67f`
+- Built from commit: `8b30c6c1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -29,44 +29,48 @@
 - User APIs
 - route
 - community_dispute_chat_service.py
-- user_service.py
+- UserService
 - extensions.py
-- CommunityValidationError
+- user_service.py
 - passModels.py
-- app/__init__.py
+- add_wallet_balance
 - Phone Number APIs (hfg-user-onboard)
 - Unified Public Tournament APIs
-- DropCrateClaimTests
+- delete_user_id
 - _run_notification_dispatch_job
 - _EmailText
-- _now
+- process_pending_community_payments
 - _refund_or_cancel_registration
 - WalletCreditSecurityTests
 - security.py
-- create_community_payment_attempt
-- test_notification_campaign.py
+- upload_temporary_evidence
+- _ensure_notification_tracking_tables
 - Community Host Tournament Management E2E
 - 3B. Match Operations
-- User
-- 3. Participant and Check-in Management
+- UserSignupApiTests
+- PasswordManager
 - Cloudinary Community Evidence Setup
 - Community Tournament APIs (Frontend Handoff)
 - tournament_matches
 - Exception
-- drop-crate-claim.md
-- notification-context.md
-- 20261005_notification_context.sql
+- _result_contexts
+- event_controller.py
+- create_user
 - RazorpayWebhookTests
 - 2. Create and Edit a Tournament
 - 3A. Esports Teams and Rosters
 - 4. Results and Disputes
 - Suggested Screen Flows
 - Public APIs
+- vendor.py
 - 3C. Control Room and Communication
 - Data Models
 - 1. Host Onboarding
 - 6. Platform Admin Operations
 - booking.py
+- PhysicalAddress
+- 5. Winners and Payouts
+- review_payout
 - AGENTS.md
 - user-deletion-lifecycle.md
 - job/__init__.py
@@ -79,7 +83,7 @@
 ## God Nodes (most connected - your core abstractions)
 1. `CommunityValidationError` - 108 edges
 2. `CommunityConflictError` - 76 edges
-3. `auth_required_self()` - 76 edges
+3. `auth_required_self()` - 75 edges
 4. `_handle_service_error()` - 67 edges
 5. `CommunityForbiddenError` - 59 edges
 6. `_now()` - 47 edges
@@ -103,7 +107,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (72 total, 14 thin omitted)
+## Communities (76 total, 14 thin omitted)
 
 ### Community 0 - "community_tournament_controller.py"
 Cohesion: 0.08
@@ -114,40 +118,40 @@ Cohesion: 0.07
 Nodes (54): Any, _amount_in_paise(), _as_dict(), create_payment_intent(), fetch_tournament_payment(), fetch_tournament_payment_for_order(), fetch_tournament_refund(), _mock_create_intent() (+46 more)
 
 ### Community 2 - "community_tournament_control_service.py"
-Cohesion: 0.11
-Nodes (35): CommunityMatchResultSubmission, CommunityTeamStatus, CommunityTournamentTeam, CommunityTournamentTeamMember, _auto_check_in_teams(), _automatic_team_ready(), control_room(), create_team() (+27 more)
+Cohesion: 0.09
+Nodes (63): CommunityTournamentAnnouncement, CommunityTournamentDispute, accept_result_proposal(), admin_resolve_match_result(), _advance_match_winner(), _auto_check_in_teams(), _automatic_team_ready(), control_room() (+55 more)
 
 ### Community 3 - "community_tournament_service.py"
 Cohesion: 0.10
-Nodes (38): _apply_provider_refund(), _banner_asset(), _bounded_int(), cancel_registration(), close_registration(), _cloudinary_evidence_config(), _cloudinary_signature(), _configure_cloudinary_evidence() (+30 more)
+Nodes (56): CommunityHostVerification, create_manual_match(), list_audit_log(), _banner_asset(), _bind_verified_payment_attempt(), _bounded_int(), cancel_registration(), CommunityValidationError (+48 more)
 
 ### Community 4 - "event_participation_controller.py"
-Cohesion: 0.11
-Nodes (39): _body(), create_team(), _dispatch_push_async(), _event_flag(), force_remove_team_member(), get_team_members(), get_user_joined_tournaments(), get_user_teams() (+31 more)
+Cohesion: 0.10
+Nodes (40): _body(), create_team(), _dispatch_push_async(), _event_flag(), force_remove_team_member(), get_team_members(), get_user_joined_tournaments(), get_user_teams() (+32 more)
 
 ### Community 5 - "CommunityConflictError"
-Cohesion: 0.09
-Nodes (41): CommunityFileAsset, CommunityHostStatus, CommunityHostTier, CommunityHostVerification, CommunityTournament, CommunityTournamentRegistration, CommunityTournamentRegistrationStatus, CommunityTournamentStatus (+33 more)
+Cohesion: 0.10
+Nodes (36): CommunityHostStatus, CommunityHostTier, CommunityTournament, CommunityTournamentRegistration, CommunityTournamentRegistrationStatus, CommunityTournamentStatus, CommunityAuditLog, CommunityDisputeStatus (+28 more)
 
 ### Community 6 - "tournament_engine_controller.py"
 Cohesion: 0.09
 Nodes (41): _event_flag(), get_event(), get_event_leaderboard(), get_event_provisional_results(), get_public_gamer_profile(), list_public_events(), _optional_request_user_id(), get (+33 more)
 
 ### Community 7 - "user_controller.py"
-Cohesion: 0.07
-Nodes (35): add_hash_coins(), add_wallet_balance(), claim_drop_crate(), _clear_deleted_user_caches(), create_voucher_for_referral_points(), _ensure_hash_wallet_row(), get_all_fcm(), _invalidate_user_microcache() (+27 more)
+Cohesion: 0.09
+Nodes (16): get_all_fcm(), get_user(), _normalize_indian_phone(), Update (or create) user phone entry in contact_info. Production-safe checks: -…, register_fcm_token(), update_registered_phone(), user_purchase_pass(), CafePass (+8 more)
 
 ### Community 8 - "community_tournaments"
 Cohesion: 0.14
 Nodes (24): community_audit_logs, community_file_assets, community_host_verifications, community_match_results, community_tournament_disputes, community_tournament_payouts, community_tournament_registrations, community_tournaments (+16 more)
 
 ### Community 9 - "review_controller.py"
-Cohesion: 0.27
-Nodes (16): _clean_text(), create_review(), edit_review(), _internal_authorized(), internal_list_reviews(), internal_respond_review(), internal_reviews_summary(), internal_update_review_status() (+8 more)
+Cohesion: 0.16
+Nodes (20): Config, create_app(), _clean_text(), create_review(), edit_review(), _internal_authorized(), internal_list_reviews(), internal_respond_review() (+12 more)
 
 ### Community 10 - "CommunityEsportsOperationTests"
 Cohesion: 0.11
-Nodes (4): Schedule playable matches by round; automatic byes take no time slot., _schedule_bracket_rounds(), CommunityEsportsOperationTests, patch
+Nodes (3): _derive_status(), CommunityEsportsOperationTests, patch
 
 ### Community 11 - "User APIs"
 Cohesion: 0.08
@@ -158,28 +162,28 @@ Cohesion: 0.18
 Nodes (24): get_extra_service(), get_extra_service_categories(), get_extra_service_menu_item(), get_extra_service_menus(), get_registered_phone_status(), get_user_available_passes_by_id(), get_user_hash_coins(), get_voucher_by_user() (+16 more)
 
 ### Community 13 - "community_dispute_chat_service.py"
-Cohesion: 0.18
-Nodes (19): _admin_user_ids(), CommunityDisputeChatError, _dispute_initiator(), _evidence_previews(), firebase_uid_for_user(), _match_details(), _match_participant_user_ids(), mint_dispute_chat_token() (+11 more)
+Cohesion: 0.14
+Nodes (18): CommunityFileAsset, CommunityMatchResult, CommunityMatchResultSubmission, CommunityTournamentTeamMember, _admin_user_ids(), CommunityDisputeChatError, firebase_uid_for_user(), _match_details() (+10 more)
 
-### Community 14 - "user_service.py"
-Cohesion: 0.06
-Nodes (22): get_user(), declared_attr, ContactInfo, Safely serialize contact info to dictionary, DeletedUserCooldown, PasswordManager, PhysicalAddress, Safely serialize physical address to dictionary with proper type handling (+14 more)
+### Community 14 - "UserService"
+Cohesion: 0.12
+Nodes (12): ContactInfo, Safely serialize contact info to dictionary, ReferralTracking, Idempotent finalization for post-signup side effects. Safe to run multiple…, Add physical address to user using relationship, Add contact info to user using relationship, Creates a new user and related entities in the database, with validations., Fetch a user by ID with eager loading of relationships (+4 more)
 
 ### Community 15 - "extensions.py"
-Cohesion: 0.08
-Nodes (10): BookingExtraService, CafePass, ExtraServiceMenuImage, MatchParticipant, PaymentTransactionMapping, TournamentSeed, Image, Vendor (+2 more)
+Cohesion: 0.11
+Nodes (6): BookingExtraService, MatchParticipant, ProvisionalResults, TournamentSeed, VerificationChecks, Winners
 
-### Community 16 - "CommunityValidationError"
-Cohesion: 0.17
-Nodes (23): CommunityTournamentAnnouncement, create_announcement(), create_manual_match(), host_results_overview(), list_audit_log(), Operational result-tab payload for the tournament manager., CommunityValidationError, _gamer_summaries() (+15 more)
+### Community 16 - "user_service.py"
+Cohesion: 0.18
+Nodes (6): DeletedUserCooldown, HashWallet, Safely serialize user object to dictionary, User, Voucher, create_voucher_if_eligible()
 
 ### Community 17 - "passModels.py"
 Cohesion: 0.12
 Nodes (6): CafePass, PassRedemptionLog, PassType, Generate unique pass UID for hour-based passes, Validate pass configuration, UserPass
 
-### Community 18 - "app/__init__.py"
-Cohesion: 0.25
-Nodes (6): Config, create_app(), load_key_from_file(), init_firebase(), Send an FCM notification and return structured status for async workers., send_notification_with_result()
+### Community 18 - "add_wallet_balance"
+Cohesion: 0.16
+Nodes (13): add_hash_coins(), add_wallet_balance(), create_voucher_for_referral_points(), _ensure_hash_wallet_row(), _invalidate_user_microcache(), mark_notification_read(), notify_user(), Example: Add hash coins to user and notify. { "amount": 500 } (+5 more)
 
 ### Community 19 - "Phone Number APIs (hfg-user-onboard)"
 Cohesion: 0.13
@@ -189,49 +193,49 @@ Nodes (14): 1) Check Registered Phone, 2) Update Registered Phone, Error Respons
 Cohesion: 0.13
 Nodes (14): Backend Files, Frontend Rules, Gamer Profile, Get Gamer Profile, Get Provisional Results, Get Tournament Detail, Get Unified Leaderboard, Leaderboard (+6 more)
 
+### Community 21 - "delete_user_id"
+Cohesion: 0.18
+Nodes (13): _clear_deleted_user_caches(), delete_user_id(), _invalidate_fid_caches(), _is_valid_user_deletion_cron_request(), _purge_soft_deleted_user(), purge_soft_deleted_users(), Return records that must be retained instead of hard-deleted., Attach requested_fid to the existing user identified by email. Returns dict:… (+5 more)
+
 ### Community 22 - "_run_notification_dispatch_job"
-Cohesion: 0.12
-Nodes (21): cron_trigger_daily_notifications(), _ensure_notification_tracking_tables(), get_notification_dispatch_job(), _is_valid_cron_request(), list_notification_dispatch_failures(), notification_dispatch_failures_summary(), preview_campaign_notification(), Shared-secret gate for cron endpoints. It fails closed when the secret is… (+13 more)
+Cohesion: 0.20
+Nodes (11): _run_notification_dispatch_job(), _upsert_notification_failure(), gemini_agent(), generate_notification(), is_within_time_window(), main(), Check if current time is between 6:00 AM and 10:00 PM IST, run_notification_cycle() (+3 more)
 
 ### Community 23 - "_EmailText"
 Cohesion: 0.20
 Nodes (8): HTMLParser, build_hfg_email_html(), email_text(), _EmailText, _extract_body(), Generate a useful plain-text alternative, retaining links and table values., generate_referral_code(), send_email()
 
-### Community 24 - "_now"
-Cohesion: 0.10
-Nodes (45): CommunityTournamentDispute, accept_result_proposal(), admin_resolve_match_result(), _advance_match_winner(), create_result_proposal(), dispute_result_proposal(), _finalize_result_proposal(), manage_team() (+37 more)
+### Community 24 - "process_pending_community_payments"
+Cohesion: 0.17
+Nodes (13): _apply_provider_refund(), enqueue_community_payment_webhook(), _find_community_registration_for_provider_ids(), process_pending_community_payment_webhooks(), process_pending_community_payments(), process_pending_community_refunds(), Persist an already-authenticated provider event before acknowledging it., Reconcile durable Razorpay webhook events, including out-of-order delivery. (+5 more)
 
 ### Community 25 - "_refund_or_cancel_registration"
 Cohesion: 0.48
 Nodes (5): _refund_or_cancel_registration(), CommunityRegistrationRefundTests, patch, registration(), tournament()
 
 ### Community 27 - "security.py"
-Cohesion: 0.12
-Nodes (15): _build_auth_response_for_fid(), create_user(), _find_existing_user_fid_by_email(), get_user_by_fid_auth(), _invalidate_fid_caches(), _merge_existing_user_by_email(), Build the same payload contract as GET /users/fid/<fid>: {"user": ..., "token":…, Attach requested_fid to the existing user identified by email. Returns dict:… (+7 more)
+Cohesion: 0.20
+Nodes (8): _build_auth_response_for_fid(), get_user_by_fid_auth(), Build the same payload contract as GET /users/fid/<fid>: {"user": ..., "token":…, auth_required(), encode_user(), - match_route_user: if True, ensure token user_id matches the user_id in the…, Encode a user ID using RSA public key PEM string. Returns a base64-encoded…, Fetch only fields required by /users/fid auth response. Returns already-…
 
-### Community 28 - "create_community_payment_attempt"
+### Community 28 - "upload_temporary_evidence"
+Cohesion: 0.20
+Nodes (11): _cloudinary_evidence_config(), _cloudinary_signature(), _configure_cloudinary_evidence(), create_temporary_evidence_upload(), _evidence_upload_access(), _is_cloudinary_evidence_asset(), purge_expired_community_evidence(), Issue a short-lived direct-upload signature; evidence bytes bypass Render. (+3 more)
+
+### Community 29 - "_ensure_notification_tracking_tables"
 Cohesion: 0.29
-Nodes (7): _bind_verified_payment_attempt(), create_community_payment_attempt(), _payment_attempt_receipt(), _payment_checkout_payload(), Keep the Razorpay receipt unique, stable, and within its 40-character limit., Create or reuse the one active Razorpay checkout for a registration. The public…, Attach a provider-verified payment to its registration exactly once.
-
-### Community 29 - "test_notification_campaign.py"
-Cohesion: 0.53
-Nodes (4): generator(), test_ai_failure_uses_configured_fallback(), test_invalid_ai_response_uses_configured_fallback(), test_saved_context_replaces_old_campaign()
+Nodes (9): cron_trigger_daily_notifications(), _ensure_notification_tracking_tables(), get_notification_dispatch_job(), _is_valid_cron_request(), list_notification_dispatch_failures(), notification_dispatch_failures_summary(), Shared-secret gate for cron endpoints. It fails closed when the secret is…, unblock_notification_dispatch_failure() (+1 more)
 
 ### Community 30 - "Community Host Tournament Management E2E"
 Cohesion: 0.20
-Nodes (9): 5. Winners and Payouts, 5A. Organizer Reputation, Community Host Tournament Management E2E, Error Handling, Frontend Rules, Host Payout Tracker, Lifecycle, Roles and Access (+1 more)
+Nodes (9): 3. Participant and Check-in Management, 5A. Organizer Reputation, Community Host Tournament Management E2E, Error Handling, Frontend Rules, Host Roster, Lifecycle, Player Registration (+1 more)
 
 ### Community 31 - "3B. Match Operations"
 Cohesion: 0.20
 Nodes (10): 3B. Match Operations, Admin Referee Resolution, Captain Result Agreement, Dispute Chat Provisioning, Generate Schedule and Bracket, Host Result Proposal and 15-Minute Review, Operate a Match, Read Matches (+2 more)
 
-### Community 32 - "User"
-Cohesion: 0.15
-Nodes (9): delete_user_id(), Return records that must be retained instead of hard-deleted., _sanitize_signup_payload(), _user_deletion_blockers(), _validate_signup_payload(), Safely serialize user object to dictionary, User, patch (+1 more)
-
-### Community 33 - "3. Participant and Check-in Management"
-Cohesion: 0.67
-Nodes (3): 3. Participant and Check-in Management, Host Roster, Player Registration
+### Community 33 - "PasswordManager"
+Cohesion: 0.25
+Nodes (4): declared_attr, PasswordManager, Generates credentials for the user and sends a notification email., generate_credentials()
 
 ### Community 34 - "Cloudinary Community Evidence Setup"
 Cohesion: 0.22
@@ -245,9 +249,17 @@ Nodes (8): Admin APIs, Community Tournament APIs (Frontend Handoff), Frontend Fe
 Cohesion: 0.58
 Nodes (8): events, map_veto_actions, match_disputes, match_participants, match_result_submissions, tournament_matches, tournament_seeds, teams
 
-### Community 37 - "Exception"
-Cohesion: 0.18
-Nodes (9): create_registration(), create_team(), get_event(), get_open_events(), get_results(), route, Exception, ProvisionalResults (+1 more)
+### Community 38 - "_result_contexts"
+Cohesion: 0.25
+Nodes (8): _dispute_initiator(), _evidence_previews(), Resolve registered evidence once, before the backend writes the room., Build immutable, UI-ready previews for the result that led to a dispute., Identify the person who opened the dispute without trusting client input., _result_contexts(), _submitter(), _team_name()
+
+### Community 39 - "event_controller.py"
+Cohesion: 0.48
+Nodes (6): create_registration(), create_team(), get_event(), get_open_events(), get_results(), route
+
+### Community 40 - "create_user"
+Cohesion: 0.33
+Nodes (6): create_user(), _find_existing_user_fid_by_email(), _merge_existing_user_by_email(), Merge signup payload into an existing user identified by email. Also updates…, _sanitize_signup_payload(), _validate_signup_payload()
 
 ### Community 41 - "RazorpayWebhookTests"
 Cohesion: 0.48
@@ -289,19 +301,27 @@ Nodes (4): 1. Host Onboarding, Read Host Program, Read My Verification State, Su
 Cohesion: 0.50
 Nodes (4): 6. Platform Admin Operations, Dispute Queue and Review, Payout Queue and Settlement, Review Host Verification
 
+### Community 54 - "5. Winners and Payouts"
+Cohesion: 0.67
+Nodes (3): 5. Winners and Payouts, Host Payout Tracker, Submit Winners
+
+### Community 55 - "review_payout"
+Cohesion: 0.67
+Nodes (3): _apply_wallet_transaction(), Keep the wallet balance and its immutable transaction ledger in sync., review_payout()
+
 ## Knowledge Gaps
-- **126 isolated node(s):** `BookingExtraService`, `EventStatus`, `MatchParticipant`, `TournamentSeed`, `community_audit_logs` (+121 more)
+- **123 isolated node(s):** `BookingExtraService`, `EventStatus`, `MatchParticipant`, `TournamentSeed`, `community_audit_logs` (+118 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `User` connect `User` to `community_tournament_control_service.py`, `community_tournament_service.py`, `event_participation_controller.py`, `CommunityConflictError`, `user_controller.py`, `review_controller.py`, `community_dispute_chat_service.py`, `user_service.py`, `CommunityValidationError`?**
-  _High betweenness centrality (0.057) - this node is a cross-community bridge._
-- **Why does `CommunityValidationError` connect `CommunityValidationError` to `community_tournament_controller.py`, `User`, `community_tournament_control_service.py`, `community_tournament_service.py`, `event_participation_controller.py`, `CommunityConflictError`, `payment_service.py`, `CommunityEsportsOperationTests`, `_now`, `create_community_payment_attempt`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
-- **Why does `auth_required_self()` connect `community_tournament_controller.py` to `User`, `user_controller.py`, `review_controller.py`, `route`, `user_service.py`, `security.py`?**
+- **Why does `User` connect `user_service.py` to `UserSignupApiTests`, `community_tournament_control_service.py`, `community_tournament_service.py`, `event_participation_controller.py`, `CommunityConflictError`, `user_controller.py`, `review_controller.py`, `community_dispute_chat_service.py`, `UserService`?**
+  _High betweenness centrality (0.061) - this node is a cross-community bridge._
+- **Why does `CommunityValidationError` connect `community_tournament_service.py` to `community_tournament_controller.py`, `payment_service.py`, `community_tournament_control_service.py`, `event_participation_controller.py`, `CommunityConflictError`, `CommunityEsportsOperationTests`, `community_dispute_chat_service.py`, `user_service.py`, `review_payout`, `process_pending_community_payments`, `upload_temporary_evidence`?**
+  _High betweenness centrality (0.055) - this node is a cross-community bridge._
+- **Why does `auth_required_self()` connect `community_tournament_controller.py` to `user_controller.py`, `review_controller.py`, `route`, `add_wallet_balance`, `delete_user_id`, `security.py`?**
   _High betweenness centrality (0.045) - this node is a cross-community bridge._
 - **Are the 33 inferred relationships involving `CommunityValidationError` (e.g. with `CommunityFileAsset` and `CommunityHostStatus`) actually correct?**
   _`CommunityValidationError` has 33 INFERRED edges - model-reasoned connections that need verification._
@@ -310,4 +330,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Are the 33 inferred relationships involving `CommunityForbiddenError` (e.g. with `CommunityFileAsset` and `CommunityHostStatus`) actually correct?**
   _`CommunityForbiddenError` has 33 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `BookingExtraService`, `EventStatus`, `MatchParticipant` to the rest of the system?**
-  _126 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _123 weakly-connected nodes found - possible documentation gaps or missing edges._
