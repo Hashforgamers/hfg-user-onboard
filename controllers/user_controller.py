@@ -1842,9 +1842,13 @@ def add_hash_coins():
     }
     """
     user_id = g.auth_user_id 
-    data = request.json
+    if getattr(g, 'token_expired', False):
+        return jsonify({'error':'token_expired'}), 401
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error':'invalid_request'}), 400
     amount = data.get('amount')
-    if not amount or not isinstance(amount, int) or amount <= 0:
+    if type(amount) is not int or amount <= 0:
         return jsonify({"message": "Amount must be a positive integer"}), 400
 
     user = User.query.get(user_id)
@@ -1852,12 +1856,10 @@ def add_hash_coins():
         return jsonify({'message': 'User not found'}), 404
 
     try:
-        user_hash_coin = db.session.query(UserHashCoin).filter_by(user_id=user_id).first()
-        if not user_hash_coin:
-            user_hash_coin = UserHashCoin(user_id=user_id, hash_coins=amount)
-            db.session.add(user_hash_coin)
-        else:
-            user_hash_coin.hash_coins += amount
+        new_balance = db.session.execute(text('''INSERT INTO user_hash_coins(user_id,hash_coins,updated_at)
+            VALUES (:uid,:amount,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE
+            SET hash_coins=user_hash_coins.hash_coins+EXCLUDED.hash_coins, updated_at=CURRENT_TIMESTAMP
+            RETURNING hash_coins'''), {'uid':user_id,'amount':amount}).scalar_one()
 
         db.session.commit()
 
@@ -1865,7 +1867,7 @@ def add_hash_coins():
         notify_user_all_tokens(
             user,
             "Congrats!",
-            f"You have received {amount} Hash Coins. Total Hash Coins: {user_hash_coin.hash_coins}."
+            f"You have received {amount} Hash Coins. Total Hash Coins: {new_balance}."
         )
         # ---
         _invalidate_user_microcache(user_id, [
@@ -1875,12 +1877,33 @@ def add_hash_coins():
         ])
         return jsonify({
             "user_id": user_id,
-            "new_hash_coins": user_hash_coin.hash_coins,
+            "new_hash_coins": new_balance,
             "message": f"{amount} Hash Coins credited"
         })
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+@user_blueprint.route('/users/hash-coins/spend', methods=['POST'])
+@auth_required_self(decrypt_user=True)
+def spend_hash_coins():
+    if getattr(g, 'token_expired', False):
+        return jsonify({'error':'token_expired'}), 401
+    from services.hash_coin_spend import spend
+    try:
+        result, status = spend(int(g.auth_user_id), request.get_json(silent=True))
+        if status == 200:
+            db.session.commit()
+            _invalidate_user_microcache(g.auth_user_id, ['users-hash-coins'])
+        else:
+            db.session.rollback()
+        response = jsonify(result)
+        response.headers['Cache-Control'] = 'private, no-store'
+        return response, status
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('HashCoin spend failed')
+        return jsonify({'error':'hash_coin_spend_failed'}), 500
 
 @user_blueprint.route("/users/wallet", methods=["GET"])
 @auth_required_self(decrypt_user=True)  # set to False if sub is not encrypted

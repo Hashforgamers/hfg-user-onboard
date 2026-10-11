@@ -50,8 +50,8 @@
     "semantic_hash": "20e060fa54eaa53131a61ee708c8c8c3"
   },
   "controllers/user_controller.py": {
-    "mtime": 1791190323.9693666,
-    "ast_hash": "1b7811acb2e85cf04d2e2b4105a9f7d6",
+    "mtime": 1791716964.9861217,
+    "ast_hash": "f5e865d6d26430e4cb57daba384b32ac",
     "semantic_hash": ""
   },
   "db/__init__.py": {
@@ -567,6 +567,26 @@
   "docs/notification-context.md": {
     "mtime": 1791191072.0764663,
     "ast_hash": "15d4a63939948a8fbb682b74eb904941",
+    "semantic_hash": ""
+  },
+  "services/hash_coin_spend.py": {
+    "mtime": 1791716931.288829,
+    "ast_hash": "71ca50029e30f62c509d5525676673d7",
+    "semantic_hash": ""
+  },
+  "sql/20261011_hash_coin_spends.sql": {
+    "mtime": 1791716931.2917793,
+    "ast_hash": "8e7217e11903e530dc9ac7c4ce4455ab",
+    "semantic_hash": ""
+  },
+  "tests/test_hash_coin_spend_pg.py": {
+    "mtime": 1791717022.743132,
+    "ast_hash": "97ab5217421ddc2d21deec5a9a8739b4",
+    "semantic_hash": ""
+  },
+  "docs/hash-coin-spend.md": {
+    "mtime": 1791717022.7484598,
+    "ast_hash": "4fa14145bbc8b7d9bb4f0ebbb8be10d4",
     "semantic_hash": ""
   }
 }

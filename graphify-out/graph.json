@@ -10,8 +10,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "app",
-      "community": 18,
-      "community_name": "app/__init__.py",
+      "community": 22,
+      "community_name": "_run_notification_dispatch_job",
       "norm_label": "app.py"
     },
     {
@@ -32,8 +32,8 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "app_init_create_app",
-      "community": 18,
-      "community_name": "app/__init__.py",
+      "community": 22,
+      "community_name": "_run_notification_dispatch_job",
       "norm_label": "create_app()"
     },
     {
@@ -1462,8 +1462,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "controllers_event_public_controller",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "event_public_controller.py"
     },
     {
@@ -1473,8 +1473,8 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "controllers_event_public_controller_optional_request_user_id",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "_optional_request_user_id()"
     },
     {
@@ -1484,8 +1484,8 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "controllers_event_public_controller_event_flag",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "_event_flag()"
     },
     {
@@ -1495,8 +1495,8 @@
       "source_location": "",
       "_origin": "ast",
       "id": "controllers_event_public_controller_py_get",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "get"
     },
     {
@@ -1506,8 +1506,8 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "controllers_event_public_controller_list_public_events",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "list_public_events()"
     },
     {
@@ -1517,8 +1517,8 @@
       "source_location": "L236",
       "_origin": "ast",
       "id": "controllers_event_public_controller_get_public_gamer_profile",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "get_public_gamer_profile()"
     },
     {
@@ -1528,8 +1528,8 @@
       "source_location": "L311",
       "_origin": "ast",
       "id": "controllers_event_public_controller_get_event",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "get_event()"
     },
     {
@@ -1539,8 +1539,8 @@
       "source_location": "L472",
       "_origin": "ast",
       "id": "controllers_event_public_controller_get_event_leaderboard",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "get_event_leaderboard()"
     },
     {
@@ -1550,8 +1550,8 @@
       "source_location": "L672",
       "_origin": "ast",
       "id": "controllers_event_public_controller_get_event_provisional_results",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "get_event_provisional_results()"
     },
     {
@@ -1561,8 +1561,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_21",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "return the authenticated app user when a valid bearer token is supplied."
     },
     {
@@ -1572,8 +1572,8 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_43",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "compute display flag in ist \u2014 not utc, not server time. now < start \u2192..."
     },
     {
@@ -1583,8 +1583,8 @@
       "source_location": "L65",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_65",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "public event listing \u2014 no auth required. query params: ?vendor_id=14 (optional..."
     },
     {
@@ -1594,8 +1594,8 @@
       "source_location": "L237",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_237",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "public, display-safe gamer profile for tournament screens."
     },
     {
@@ -1605,8 +1605,8 @@
       "source_location": "L312",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_312",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "single event detail \u2014 no auth required. returns full event info including team..."
     },
     {
@@ -1616,8 +1616,8 @@
       "source_location": "L473",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_473",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "specific event leaderboard. query params: ?stage=auto|winners|provisional auto..."
     },
     {
@@ -1627,8 +1627,8 @@
       "source_location": "L673",
       "_origin": "ast",
       "id": "controllers_event_public_controller_rationale_673",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "specific event provisional results. public endpoint."
     },
     {
@@ -2034,8 +2034,8 @@
       "source_location": "L102",
       "_origin": "ast",
       "id": "controllers_user_controller_invalidate_user_microcache",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "_invalidate_user_microcache()"
     },
     {
@@ -2045,8 +2045,8 @@
       "source_location": "L113",
       "_origin": "ast",
       "id": "controllers_user_controller_ensure_hash_wallet_row",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "_ensure_hash_wallet_row()"
     },
     {
@@ -2056,8 +2056,8 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "controllers_user_controller_user_deletion_blockers",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_user_deletion_blockers()"
     },
     {
@@ -2067,8 +2067,8 @@
       "source_location": "L189",
       "_origin": "ast",
       "id": "controllers_user_controller_clear_deleted_user_caches",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_clear_deleted_user_caches()"
     },
     {
@@ -2078,8 +2078,8 @@
       "source_location": "L203",
       "_origin": "ast",
       "id": "controllers_user_controller_sanitize_signup_payload",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_sanitize_signup_payload()"
     },
     {
@@ -2089,8 +2089,8 @@
       "source_location": "L243",
       "_origin": "ast",
       "id": "controllers_user_controller_validate_signup_payload",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_validate_signup_payload()"
     },
     {
@@ -2100,8 +2100,8 @@
       "source_location": "L298",
       "_origin": "ast",
       "id": "controllers_user_controller_build_auth_response_for_fid",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "_build_auth_response_for_fid()"
     },
     {
@@ -2112,7 +2112,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_invalidate_fid_caches",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_invalidate_fid_caches()"
     },
     {
@@ -2123,7 +2123,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_find_existing_user_fid_by_email",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_find_existing_user_fid_by_email()"
     },
     {
@@ -2134,7 +2134,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_relink_fid_for_existing_email",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_relink_fid_for_existing_email()"
     },
     {
@@ -2145,7 +2145,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_merge_existing_user_by_email",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_merge_existing_user_by_email()"
     },
     {
@@ -2166,8 +2166,8 @@
       "source_location": "L605",
       "_origin": "ast",
       "id": "controllers_user_controller_notify_user",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 18,
+      "community_name": "app/__init__.py",
       "norm_label": "notify_user()"
     },
     {
@@ -2177,8 +2177,8 @@
       "source_location": "L613",
       "_origin": "ast",
       "id": "controllers_user_controller_is_valid_cron_request",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "_is_valid_cron_request()"
     },
     {
@@ -2188,8 +2188,8 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "controllers_user_controller_ensure_notification_tracking_tables",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "_ensure_notification_tracking_tables()"
     },
     {
@@ -2243,8 +2243,8 @@
       "source_location": "L837",
       "_origin": "ast",
       "id": "controllers_user_controller_get_notification_dispatch_job",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "get_notification_dispatch_job()"
     },
     {
@@ -2254,8 +2254,8 @@
       "source_location": "L848",
       "_origin": "ast",
       "id": "controllers_user_controller_list_notification_dispatch_failures",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "list_notification_dispatch_failures()"
     },
     {
@@ -2265,8 +2265,8 @@
       "source_location": "L867",
       "_origin": "ast",
       "id": "controllers_user_controller_notification_dispatch_failures_summary",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "notification_dispatch_failures_summary()"
     },
     {
@@ -2276,8 +2276,8 @@
       "source_location": "L894",
       "_origin": "ast",
       "id": "controllers_user_controller_unblock_notification_dispatch_failure",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "unblock_notification_dispatch_failure()"
     },
     {
@@ -2288,7 +2288,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_create_user",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "create_user()"
     },
     {
@@ -2309,8 +2309,8 @@
       "source_location": "L1111",
       "_origin": "ast",
       "id": "controllers_user_controller_delete_user_id",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "delete_user_id()"
     },
     {
@@ -2320,8 +2320,8 @@
       "source_location": "L1193",
       "_origin": "ast",
       "id": "controllers_user_controller_restore_deleted_user",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "restore_deleted_user()"
     },
     {
@@ -2331,8 +2331,8 @@
       "source_location": "L1226",
       "_origin": "ast",
       "id": "controllers_user_controller_is_valid_user_deletion_cron_request",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_is_valid_user_deletion_cron_request()"
     },
     {
@@ -2342,8 +2342,8 @@
       "source_location": "L1237",
       "_origin": "ast",
       "id": "controllers_user_controller_purge_soft_deleted_user",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "_purge_soft_deleted_user()"
     },
     {
@@ -2353,8 +2353,8 @@
       "source_location": "L1309",
       "_origin": "ast",
       "id": "controllers_user_controller_purge_soft_deleted_users",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "purge_soft_deleted_users()"
     },
     {
@@ -2364,8 +2364,8 @@
       "source_location": "L1336",
       "_origin": "ast",
       "id": "controllers_user_controller_get_user",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "get_user()"
     },
     {
@@ -2408,8 +2408,8 @@
       "source_location": "L1527",
       "_origin": "ast",
       "id": "controllers_user_controller_get_user_by_fid_auth",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "get_user_by_fid_auth()"
     },
     {
@@ -2430,8 +2430,8 @@
       "source_location": "L1744",
       "_origin": "ast",
       "id": "controllers_user_controller_create_voucher_for_referral_points",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "create_voucher_for_referral_points()"
     },
     {
@@ -2463,15 +2463,26 @@
       "source_location": "L1837",
       "_origin": "ast",
       "id": "controllers_user_controller_add_hash_coins",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "add_hash_coins()"
+    },
+    {
+      "label": "spend_hash_coins()",
+      "file_type": "code",
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L1889",
+      "_origin": "ast",
+      "id": "controllers_user_controller_spend_hash_coins",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
+      "norm_label": "spend_hash_coins()"
     },
     {
       "label": "get_wallet_balance_auth()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1887",
+      "source_location": "L1910",
       "_origin": "ast",
       "id": "controllers_user_controller_get_wallet_balance_auth",
       "community": 12,
@@ -2482,29 +2493,29 @@
       "label": "claim_drop_crate()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1913",
+      "source_location": "L1936",
       "_origin": "ast",
       "id": "controllers_user_controller_claim_drop_crate",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "claim_drop_crate()"
     },
     {
       "label": "add_wallet_balance()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1966",
+      "source_location": "L1989",
       "_origin": "ast",
       "id": "controllers_user_controller_add_wallet_balance",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "add_wallet_balance()"
     },
     {
       "label": "user_purchase_pass()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2058",
+      "source_location": "L2081",
       "_origin": "ast",
       "id": "controllers_user_controller_user_purchase_pass",
       "community": 7,
@@ -2515,7 +2526,7 @@
       "label": "user_transaction_history()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2136",
+      "source_location": "L2159",
       "_origin": "ast",
       "id": "controllers_user_controller_user_transaction_history",
       "community": 12,
@@ -2526,7 +2537,7 @@
       "label": "user_available_passes()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2189",
+      "source_location": "L2212",
       "_origin": "ast",
       "id": "controllers_user_controller_user_available_passes",
       "community": 12,
@@ -2537,7 +2548,7 @@
       "label": "user_all_passes()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2255",
+      "source_location": "L2278",
       "_origin": "ast",
       "id": "controllers_user_controller_user_all_passes",
       "community": 12,
@@ -2548,7 +2559,7 @@
       "label": "user_passes()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2297",
+      "source_location": "L2320",
       "_origin": "ast",
       "id": "controllers_user_controller_user_passes",
       "community": 12,
@@ -2559,7 +2570,7 @@
       "label": "user_passes_history()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2340",
+      "source_location": "L2363",
       "_origin": "ast",
       "id": "controllers_user_controller_user_passes_history",
       "community": 12,
@@ -2570,7 +2581,7 @@
       "label": "pass_details()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2371",
+      "source_location": "L2394",
       "_origin": "ast",
       "id": "controllers_user_controller_pass_details",
       "community": 12,
@@ -2581,7 +2592,7 @@
       "label": "get_extra_service_categories()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2399",
+      "source_location": "L2422",
       "_origin": "ast",
       "id": "controllers_user_controller_get_extra_service_categories",
       "community": 12,
@@ -2592,7 +2603,7 @@
       "label": "get_extra_service_menus()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2424",
+      "source_location": "L2447",
       "_origin": "ast",
       "id": "controllers_user_controller_get_extra_service_menus",
       "community": 12,
@@ -2603,7 +2614,7 @@
       "label": "get_extra_service_menu_item()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2459",
+      "source_location": "L2482",
       "_origin": "ast",
       "id": "controllers_user_controller_get_extra_service_menu_item",
       "community": 12,
@@ -2614,7 +2625,7 @@
       "label": "get_extra_service()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2496",
+      "source_location": "L2519",
       "_origin": "ast",
       "id": "controllers_user_controller_get_extra_service",
       "community": 12,
@@ -2625,7 +2636,7 @@
       "label": "get_all_fcm()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2562",
+      "source_location": "L2585",
       "_origin": "ast",
       "id": "controllers_user_controller_get_all_fcm",
       "community": 7,
@@ -2636,7 +2647,7 @@
       "label": "get_user_available_passes_by_id()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2590",
+      "source_location": "L2613",
       "_origin": "ast",
       "id": "controllers_user_controller_get_user_available_passes_by_id",
       "community": 12,
@@ -2647,7 +2658,7 @@
       "label": "list_user_notifications()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2671",
+      "source_location": "L2694",
       "_origin": "ast",
       "id": "controllers_user_controller_list_user_notifications",
       "community": 12,
@@ -2658,29 +2669,29 @@
       "label": "mark_notification_read()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2733",
+      "source_location": "L2756",
       "_origin": "ast",
       "id": "controllers_user_controller_mark_notification_read",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "mark_notification_read()"
     },
     {
       "label": "trigger_demo_notification()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2756",
+      "source_location": "L2779",
       "_origin": "ast",
       "id": "controllers_user_controller_trigger_demo_notification",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 18,
+      "community_name": "app/__init__.py",
       "norm_label": "trigger_demo_notification()"
     },
     {
       "label": "preview_campaign_notification()",
       "file_type": "code",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2851",
+      "source_location": "L2874",
       "_origin": "ast",
       "id": "controllers_user_controller_preview_campaign_notification",
       "community": 22,
@@ -2694,8 +2705,8 @@
       "source_location": "L145",
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_145",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "return records that must be retained instead of hard-deleted."
     },
     {
@@ -2705,8 +2716,8 @@
       "source_location": "L299",
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_299",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "build the same payload contract as get /users/fid/<fid>: {\"user\": ..., \"token\":..."
     },
     {
@@ -2717,7 +2728,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_404",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "attach requested_fid to the existing user identified by email. returns dict:..."
     },
     {
@@ -2728,7 +2739,7 @@
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_485",
       "community": 27,
-      "community_name": "security.py",
+      "community_name": "test_user_signup_api.py",
       "norm_label": "merge signup payload into an existing user identified by email. also updates..."
     },
     {
@@ -2738,8 +2749,8 @@
       "source_location": "L614",
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_614",
-      "community": 22,
-      "community_name": "_run_notification_dispatch_job",
+      "community": 77,
+      "community_name": "_ensure_notification_tracking_tables",
       "norm_label": "shared-secret gate for cron endpoints. it fails closed when the secret is..."
     },
     {
@@ -2782,28 +2793,28 @@
       "source_location": "L1838",
       "_origin": "ast",
       "id": "controllers_user_controller_rationale_1838",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "example: add hash coins to user and notify. { \"amount\": 500 }"
     },
     {
       "label": "Credit the fixed welcome reward once per authenticated account.",
       "file_type": "rationale",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1914",
+      "source_location": "L1937",
       "_origin": "ast",
-      "id": "controllers_user_controller_rationale_1914",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "id": "controllers_user_controller_rationale_1937",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "credit the fixed welcome reward once per authenticated account."
     },
     {
       "label": "Get all extra service categories with their menu items for a specific vendor\u2026",
       "file_type": "rationale",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2497",
+      "source_location": "L2520",
       "_origin": "ast",
-      "id": "controllers_user_controller_rationale_2497",
+      "id": "controllers_user_controller_rationale_2520",
       "community": 12,
       "community_name": "route",
       "norm_label": "get all extra service categories with their menu items for a specific vendor..."
@@ -2812,9 +2823,9 @@
       "label": "Get available passes for a specific user by user_id. Includes hour-based pass\u2026",
       "file_type": "rationale",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2591",
+      "source_location": "L2614",
       "_origin": "ast",
-      "id": "controllers_user_controller_rationale_2591",
+      "id": "controllers_user_controller_rationale_2614",
       "community": 12,
       "community_name": "route",
       "norm_label": "get available passes for a specific user by user_id. includes hour-based pass..."
@@ -2823,11 +2834,11 @@
       "label": "Demo endpoint to create a notification + trigger FCM with invite-like payload.\u2026",
       "file_type": "rationale",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2757",
+      "source_location": "L2780",
       "_origin": "ast",
-      "id": "controllers_user_controller_rationale_2757",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "id": "controllers_user_controller_rationale_2780",
+      "community": 18,
+      "community_name": "app/__init__.py",
       "norm_label": "demo endpoint to create a notification + trigger fcm with invite-like payload...."
     },
     {
@@ -3024,8 +3035,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_cafepass",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "cafepass.py"
     },
     {
@@ -3035,8 +3046,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_cafepass_cafepass",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "cafepass"
     },
     {
@@ -3046,8 +3057,8 @@
       "source_location": "L38",
       "_origin": "ast",
       "id": "models_cafepass_cafepass_repr",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -3057,8 +3068,8 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "models_cafepass_cafepass_to_dict",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3090,8 +3101,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_communitytournament",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communitytournament.py"
     },
     {
@@ -3102,7 +3113,7 @@
       "_origin": "ast",
       "id": "models_communitytournament_communityhoststatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityhoststatus"
     },
     {
@@ -3113,7 +3124,7 @@
       "_origin": "ast",
       "id": "models_communitytournament_communityhosttier",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityhosttier"
     },
     {
@@ -3123,8 +3134,8 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "models_communitytournament_communitytournamentstatus",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communitytournamentstatus"
     },
     {
@@ -3135,7 +3146,7 @@
       "_origin": "ast",
       "id": "models_communitytournament_communitytournamentregistrationstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitytournamentregistrationstatus"
     },
     {
@@ -3145,8 +3156,8 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "models_communitytournament_communityhostverification",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communityhostverification"
     },
     {
@@ -3156,8 +3167,8 @@
       "source_location": "L80",
       "_origin": "ast",
       "id": "models_communitytournament_communityhostverification_to_dict",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3167,8 +3178,8 @@
       "source_location": "L106",
       "_origin": "ast",
       "id": "models_communitytournament_communitytournament",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communitytournament"
     },
     {
@@ -3178,8 +3189,8 @@
       "source_location": "L189",
       "_origin": "ast",
       "id": "models_communitytournament_communitytournament_to_dict",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3189,8 +3200,8 @@
       "source_location": "L254",
       "_origin": "ast",
       "id": "models_communitytournament_communitytournamentregistration",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communitytournamentregistration"
     },
     {
@@ -3200,8 +3211,8 @@
       "source_location": "L300",
       "_origin": "ast",
       "id": "models_communitytournament_communitytournamentregistration_to_dict",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3212,7 +3223,7 @@
       "_origin": "ast",
       "id": "models_communitytournament_communityfileasset",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityfileasset"
     },
     {
@@ -3223,7 +3234,7 @@
       "_origin": "ast",
       "id": "models_communitytournament_communityfileasset_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3234,7 +3245,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitytournamentoperations.py"
     },
     {
@@ -3245,7 +3256,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityresultstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityresultstatus"
     },
     {
@@ -3256,7 +3267,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitydisputestatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitydisputestatus"
     },
     {
@@ -3267,7 +3278,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypayoutstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypayoutstatus"
     },
     {
@@ -3278,7 +3289,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentsettlementstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentsettlementstatus"
     },
     {
@@ -3289,7 +3300,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentattemptstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentattemptstatus"
     },
     {
@@ -3300,7 +3311,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentwebhookstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentwebhookstatus"
     },
     {
@@ -3311,7 +3322,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityduplicatepaymentrecoverystatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityduplicatepaymentrecoverystatus"
     },
     {
@@ -3333,7 +3344,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchstatus",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitymatchstatus"
     },
     {
@@ -3343,8 +3354,8 @@
       "source_location": "L82",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentteam",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitytournamentteam"
     },
     {
@@ -3354,8 +3365,8 @@
       "source_location": "L107",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentteam_to_dict",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3365,8 +3376,8 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentteammember",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "communitytournamentteammember"
     },
     {
@@ -3376,8 +3387,8 @@
       "source_location": "L149",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentteammember_to_dict",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": ".to_dict()"
     },
     {
@@ -3388,7 +3399,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentmatch",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitytournamentmatch"
     },
     {
@@ -3399,7 +3410,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentmatch_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3409,8 +3420,8 @@
       "source_location": "L222",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresultsubmission",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 13,
+      "community_name": "community_dispute_chat_service.py",
       "norm_label": "communitymatchresultsubmission"
     },
     {
@@ -3420,8 +3431,8 @@
       "source_location": "L239",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresultsubmission_to_dict",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 13,
+      "community_name": "community_dispute_chat_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3432,7 +3443,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresultproposal",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitymatchresultproposal"
     },
     {
@@ -3443,7 +3454,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresultproposal_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3475,8 +3486,8 @@
       "source_location": "L322",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentreview",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "communitytournamentreview"
     },
     {
@@ -3486,8 +3497,8 @@
       "source_location": "L347",
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentreview_to_dict",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3498,7 +3509,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresult",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitymatchresult"
     },
     {
@@ -3509,7 +3520,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitymatchresult_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3542,7 +3553,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentpayout",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitytournamentpayout"
     },
     {
@@ -3553,7 +3564,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitytournamentpayout_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3564,7 +3575,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityauditlog",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityauditlog"
     },
     {
@@ -3575,7 +3586,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityauditlog_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3586,7 +3597,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentsettlementjob",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentsettlementjob"
     },
     {
@@ -3597,7 +3608,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentsettlementjob_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3608,7 +3619,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentattempt",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentattempt"
     },
     {
@@ -3619,7 +3630,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communitypaymentwebhookevent",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitypaymentwebhookevent"
     },
     {
@@ -3630,7 +3641,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityduplicatepaymentrecovery",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityduplicatepaymentrecovery"
     },
     {
@@ -3641,7 +3652,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_communityduplicatepaymentrecovery_to_dict",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3652,7 +3663,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_rationale_513",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "durable retry record for a paid community registration."
     },
     {
@@ -3663,7 +3674,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_rationale_556",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "one immutable provider order for a community registration checkout."
     },
     {
@@ -3674,7 +3685,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_rationale_581",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "authenticated provider event inbox, retained for replay-safe reconciliation."
     },
     {
@@ -3685,7 +3696,7 @@
       "_origin": "ast",
       "id": "models_communitytournamentoperations_rationale_609",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "a captured extra payment that must be refunded without changing entry state."
     },
     {
@@ -3695,8 +3706,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_contactinfo",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "contactinfo.py"
     },
     {
@@ -3706,8 +3717,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_contactinfo_contactinfo",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "contactinfo"
     },
     {
@@ -3717,8 +3728,8 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "models_contactinfo_contactinfo_to_dict",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -3728,8 +3739,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "models_contactinfo_rationale_21",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "safely serialize contact info to dictionary"
     },
     {
@@ -3739,8 +3750,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_deletedusercooldownperiod",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "deletedusercooldownperiod.py"
     },
     {
@@ -3750,8 +3761,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_deletedusercooldownperiod_deletedusercooldown",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "deletedusercooldown"
     },
     {
@@ -3761,8 +3772,8 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "models_deletedusercooldownperiod_deletedusercooldown_init",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": ".__init__()"
     },
     {
@@ -3772,8 +3783,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_event",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "event.py"
     },
     {
@@ -3783,8 +3794,8 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "models_event_eventstatus",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "eventstatus"
     },
     {
@@ -3794,8 +3805,8 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "models_event_event",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "event"
     },
     {
@@ -3849,8 +3860,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_extraservicemenuimage",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "extraservicemenuimage.py"
     },
     {
@@ -3860,8 +3871,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_extraservicemenuimage_extraservicemenuimage",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "extraservicemenuimage"
     },
     {
@@ -3871,8 +3882,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "models_extraservicemenuimage_extraservicemenuimage_str",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": ".__str__()"
     },
     {
@@ -3882,8 +3893,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_fcmtoken",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 4,
+      "community_name": "event_participation_controller.py",
       "norm_label": "fcmtoken.py"
     },
     {
@@ -3893,8 +3904,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "models_fcmtoken_fcmtoken",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 4,
+      "community_name": "event_participation_controller.py",
       "norm_label": "fcmtoken"
     },
     {
@@ -3904,8 +3915,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_hashwallet",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "hashwallet.py"
     },
     {
@@ -3916,7 +3927,7 @@
       "_origin": "ast",
       "id": "models_hashwallet_hashwallet",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "hashwallet"
     },
     {
@@ -3927,7 +3938,7 @@
       "_origin": "ast",
       "id": "models_hashwallet_hashwallet_repr",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -3937,8 +3948,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_hashwallettransaction",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "hashwallettransaction.py"
     },
     {
@@ -3949,7 +3960,7 @@
       "_origin": "ast",
       "id": "models_hashwallettransaction_hashwallettransaction",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "hashwallettransaction"
     },
     {
@@ -3960,7 +3971,7 @@
       "_origin": "ast",
       "id": "models_hashwallettransaction_hashwallettransaction_repr",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -4344,8 +4355,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_passwordmanager",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "passwordmanager.py"
     },
     {
@@ -4356,7 +4367,7 @@
       "_origin": "ast",
       "id": "models_passwordmanager_passwordmanager",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "passwordmanager"
     },
     {
@@ -4367,7 +4378,7 @@
       "_origin": "ast",
       "id": "declared_attr",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "declared_attr"
     },
     {
@@ -4378,7 +4389,7 @@
       "_origin": "ast",
       "id": "models_passwordmanager_passwordmanager_mapper_args",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".__mapper_args__()"
     },
     {
@@ -4389,7 +4400,7 @@
       "_origin": "ast",
       "id": "models_passwordmanager_passwordmanager_user",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".user()"
     },
     {
@@ -4400,7 +4411,7 @@
       "_origin": "ast",
       "id": "models_passwordmanager_passwordmanager_repr",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".__repr__()"
     },
     {
@@ -4410,8 +4421,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_paymenttransactionmapping",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "paymenttransactionmapping.py"
     },
     {
@@ -4421,8 +4432,8 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "models_paymenttransactionmapping_paymenttransactionmapping",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": "paymenttransactionmapping"
     },
     {
@@ -4432,8 +4443,8 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "models_paymenttransactionmapping_paymenttransactionmapping_repr",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 7,
+      "community_name": "user_controller.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -4443,8 +4454,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_physicaladdress",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "physicaladdress.py"
     },
     {
@@ -4455,7 +4466,7 @@
       "_origin": "ast",
       "id": "models_physicaladdress_physicaladdress",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "physicaladdress"
     },
     {
@@ -4466,7 +4477,7 @@
       "_origin": "ast",
       "id": "models_physicaladdress_physicaladdress_to_dict",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".to_dict()"
     },
     {
@@ -4477,7 +4488,7 @@
       "_origin": "ast",
       "id": "models_physicaladdress_rationale_30",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "safely serialize physical address to dictionary with proper type handling"
     },
     {
@@ -4520,8 +4531,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_referraltracking",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "referraltracking.py"
     },
     {
@@ -4531,8 +4542,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_referraltracking_referraltracking",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "referraltracking"
     },
     {
@@ -4729,8 +4740,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_uploadedimage",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": "uploadedimage.py"
     },
     {
@@ -4740,8 +4751,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_uploadedimage_image",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": "image"
     },
     {
@@ -4751,8 +4762,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_user",
-      "community": 32,
-      "community_name": "User",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "user.py"
     },
     {
@@ -4795,8 +4806,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_userdeletionarchive",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "userdeletionarchive.py"
     },
     {
@@ -4806,8 +4817,8 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "models_userdeletionarchive_userdeletionarchive",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "userdeletionarchive"
     },
     {
@@ -4861,8 +4872,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_vendor",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": "vendor.py"
     },
     {
@@ -4872,8 +4883,8 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "models_vendor_vendor",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": "vendor"
     },
     {
@@ -4883,8 +4894,8 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "models_vendor_vendor_str",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": ".__str__()"
     },
     {
@@ -4894,8 +4905,8 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "models_vendor_vendor_repr",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 79,
+      "community_name": "vendor.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -4905,8 +4916,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_verification_checks",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 81,
+      "community_name": "verification_checks.py",
       "norm_label": "verification_checks.py"
     },
     {
@@ -4916,8 +4927,8 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "models_verification_checks_verificationchecks",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 81,
+      "community_name": "verification_checks.py",
       "norm_label": "verificationchecks"
     },
     {
@@ -4927,8 +4938,8 @@
       "source_location": "L44",
       "_origin": "ast",
       "id": "models_verification_checks_verificationchecks_to_dict",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 81,
+      "community_name": "verification_checks.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -4938,8 +4949,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_voucher",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "voucher.py"
     },
     {
@@ -4949,8 +4960,8 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "models_voucher_voucher",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "voucher"
     },
     {
@@ -4960,8 +4971,8 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "models_voucher_voucher_repr",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": ".__repr__()"
     },
     {
@@ -4971,8 +4982,8 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "models_voucher_voucher_to_dict",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -4982,8 +4993,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "models_winners",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 82,
+      "community_name": "winners.py",
       "norm_label": "winners.py"
     },
     {
@@ -4993,8 +5004,8 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "models_winners_winners",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 82,
+      "community_name": "winners.py",
       "norm_label": "winners"
     },
     {
@@ -5004,8 +5015,8 @@
       "source_location": "L38",
       "_origin": "ast",
       "id": "models_winners_winners_to_dict",
-      "community": 15,
-      "community_name": "extensions.py",
+      "community": 82,
+      "community_name": "winners.py",
       "norm_label": ".to_dict()"
     },
     {
@@ -5268,8 +5279,8 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_team_payload",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "_team_payload()"
     },
     {
@@ -5279,8 +5290,8 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_validate_roster",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 10,
+      "community_name": "CommunityEsportsOperationTests",
       "norm_label": "_validate_roster()"
     },
     {
@@ -5290,8 +5301,8 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_automatic_team_ready",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "_automatic_team_ready()"
     },
     {
@@ -5301,8 +5312,8 @@
       "source_location": "L154",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_create_team",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "create_team()"
     },
     {
@@ -5312,8 +5323,8 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_replace_team_roster",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "replace_team_roster()"
     },
     {
@@ -5323,8 +5334,8 @@
       "source_location": "L256",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_invite_team_member",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "invite_team_member()"
     },
     {
@@ -5334,8 +5345,8 @@
       "source_location": "L318",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_respond_team_invitation",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "respond_team_invitation()"
     },
     {
@@ -5411,8 +5422,8 @@
       "source_location": "L548",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_schedule_bracket_rounds",
-      "community": 10,
-      "community_name": "CommunityEsportsOperationTests",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "_schedule_bracket_rounds()"
     },
     {
@@ -5455,8 +5466,8 @@
       "source_location": "L730",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_create_manual_match",
-      "community": 16,
-      "community_name": "CommunityValidationError",
+      "community": 3,
+      "community_name": "create_tournament",
       "norm_label": "create_manual_match()"
     },
     {
@@ -5565,8 +5576,8 @@
       "source_location": "L988",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_match_captain_user_ids",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "_match_captain_user_ids()"
     },
     {
@@ -5719,8 +5730,8 @@
       "source_location": "L1739",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_control_room",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "control_room()"
     },
     {
@@ -5752,8 +5763,8 @@
       "source_location": "L1994",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_rule_template",
-      "community": 0,
-      "community_name": "community_tournament_controller.py",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "rule_template()"
     },
     {
@@ -5763,8 +5774,8 @@
       "source_location": "L2007",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_tournament_readiness",
-      "community": 0,
-      "community_name": "community_tournament_controller.py",
+      "community": 16,
+      "community_name": "CommunityValidationError",
       "norm_label": "tournament_readiness()"
     },
     {
@@ -5774,8 +5785,8 @@
       "source_location": "L2040",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_create_tournament_review",
-      "community": 5,
-      "community_name": "CommunityConflictError",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "create_tournament_review()"
     },
     {
@@ -5796,8 +5807,8 @@
       "source_location": "L257",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_rationale_257",
-      "community": 2,
-      "community_name": "community_tournament_control_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "reserve one roster slot and notify an invited player without replacing the..."
     },
     {
@@ -5807,8 +5818,8 @@
       "source_location": "L549",
       "_origin": "ast",
       "id": "services_community_tournament_control_service_rationale_549",
-      "community": 10,
-      "community_name": "CommunityEsportsOperationTests",
+      "community": 2,
+      "community_name": "community_tournament_control_service.py",
       "norm_label": "schedule playable matches by round; automatic byes take no time slot."
     },
     {
@@ -5873,7 +5884,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "services_community_tournament_service",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "community_tournament_service.py"
     },
@@ -5907,7 +5918,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_communityforbiddenerror",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityforbiddenerror"
     },
     {
@@ -5918,7 +5929,7 @@
       "_origin": "ast",
       "id": "permissionerror",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "permissionerror"
     },
     {
@@ -5929,7 +5940,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_communityconflicterror",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communityconflicterror"
     },
     {
@@ -5940,7 +5951,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_py_runtimeerror",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "runtimeerror"
     },
     {
@@ -5951,7 +5962,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_communitystorageerror",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "communitystorageerror"
     },
     {
@@ -5973,7 +5984,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_parse_datetime",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_parse_datetime()"
     },
     {
@@ -5984,7 +5995,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_money",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_money()"
     },
     {
@@ -5995,7 +6006,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_room_details_data",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_room_details_data()"
     },
     {
@@ -6006,7 +6017,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_json_object",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_json_object()"
     },
     {
@@ -6017,7 +6028,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_bounded_int",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_bounded_int()"
     },
     {
@@ -6028,7 +6039,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_invite_code_hash",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_invite_code_hash()"
     },
     {
@@ -6050,7 +6061,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_banner_asset",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_banner_asset()"
     },
     {
@@ -6061,7 +6072,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_host_commission_rate",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_host_commission_rate()"
     },
     {
@@ -6126,7 +6137,7 @@
       "source_location": "L315",
       "_origin": "ast",
       "id": "services_community_tournament_service_cloudinary_evidence_config",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_cloudinary_evidence_config()"
     },
@@ -6137,7 +6148,7 @@
       "source_location": "L324",
       "_origin": "ast",
       "id": "services_community_tournament_service_configure_cloudinary_evidence",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_configure_cloudinary_evidence()"
     },
@@ -6148,7 +6159,7 @@
       "source_location": "L334",
       "_origin": "ast",
       "id": "services_community_tournament_service_evidence_upload_access",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_evidence_upload_access()"
     },
@@ -6159,7 +6170,7 @@
       "source_location": "L354",
       "_origin": "ast",
       "id": "services_community_tournament_service_cloudinary_signature",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_cloudinary_signature()"
     },
@@ -6170,7 +6181,7 @@
       "source_location": "L363",
       "_origin": "ast",
       "id": "services_community_tournament_service_create_temporary_evidence_upload",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "create_temporary_evidence_upload()"
     },
@@ -6181,7 +6192,7 @@
       "source_location": "L398",
       "_origin": "ast",
       "id": "services_community_tournament_service_upload_temporary_evidence",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "upload_temporary_evidence()"
     },
@@ -6192,7 +6203,7 @@
       "source_location": "L486",
       "_origin": "ast",
       "id": "services_community_tournament_service_is_cloudinary_evidence_asset",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_is_cloudinary_evidence_asset()"
     },
@@ -6203,7 +6214,7 @@
       "source_location": "L498",
       "_origin": "ast",
       "id": "services_community_tournament_service_purge_expired_community_evidence",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "purge_expired_community_evidence()"
     },
@@ -6215,7 +6226,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_apply_wallet_transaction",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "_apply_wallet_transaction()"
     },
     {
@@ -6225,8 +6236,8 @@
       "source_location": "L571",
       "_origin": "ast",
       "id": "services_community_tournament_service_derive_status",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 10,
+      "community_name": "CommunityEsportsOperationTests",
       "norm_label": "_derive_status()"
     },
     {
@@ -6237,7 +6248,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_sync_tournament_status",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "sync_tournament_status()"
     },
     {
@@ -6248,7 +6259,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_recalculate_prize_pool",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_recalculate_prize_pool()"
     },
     {
@@ -6259,7 +6270,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_host_verification",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_host_verification()"
     },
     {
@@ -6270,7 +6281,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_require_host_for_paid_tournament",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "_require_host_for_paid_tournament()"
     },
     {
@@ -6281,7 +6292,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_submit_host_verification",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "submit_host_verification()"
     },
     {
@@ -6303,7 +6314,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_create_tournament",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "create_tournament()"
     },
     {
@@ -6314,7 +6325,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_update_tournament",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "update_tournament()"
     },
     {
@@ -6324,8 +6335,8 @@
       "source_location": "L996",
       "_origin": "ast",
       "id": "services_community_tournament_service_close_registration",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "close_registration()"
     },
     {
@@ -6346,8 +6357,8 @@
       "source_location": "L1056",
       "_origin": "ast",
       "id": "services_community_tournament_service_list_tournaments",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "list_tournaments()"
     },
     {
@@ -6357,8 +6368,8 @@
       "source_location": "L1107",
       "_origin": "ast",
       "id": "services_community_tournament_service_get_tournament",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 0,
+      "community_name": "community_tournament_controller.py",
       "norm_label": "get_tournament()"
     },
     {
@@ -6379,8 +6390,8 @@
       "source_location": "L1165",
       "_origin": "ast",
       "id": "services_community_tournament_service_payment_attempt_receipt",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "_payment_attempt_receipt()"
     },
     {
@@ -6390,8 +6401,8 @@
       "source_location": "L1171",
       "_origin": "ast",
       "id": "services_community_tournament_service_payment_checkout_payload",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "_payment_checkout_payload()"
     },
     {
@@ -6401,8 +6412,8 @@
       "source_location": "L1187",
       "_origin": "ast",
       "id": "services_community_tournament_service_create_community_payment_attempt",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "create_community_payment_attempt()"
     },
     {
@@ -6412,8 +6423,8 @@
       "source_location": "L1258",
       "_origin": "ast",
       "id": "services_community_tournament_service_bind_verified_payment_attempt",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "_bind_verified_payment_attempt()"
     },
     {
@@ -6445,8 +6456,8 @@
       "source_location": "L1366",
       "_origin": "ast",
       "id": "services_community_tournament_service_find_community_registration_for_provider_ids",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 28,
+      "community_name": "enqueue_community_payment_webhook",
       "norm_label": "_find_community_registration_for_provider_ids()"
     },
     {
@@ -6456,8 +6467,8 @@
       "source_location": "L1399",
       "_origin": "ast",
       "id": "services_community_tournament_service_enqueue_community_payment_webhook",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 28,
+      "community_name": "enqueue_community_payment_webhook",
       "norm_label": "enqueue_community_payment_webhook()"
     },
     {
@@ -6489,8 +6500,8 @@
       "source_location": "L1543",
       "_origin": "ast",
       "id": "services_community_tournament_service_register_for_tournament",
-      "community": 24,
-      "community_name": "_now",
+      "community": 3,
+      "community_name": "create_tournament",
       "norm_label": "register_for_tournament()"
     },
     {
@@ -6533,7 +6544,7 @@
       "source_location": "L1851",
       "_origin": "ast",
       "id": "services_community_tournament_service_apply_provider_refund",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "_apply_provider_refund()"
     },
@@ -6555,8 +6566,8 @@
       "source_location": "L1922",
       "_origin": "ast",
       "id": "services_community_tournament_service_process_pending_community_refunds",
-      "community": 24,
-      "community_name": "_now",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "process_pending_community_refunds()"
     },
     {
@@ -6600,7 +6611,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_cancel_registration",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "cancel_registration()"
     },
     {
@@ -6798,7 +6809,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_submit_winners",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "submit_winners()"
     },
     {
@@ -6809,7 +6820,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_create_file_asset",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "create_file_asset()"
     },
     {
@@ -6820,7 +6831,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_165",
       "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community_name": "create_tournament",
       "norm_label": "accept a game-neutral room/lobby payload without imposing game-specific keys."
     },
     {
@@ -6830,7 +6841,7 @@
       "source_location": "L364",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_364",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "issue a short-lived direct-upload signature; evidence bytes bypass render."
     },
@@ -6841,7 +6852,7 @@
       "source_location": "L399",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_399",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "upload a screenshot through hash and register it as temporary evidence."
     },
@@ -6852,7 +6863,7 @@
       "source_location": "L499",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_499",
-      "community": 3,
+      "community": 5,
       "community_name": "community_tournament_service.py",
       "norm_label": "delete retained cloudinary evidence while keeping an audit tombstone."
     },
@@ -6864,7 +6875,7 @@
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_553",
       "community": 5,
-      "community_name": "CommunityConflictError",
+      "community_name": "community_tournament_service.py",
       "norm_label": "keep the wallet balance and its immutable transaction ledger in sync."
     },
     {
@@ -6874,8 +6885,8 @@
       "source_location": "L997",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_997",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 24,
+      "community_name": "_now",
       "norm_label": "close an active registration window early without moving the start time."
     },
     {
@@ -6896,8 +6907,8 @@
       "source_location": "L1166",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_1166",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "keep the razorpay receipt unique, stable, and within its 40-character limit."
     },
     {
@@ -6907,8 +6918,8 @@
       "source_location": "L1188",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_1188",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "create or reuse the one active razorpay checkout for a registration. the public..."
     },
     {
@@ -6918,8 +6929,8 @@
       "source_location": "L1259",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_1259",
-      "community": 28,
-      "community_name": "create_community_payment_attempt",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "attach a provider-verified payment to its registration exactly once."
     },
     {
@@ -6951,8 +6962,8 @@
       "source_location": "L1400",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_1400",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 28,
+      "community_name": "enqueue_community_payment_webhook",
       "norm_label": "persist an already-authenticated provider event before acknowledging it."
     },
     {
@@ -7006,8 +7017,8 @@
       "source_location": "L1923",
       "_origin": "ast",
       "id": "services_community_tournament_service_rationale_1923",
-      "community": 24,
-      "community_name": "_now",
+      "community": 5,
+      "community_name": "community_tournament_service.py",
       "norm_label": "reconcile provider refunds accepted but not yet processed."
     },
     {
@@ -7226,8 +7237,8 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "services_event_service_eventservice_create_team",
-      "community": 4,
-      "community_name": "event_participation_controller.py",
+      "community": 37,
+      "community_name": "Exception",
       "norm_label": ".create_team()"
     },
     {
@@ -7281,8 +7292,8 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "services_firebase_service_send_notification",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 18,
+      "community_name": "app/__init__.py",
       "norm_label": "send_notification()"
     },
     {
@@ -7303,8 +7314,8 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "services_firebase_service_notify_user_all_tokens",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "notify_user_all_tokens()"
     },
     {
@@ -7325,9 +7336,42 @@
       "source_location": "L50",
       "_origin": "ast",
       "id": "services_firebase_service_rationale_50",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "send an fcm notification to all of a user's registered devices. failures are..."
+    },
+    {
+      "label": "hash_coin_spend.py",
+      "file_type": "code",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "services_hash_coin_spend",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "hash_coin_spend.py"
+    },
+    {
+      "label": "spend()",
+      "file_type": "code",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L7",
+      "_origin": "ast",
+      "id": "services_hash_coin_spend_spend",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "spend()"
+    },
+    {
+      "label": "Atomic, priced HashCoin purchases; caller commits balance and receipt together.",
+      "file_type": "rationale",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "services_hash_coin_spend_rationale_1",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "atomic, priced hashcoin purchases; caller commits balance and receipt together."
     },
     {
       "label": "notification_context.py",
@@ -7886,8 +7930,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "services_referral_service",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "referral_service.py"
     },
     {
@@ -7897,8 +7941,8 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "services_referral_service_create_voucher_if_eligible",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "create_voucher_if_eligible()"
     },
     {
@@ -7908,8 +7952,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "services_security",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "security.py"
     },
     {
@@ -7919,8 +7963,8 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "services_security_invalidate_user_auth_status",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "invalidate_user_auth_status()"
     },
     {
@@ -7930,8 +7974,8 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "services_security_is_soft_deleted_user",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "_is_soft_deleted_user()"
     },
     {
@@ -7941,8 +7985,8 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "services_security_encode_user",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "encode_user()"
     },
     {
@@ -7952,8 +7996,8 @@
       "source_location": "L73",
       "_origin": "ast",
       "id": "services_security_decode_user",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "decode_user()"
     },
     {
@@ -7974,8 +8018,8 @@
       "source_location": "L101",
       "_origin": "ast",
       "id": "services_security_extract_bearer_token",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "extract_bearer_token()"
     },
     {
@@ -7985,8 +8029,8 @@
       "source_location": "L110",
       "_origin": "ast",
       "id": "services_security_auth_required",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "auth_required()"
     },
     {
@@ -7996,8 +8040,8 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "services_security_rationale_49",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "encode a user id using rsa public key pem string. returns a base64-encoded..."
     },
     {
@@ -8007,8 +8051,8 @@
       "source_location": "L74",
       "_origin": "ast",
       "id": "services_security_rationale_74",
-      "community": 6,
-      "community_name": "tournament_engine_controller.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "decode the encrypted user id using rsa private key pem string."
     },
     {
@@ -8018,8 +8062,8 @@
       "source_location": "L111",
       "_origin": "ast",
       "id": "services_security_rationale_111",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 33,
+      "community_name": "event_public_controller.py",
       "norm_label": "- match_route_user: if true, ensure token user_id matches the user_id in the..."
     },
     {
@@ -8029,8 +8073,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "services_user_service",
-      "community": 14,
-      "community_name": "user_service.py",
+      "community": 15,
+      "community_name": "extensions.py",
       "norm_label": "user_service.py"
     },
     {
@@ -8041,7 +8085,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "userservice"
     },
     {
@@ -8052,7 +8096,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_referral_code_from_user_id",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "._referral_code_from_user_id()"
     },
     {
@@ -8063,7 +8107,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_create_user",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".create_user()"
     },
     {
@@ -8074,7 +8118,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_enqueue_post_create_finalize",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".enqueue_post_create_finalize()"
     },
     {
@@ -8085,7 +8129,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_finalize_user_post_create",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".finalize_user_post_create()"
     },
     {
@@ -8096,7 +8140,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_add_physical_address",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "._add_physical_address()"
     },
     {
@@ -8107,7 +8151,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_add_contact_info",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "._add_contact_info()"
     },
     {
@@ -8118,7 +8162,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_generate_credentials_and_notify",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".generate_credentials_and_notify()"
     },
     {
@@ -8129,7 +8173,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_get_user",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".get_user()"
     },
     {
@@ -8140,7 +8184,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_get_user_by_fid",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".get_user_by_fid()"
     },
     {
@@ -8150,8 +8194,8 @@
       "source_location": "L460",
       "_origin": "ast",
       "id": "services_user_service_userservice_get_user_auth_payload_by_fid",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": ".get_user_auth_payload_by_fid()"
     },
     {
@@ -8162,7 +8206,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_get_user_vouchers",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".get_user_vouchers()"
     },
     {
@@ -8173,7 +8217,7 @@
       "_origin": "ast",
       "id": "services_user_service_userservice_is_in_cooldown",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": ".is_in_cooldown()"
     },
     {
@@ -8184,7 +8228,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_40",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "creates a new user and related entities in the database, with validations."
     },
     {
@@ -8195,7 +8239,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_296",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "idempotent finalization for post-signup side effects. safe to run multiple..."
     },
     {
@@ -8206,7 +8250,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_351",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "add physical address to user using relationship"
     },
     {
@@ -8217,7 +8261,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_372",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "add contact info to user using relationship"
     },
     {
@@ -8228,7 +8272,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_387",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "generates credentials for the user and sends a notification email."
     },
     {
@@ -8239,7 +8283,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_424",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "fetch a user by id with eager loading of relationships"
     },
     {
@@ -8250,7 +8294,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_434",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "fetch a user by fid for auth flow (read-only and low-latency)."
     },
     {
@@ -8260,8 +8304,8 @@
       "source_location": "L461",
       "_origin": "ast",
       "id": "services_user_service_rationale_461",
-      "community": 27,
-      "community_name": "security.py",
+      "community": 76,
+      "community_name": "_build_auth_response_for_fid",
       "norm_label": "fetch only fields required by /users/fid auth response. returns already-..."
     },
     {
@@ -8272,7 +8316,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_553",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "get all vouchers for a user"
     },
     {
@@ -8283,7 +8327,7 @@
       "_origin": "ast",
       "id": "services_user_service_rationale_558",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "check if email or phone is in cooldown period"
     },
     {
@@ -8316,7 +8360,7 @@
       "_origin": "ast",
       "id": "services_utils_generate_credentials",
       "community": 14,
-      "community_name": "user_service.py",
+      "community_name": "UserService",
       "norm_label": "generate_credentials()"
     },
     {
@@ -8947,6 +8991,17 @@
       "norm_label": "notification_campaign_settings"
     },
     {
+      "label": "20261011_hash_coin_spends.sql",
+      "file_type": "code",
+      "source_file": "sql/20261011_hash_coin_spends.sql",
+      "source_location": null,
+      "_origin": "ast",
+      "id": "sql_20261011_hash_coin_spends",
+      "community": 83,
+      "community_name": "20261011_hash_coin_spends.sql",
+      "norm_label": "20261011_hash_coin_spends.sql"
+    },
+    {
       "label": "test_seed_10_community_tournament_users.sql",
       "file_type": "code",
       "source_file": "sql/test_seed_10_community_tournament_users.sql",
@@ -9008,8 +9063,8 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "tests_test_community_esports_operations_communityesportsoperationtests_test_cloudinary_signature_uses_sorted_non_empty_parameters",
-      "community": 3,
-      "community_name": "community_tournament_service.py",
+      "community": 10,
+      "community_name": "CommunityEsportsOperationTests",
       "norm_label": ".test_cloudinary_signature_uses_sorted_non_empty_parameters()"
     },
     {
@@ -9569,8 +9624,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_drop_crate_claim",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "test_drop_crate_claim.py"
     },
     {
@@ -9682,6 +9737,127 @@
       "community": 21,
       "community_name": "DropCrateClaimTests",
       "norm_label": ".test_route_requires_authentication()"
+    },
+    {
+      "label": "test_hash_coin_spend_pg.py",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_hash_coin_spend_pg.py"
+    },
+    {
+      "label": "fixture",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "fixture",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "fixture"
+    },
+    {
+      "label": "coins()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L10",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_coins",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "coins()"
+    },
+    {
+      "label": "buy()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L31",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_buy",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "buy()"
+    },
+    {
+      "label": "test_receipt_replay_returns_original_balance_and_scopes_user()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L37",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_receipt_replay_returns_original_balance_and_scopes_user",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_receipt_replay_returns_original_balance_and_scopes_user()"
+    },
+    {
+      "label": "test_concurrent_same_reference_debits_once()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L44",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_concurrent_same_reference_debits_once",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_concurrent_same_reference_debits_once()"
+    },
+    {
+      "label": "test_competing_purchases_do_not_overdraw()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L48",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_competing_purchases_do_not_overdraw",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_competing_purchases_do_not_overdraw()"
+    },
+    {
+      "label": "test_price_and_input_validation()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L52",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_price_and_input_validation",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_price_and_input_validation()"
+    },
+    {
+      "label": "test_balance_and_receipt_rollback_together()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L58",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_balance_and_receipt_rollback_together",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_balance_and_receipt_rollback_together()"
+    },
+    {
+      "label": "test_credit_endpoint_rejects_negative_boolean_and_nonobject()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L64",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_credit_endpoint_rejects_negative_boolean_and_nonobject",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_credit_endpoint_rejects_negative_boolean_and_nonobject()"
+    },
+    {
+      "label": "test_spend_route_rejects_expired_token_before_database()",
+      "file_type": "code",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L76",
+      "_origin": "ast",
+      "id": "tests_test_hash_coin_spend_pg_test_spend_route_rejects_expired_token_before_database",
+      "community": 53,
+      "community_name": "test_hash_coin_spend_pg.py",
+      "norm_label": "test_spend_route_rejects_expired_token_before_database()"
     },
     {
       "label": "test_notification_campaign.py",
@@ -9910,8 +10086,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_user_signup_api",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": "test_user_signup_api.py"
     },
     {
@@ -9965,8 +10141,8 @@
       "source_location": "L47",
       "_origin": "ast",
       "id": "tests_test_user_signup_api_usersignupapitests_test_validates_contact_columns_before_database_insert",
-      "community": 32,
-      "community_name": "User",
+      "community": 27,
+      "community_name": "test_user_signup_api.py",
       "norm_label": ".test_validates_contact_columns_before_database_insert()"
     },
     {
@@ -10042,8 +10218,8 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_test_wallet_credit_security",
-      "community": 7,
-      "community_name": "user_controller.py",
+      "community": 47,
+      "community_name": "_invalidate_user_microcache",
       "norm_label": "test_wallet_credit_security.py"
     },
     {
@@ -10460,8 +10636,8 @@
       "source_location": "L225",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_3_participant_and_check_in_management",
-      "community": 33,
-      "community_name": "3. Participant and Check-in Management",
+      "community": 30,
+      "community_name": "Community Host Tournament Management E2E",
       "norm_label": "3. participant and check-in management"
     },
     {
@@ -10471,8 +10647,8 @@
       "source_location": "L227",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_player_registration",
-      "community": 33,
-      "community_name": "3. Participant and Check-in Management",
+      "community": 30,
+      "community_name": "Community Host Tournament Management E2E",
       "norm_label": "player registration"
     },
     {
@@ -10482,8 +10658,8 @@
       "source_location": "L243",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_host_roster",
-      "community": 33,
-      "community_name": "3. Participant and Check-in Management",
+      "community": 30,
+      "community_name": "Community Host Tournament Management E2E",
       "norm_label": "host roster"
     },
     {
@@ -10790,8 +10966,8 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_5_winners_and_payouts",
-      "community": 30,
-      "community_name": "Community Host Tournament Management E2E",
+      "community": 80,
+      "community_name": "5. Winners and Payouts",
       "norm_label": "5. winners and payouts"
     },
     {
@@ -10801,8 +10977,8 @@
       "source_location": "L636",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_submit_winners",
-      "community": 30,
-      "community_name": "Community Host Tournament Management E2E",
+      "community": 80,
+      "community_name": "5. Winners and Payouts",
       "norm_label": "submit winners"
     },
     {
@@ -10812,8 +10988,8 @@
       "source_location": "L656",
       "_origin": "ast",
       "id": "docs_community_host_tournament_management_e2e_host_payout_tracker",
-      "community": 30,
-      "community_name": "Community Host Tournament Management E2E",
+      "community": 80,
+      "community_name": "5. Winners and Payouts",
       "norm_label": "host payout tracker"
     },
     {
@@ -11475,6 +11651,50 @@
       "community": 38,
       "community_name": "drop-crate-claim.md",
       "norm_label": "drop crate claim"
+    },
+    {
+      "label": "hash-coin-spend.md",
+      "file_type": "document",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_hash_coin_spend",
+      "community": 54,
+      "community_name": "HashCoin spend API",
+      "norm_label": "hash-coin-spend.md"
+    },
+    {
+      "label": "HashCoin spend API",
+      "file_type": "document",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_hash_coin_spend_hashcoin_spend_api",
+      "community": 54,
+      "community_name": "HashCoin spend API",
+      "norm_label": "hashcoin spend api"
+    },
+    {
+      "label": "Existing credit endpoint",
+      "file_type": "document",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L28",
+      "_origin": "ast",
+      "id": "docs_hash_coin_spend_existing_credit_endpoint",
+      "community": 54,
+      "community_name": "HashCoin spend API",
+      "norm_label": "existing credit endpoint"
+    },
+    {
+      "label": "App behavior",
+      "file_type": "document",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L32",
+      "_origin": "ast",
+      "id": "docs_hash_coin_spend_app_behavior",
+      "community": 54,
+      "community_name": "HashCoin spend API",
+      "norm_label": "app behavior"
     },
     {
       "label": "notification-context.md",
@@ -21393,7 +21613,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1966",
+      "source_location": "L1989",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21415,7 +21635,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1913",
+      "source_location": "L1936",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21514,7 +21734,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2562",
+      "source_location": "L2585",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21525,7 +21745,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2496",
+      "source_location": "L2519",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21536,7 +21756,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2399",
+      "source_location": "L2422",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21547,7 +21767,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2459",
+      "source_location": "L2482",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21558,7 +21778,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2424",
+      "source_location": "L2447",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21602,7 +21822,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2590",
+      "source_location": "L2613",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21646,7 +21866,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1887",
+      "source_location": "L1910",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21712,7 +21932,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2671",
+      "source_location": "L2694",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21723,7 +21943,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2733",
+      "source_location": "L2756",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21800,7 +22020,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2371",
+      "source_location": "L2394",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21811,7 +22031,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2851",
+      "source_location": "L2874",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21910,7 +22130,18 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2756",
+      "source_location": "L1889",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "controllers_user_controller",
+      "target": "controllers_user_controller_spend_hash_coins",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L2779",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21954,7 +22185,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2255",
+      "source_location": "L2278",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21965,7 +22196,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2189",
+      "source_location": "L2212",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21987,7 +22218,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2297",
+      "source_location": "L2320",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -21998,7 +22229,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2340",
+      "source_location": "L2363",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -22009,7 +22240,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2058",
+      "source_location": "L2081",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -22020,7 +22251,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2136",
+      "source_location": "L2159",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -22727,6 +22958,18 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
+      "source_location": "L1892",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "controllers_user_controller",
+      "target": "services_hash_coin_spend_spend",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "controllers/user_controller.py",
       "source_location": "L689",
       "weight": 1.0,
       "_origin": "ast",
@@ -22739,7 +22982,7 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2857",
+      "source_location": "L2880",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller",
@@ -22883,7 +23126,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2503",
+      "source_location": "L2526",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service",
@@ -22895,7 +23138,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2401",
+      "source_location": "L2424",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_categories",
@@ -22907,7 +23150,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2463",
+      "source_location": "L2486",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_menu_item",
@@ -22919,7 +23162,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2428",
+      "source_location": "L2451",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_menus",
@@ -22931,7 +23174,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2598",
+      "source_location": "L2621",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_user_available_passes_by_id",
@@ -22967,7 +23210,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1890",
+      "source_location": "L1913",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_wallet_balance_auth",
@@ -22979,7 +23222,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2680",
+      "source_location": "L2703",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_list_user_notifications",
@@ -22991,7 +23234,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2373",
+      "source_location": "L2396",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_pass_details",
@@ -23003,7 +23246,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2259",
+      "source_location": "L2282",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_all_passes",
@@ -23015,7 +23258,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2194",
+      "source_location": "L2217",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_available_passes",
@@ -23027,7 +23270,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2301",
+      "source_location": "L2324",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_passes",
@@ -23039,7 +23282,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2344",
+      "source_location": "L2367",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_passes_history",
@@ -23051,7 +23294,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2140",
+      "source_location": "L2163",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_transaction_history",
@@ -23063,7 +23306,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2550",
+      "source_location": "L2573",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service",
@@ -23075,7 +23318,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2416",
+      "source_location": "L2439",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_categories",
@@ -23087,7 +23330,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2487",
+      "source_location": "L2510",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_menu_item",
@@ -23099,7 +23342,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2451",
+      "source_location": "L2474",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_extra_service_menus",
@@ -23111,7 +23354,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2657",
+      "source_location": "L2680",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_user_available_passes_by_id",
@@ -23147,7 +23390,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1904",
+      "source_location": "L1927",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_wallet_balance_auth",
@@ -23159,7 +23402,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2720",
+      "source_location": "L2743",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_list_user_notifications",
@@ -23171,7 +23414,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2391",
+      "source_location": "L2414",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_pass_details",
@@ -23183,7 +23426,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2288",
+      "source_location": "L2311",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_all_passes",
@@ -23195,7 +23438,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2245",
+      "source_location": "L2268",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_available_passes",
@@ -23207,7 +23450,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2331",
+      "source_location": "L2354",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_passes",
@@ -23219,7 +23462,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2363",
+      "source_location": "L2386",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_passes_history",
@@ -23231,7 +23474,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2176",
+      "source_location": "L2199",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_transaction_history",
@@ -23243,7 +23486,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1871",
+      "source_location": "L1873",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_hash_coins",
@@ -23255,7 +23498,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2046",
+      "source_location": "L2069",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_wallet_balance",
@@ -23267,7 +23510,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1953",
+      "source_location": "L1976",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_claim_drop_crate",
@@ -23303,7 +23546,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2746",
+      "source_location": "L2769",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_mark_notification_read",
@@ -23327,7 +23570,19 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2110",
+      "source_location": "L1897",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "controllers_user_controller_spend_hash_coins",
+      "target": "controllers_user_controller_invalidate_user_microcache",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L2133",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_purchase_pass",
@@ -23339,7 +23594,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1996",
+      "source_location": "L2019",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_wallet_balance",
@@ -23351,7 +23606,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1901",
+      "source_location": "L1924",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_get_wallet_balance_auth",
@@ -23730,7 +23985,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1964",
+      "source_location": "L1987",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23742,7 +23997,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1911",
+      "source_location": "L1934",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23802,7 +24057,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2561",
+      "source_location": "L2584",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23814,7 +24069,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2495",
+      "source_location": "L2518",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23826,7 +24081,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2398",
+      "source_location": "L2421",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23838,7 +24093,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2458",
+      "source_location": "L2481",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23850,7 +24105,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2423",
+      "source_location": "L2446",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23898,7 +24153,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2589",
+      "source_location": "L2612",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23946,7 +24201,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1885",
+      "source_location": "L1908",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23970,7 +24225,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2669",
+      "source_location": "L2692",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -23982,7 +24237,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2731",
+      "source_location": "L2754",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24018,7 +24273,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2370",
+      "source_location": "L2393",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24030,7 +24285,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2850",
+      "source_location": "L2873",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24090,7 +24345,19 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2755",
+      "source_location": "L1887",
+      "weight": 1.0,
+      "context": "decorator",
+      "_origin": "ast",
+      "source": "controllers_user_controller_spend_hash_coins",
+      "target": "controllers_user_controller_py_route",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L2778",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24126,7 +24393,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2253",
+      "source_location": "L2276",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24138,7 +24405,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2187",
+      "source_location": "L2210",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24150,7 +24417,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2295",
+      "source_location": "L2318",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24162,7 +24429,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2338",
+      "source_location": "L2361",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24174,7 +24441,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2056",
+      "source_location": "L2079",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24186,7 +24453,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2134",
+      "source_location": "L2157",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24904,19 +25171,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1857",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "controllers_user_controller_add_hash_coins",
-      "target": "models_userhashcoin_userhashcoin"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "controllers/user_controller.py",
-      "source_location": "L1865",
+      "source_location": "L1867",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_hash_coins",
@@ -24946,10 +25201,34 @@
       "confidence_score": 1.0
     },
     {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L1894",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "controllers_user_controller_spend_hash_coins",
+      "target": "services_hash_coin_spend_spend"
+    },
+    {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1886",
+      "source_location": "L1888",
+      "weight": 1.0,
+      "context": "decorator",
+      "_origin": "ast",
+      "source": "controllers_user_controller_spend_hash_coins",
+      "target": "services_security_auth_required_self",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "controllers/user_controller.py",
+      "source_location": "L1909",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24963,7 +25242,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1942",
+      "source_location": "L1965",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_claim_drop_crate",
@@ -24973,7 +25252,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1912",
+      "source_location": "L1935",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -24985,10 +25264,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1914",
+      "source_location": "L1937",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "controllers_user_controller_rationale_1914",
+      "source": "controllers_user_controller_rationale_1937",
       "target": "controllers_user_controller_claim_drop_crate",
       "confidence_score": 1.0
     },
@@ -25010,7 +25289,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2029",
+      "source_location": "L2052",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_wallet_balance",
@@ -25022,7 +25301,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2040",
+      "source_location": "L2063",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_add_wallet_balance",
@@ -25032,7 +25311,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L1965",
+      "source_location": "L1988",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25058,7 +25337,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2091",
+      "source_location": "L2114",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_purchase_pass",
@@ -25070,7 +25349,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2077",
+      "source_location": "L2100",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_user_purchase_pass",
@@ -25080,7 +25359,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2057",
+      "source_location": "L2080",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25092,7 +25371,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2135",
+      "source_location": "L2158",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25104,7 +25383,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2188",
+      "source_location": "L2211",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25116,7 +25395,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2254",
+      "source_location": "L2277",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25128,7 +25407,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2296",
+      "source_location": "L2319",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25140,7 +25419,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2339",
+      "source_location": "L2362",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25152,10 +25431,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2497",
+      "source_location": "L2520",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "controllers_user_controller_rationale_2497",
+      "source": "controllers_user_controller_rationale_2520",
       "target": "controllers_user_controller_get_extra_service",
       "confidence_score": 1.0
     },
@@ -25163,10 +25442,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2591",
+      "source_location": "L2614",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "controllers_user_controller_rationale_2591",
+      "source": "controllers_user_controller_rationale_2614",
       "target": "controllers_user_controller_get_user_available_passes_by_id",
       "confidence_score": 1.0
     },
@@ -25174,7 +25453,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2670",
+      "source_location": "L2693",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25186,7 +25465,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2732",
+      "source_location": "L2755",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -25198,10 +25477,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2757",
+      "source_location": "L2780",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "controllers_user_controller_rationale_2757",
+      "source": "controllers_user_controller_rationale_2780",
       "target": "controllers_user_controller_trigger_demo_notification",
       "confidence_score": 1.0
     },
@@ -25211,7 +25490,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2792",
+      "source_location": "L2815",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_trigger_demo_notification",
@@ -25223,7 +25502,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2830",
+      "source_location": "L2853",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_trigger_demo_notification",
@@ -25235,7 +25514,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2860",
+      "source_location": "L2883",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_preview_campaign_notification",
@@ -25247,7 +25526,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "controllers/user_controller.py",
-      "source_location": "L2859",
+      "source_location": "L2882",
       "weight": 1.0,
       "_origin": "ast",
       "source": "controllers_user_controller_preview_campaign_notification",
@@ -25814,6 +26093,18 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "services_event_service",
+      "target": "db_extensions",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "services_hash_coin_spend",
       "target": "db_extensions",
       "confidence_score": 1.0
     },
@@ -39893,6 +40184,64 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "services_hash_coin_spend",
+      "target": "services_hash_coin_spend_spend",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "services/hash_coin_spend.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "services_hash_coin_spend_rationale_1",
+      "target": "services_hash_coin_spend",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L33",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_buy",
+      "target": "services_hash_coin_spend_spend"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L60",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_balance_and_receipt_rollback_together",
+      "target": "services_hash_coin_spend_spend"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L55",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_price_and_input_validation",
+      "target": "services_hash_coin_spend_spend"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "services/notification_context.py",
       "source_location": "L8",
       "weight": 1.0,
@@ -44203,6 +44552,165 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L31",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_buy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L10",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_coins",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L58",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_balance_and_receipt_rollback_together",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L48",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_competing_purchases_do_not_overdraw",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L44",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_concurrent_same_reference_debits_once",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L64",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_credit_endpoint_rejects_negative_boolean_and_nonobject",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L52",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_price_and_input_validation",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L37",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_receipt_replay_returns_original_balance_and_scopes_user",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L76",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg",
+      "target": "tests_test_hash_coin_spend_pg_test_spend_route_rejects_expired_token_before_database",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L9",
+      "weight": 1.0,
+      "context": "decorator",
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_coins",
+      "target": "fixture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L62",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_balance_and_receipt_rollback_together",
+      "target": "tests_test_hash_coin_spend_pg_buy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L49",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_competing_purchases_do_not_overdraw",
+      "target": "tests_test_hash_coin_spend_pg_buy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L45",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_concurrent_same_reference_debits_once",
+      "target": "tests_test_hash_coin_spend_pg_buy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_hash_coin_spend_pg.py",
+      "source_location": "L38",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "tests_test_hash_coin_spend_pg_test_receipt_replay_returns_original_balance_and_scopes_user",
+      "target": "tests_test_hash_coin_spend_pg_buy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "tests/test_notification_campaign.py",
       "source_location": "L10",
       "weight": 1.0,
@@ -46239,6 +46747,39 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_hash_coin_spend",
+      "target": "docs_hash_coin_spend_hashcoin_spend_api",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L32",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_hash_coin_spend_hashcoin_spend_api",
+      "target": "docs_hash_coin_spend_app_behavior",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/hash-coin-spend.md",
+      "source_location": "L28",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_hash_coin_spend_hashcoin_spend_api",
+      "target": "docs_hash_coin_spend_existing_credit_endpoint",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "docs/notification-context.md",
       "source_location": "L1",
       "weight": 1.0,
@@ -46568,5 +47109,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "f5ecf67f4e69b90abb1c6086682bacc7d63bedcb"
+  "built_at_commit": "14adeced06e474fd760396a6ba203d534d6e498a"
 }
