@@ -32,3 +32,7 @@ Before this change, POST `/api/users/hash-coins` already rejected negative amoun
 ## App behavior
 
 Grant the continuation only after confirmed HTTP 200. On a lost response, retry the same reference to determine whether the debit committed. Prevent duplicate local grants for the same purchase reference. Treat 402 as insufficient coins. Do not fall back to a negative credit request, wallet debit, or client-calculated price.
+# Updated contract
+
+See [hash-coin-items-app-handoff.md](hash-coin-items-app-handoff.md) for the expanded source list, server-priced items and ownership API. The original single-source notes below are superseded where they differ.
+

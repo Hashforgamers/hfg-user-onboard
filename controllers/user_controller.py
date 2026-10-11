@@ -1884,6 +1884,21 @@ def add_hash_coins():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@user_blueprint.route('/users/hash-coins/purchases', methods=['GET'])
+@auth_required_self(decrypt_user=True)
+def hash_coin_purchases():
+    if getattr(g, 'token_expired', False):
+        return jsonify(error='token_expired'), 401
+    from services.hash_coin_spend import purchases
+    try:
+        response = jsonify(purchases(int(g.auth_user_id)))
+        response.headers['Cache-Control'] = 'private, no-store'
+        return response, 200
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('HashCoin purchases read failed')
+        return jsonify(error='hash_coin_purchases_unavailable'), 503
+
 @user_blueprint.route('/users/hash-coins/spend', methods=['POST'])
 @auth_required_self(decrypt_user=True)
 def spend_hash_coins():
