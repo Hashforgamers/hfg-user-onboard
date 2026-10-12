@@ -4,7 +4,19 @@ from db.extensions import db
 
 PRICES = {'arrow_escape_continue': 2000, 'arrow_escape_hint': 200,
           'pac_man_continue': 1000, 'plant_vs_zombie_continue': 1000,
-          'wordly_reveal': 300}
+          'wordly_reveal': 300, 'hash_rush_continue': 1000}
+UPGRADE_PRICES = {
+    'fireRate': [60,80,105,140,180,240,315,420,555,730,965,1270,1680,2215,2925],
+    'cannonPower': [60,80,105,140,180,240,315,420,555,730,965,1270,1680,2215,2925],
+    'startArmy': [50,65,85,110,145,185,240,315,410,530,690,895,1165,1515,1970],
+    'unitDamage': [70,95,125,170,225,300,405,545,730,975,1305,1750,2345,3145,4215],
+    'unitHealth': [70,95,125,170,225,300,405,545,730,975,1305,1750,2345,3145,4215],
+    'abilityCooldown': [90,125,175,245,345,485,680,950,1330,1860],
+}
+UPGRADES = {'hash_rush_upgrade_'+key: prices for key,prices in UPGRADE_PRICES.items()}
+SKINS = {'hash_rush_skin_'+kind+'_'+item: price
+         for kind in ('army','cannon')
+         for item,price in {'emerald':150,'royal':300,'arctic':500,'shadow':800,'gold':1200}.items()}
 ITEM_SOURCES = {'ludo_skin_purchase', 'mini_game_cosmetic'}
 
 def purchases(user_id):
@@ -20,9 +32,12 @@ def spend(user_id, body):
     item = body.get('item_id')
     if type(amount) is not int or amount <= 0 or amount > 2147483647:
         return {'error':'invalid_amount'},400
-    if not isinstance(source,str) or source not in PRICES.keys() | ITEM_SOURCES:
+    if not isinstance(source,str) or source not in PRICES.keys() | ITEM_SOURCES | UPGRADES.keys() | SKINS.keys():
         return {'error':'unknown_source'},400
-    if source in ITEM_SOURCES:
+    if source in SKINS:
+        if item is not None: return {'error':'invalid_item_id'},400
+        item = source.rsplit('_',1)[-1]
+    elif source in ITEM_SOURCES:
         if not isinstance(item,str) or not item or len(item)>128 or item!=item.strip():
             return {'error':'invalid_item_id'},400
     elif item is not None:
@@ -42,10 +57,15 @@ def spend(user_id, body):
         price = db.session.execute(text('''SELECT price FROM hash_coin_items
             WHERE source=:source AND item_id=:item AND enabled=TRUE FOR SHARE'''), {'source':source,'item':item}).scalar()
         if price is None: return {'error':'unknown_item'},400
+    elif source in SKINS: price = SKINS[source]
+    elif source in UPGRADES:
+        if amount not in UPGRADES[source]: return {'error':'invalid_amount'},400
+        price = amount
+    else: price = PRICES[source]
+    if item is not None:
         owned = db.session.execute(text('''SELECT 1 FROM hash_coin_purchases
             WHERE user_id=:uid AND source=:source AND item_id=:item'''), {'uid':user_id,'source':source,'item':item}).scalar()
         if owned: return {'error':'item_already_owned','hash_coins':balance or 0},409
-    else: price = PRICES[source]
     if amount!=price: return {'error':'invalid_amount'},400
     if (balance or 0)<amount: return {'error':'insufficient_hash_coins','hash_coins':balance or 0},402
     remaining = db.session.execute(text('''UPDATE user_hash_coins SET hash_coins=hash_coins-:amount,

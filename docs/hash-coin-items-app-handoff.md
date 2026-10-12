@@ -51,3 +51,14 @@ These rules allow users to edit their own cache (including fake cache ownership)
 Inspect the deployed wordly_matches rule and apply its participant authorization, field validation and update restrictions to arrow_escape_matches. Do not replace it with a generic signed-in read/write rule; match records may contain multiple participants. Confirm equality only after reviewing and testing both deployed rule blocks.
 
 In the actual chat push dispatcher, add arrow_invite wherever wordly_invite is accepted/formatted, using the same verified sender and recipient checks and invite payload validation. Support mini_games_lounge only through the existing authorized group membership flow, excluding sender from push recipients and preventing duplicate pushes. Do not grant arbitrary room access or unrestricted match writes. Test direct/group arrow invites, invalid payloads, unauthorized sender, existing wordly invites and push deduplication. No messages or pushes were sent by this implementation.
+
+## 12 October update
+
+All supplied Ludo and mini-game item IDs and prices are seeded by sql/20261012_hash_coin_catalog.sql (53 items). Apply it after the two earlier migrations. Re-running the seed updates prices but preserves an operator's disabled flag.
+
+Hash Rush uses the requested full source names, without item_id or level:
+- hash_rush_continue: fixed 1000.
+- hash_rush_upgrade_fireRate, cannonPower, startArmy, unitDamage, unitHealth, abilityCooldown (each with the hash_rush_upgrade_ prefix): amount must occur in its supplied ladder. Repeatable; server does not enforce level progression.
+- hash_rush_skin_army_<id> and hash_rush_skin_cannon_<id>: emerald 150, royal 300, arctic 500, shadow 800, gold 1200. Permanent per user/full source. Purchases response includes full source plus item_id equal to the suffix, e.g. emerald. Omit item_id in these spend requests: the server derives it from source.
+
+Only ludo_skin_purchase and mini_game_cosmetic require the client item_id field. Existing 200/400/402/409 response contracts are unchanged. No live deployment or production migration has been performed by this local update.
