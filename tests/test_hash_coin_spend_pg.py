@@ -22,6 +22,8 @@ def coins():
         c.execute(text('CREATE TABLE users(id integer PRIMARY KEY); INSERT INTO users VALUES(1),(2); CREATE TABLE user_hash_coins(id serial PRIMARY KEY,user_id integer UNIQUE REFERENCES users(id),hash_coins integer,updated_at timestamp); INSERT INTO user_hash_coins(user_id,hash_coins) VALUES(1,4000),(2,4000)'))
         c.execute(text((Path(__file__).parents[1]/'sql/20261011_hash_coin_spends.sql').read_text().replace('BEGIN;','').replace('COMMIT;','')))
         c.execute(text((Path(__file__).parents[1]/'sql/20261011_hash_coin_items.sql').read_text().replace('BEGIN;','').replace('COMMIT;','')))
+        catalog=(Path(__file__).parents[1]/'sql/20261012_hash_coin_catalog.sql').read_text().replace('BEGIN;','').replace('COMMIT;','')
+        c.execute(text(catalog));c.execute(text(catalog))
         c.execute(text("INSERT INTO hash_coin_items(source,item_id,price) VALUES ('ludo_skin_purchase','test_dice',500),('mini_game_cosmetic','test_theme',500)"))
     sessions=scoped_session(sessionmaker(bind=engine));scope={'db':SimpleNamespace(session=sessions)}
     tree=ast.parse((Path(__file__).parents[1]/'services/hash_coin_spend.py').read_text());tree.body=[n for n in tree.body if not isinstance(n,ast.ImportFrom) or n.module!='db.extensions'];exec(compile(tree,'spend','exec'),scope)
@@ -97,6 +99,28 @@ def test_concurrent_item_purchase_different_references(coins):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results=list(pool.map(lambda n:buy(coins,str(n),source='ludo_skin_purchase',amount=500,item_id='test_dice'),range(4)))
     assert sorted(status for _,status in results)==[200,409,409,409]
+
+def test_rush_upgrade_ladders_repeatable_and_unknown_rejected(coins):
+    spend,sessions=coins
+    for source,prices in spend.__globals__['UPGRADES'].items():
+        for price in prices:
+            sessions.execute(text('UPDATE user_hash_coins SET hash_coins=10000 WHERE user_id=1'));sessions.commit()
+            assert buy(coins,source+str(price),source=source,amount=price)[1]==200
+        assert buy(coins,source+'bad',source=source,amount=1)[0]['error']=='invalid_amount'
+    assert buy(coins,'repeat',source='hash_rush_upgrade_fireRate',amount=60)[1]==200
+    assert buy(coins,source='hash_rush_upgrade_unknown',amount=60)[0]['error']=='unknown_source'
+
+def test_rush_skin_once_each_and_catalog_prices(coins):
+    spend,sessions=coins
+    for source,price in spend.__globals__['SKINS'].items():
+        sessions.execute(text('UPDATE user_hash_coins SET hash_coins=10000 WHERE user_id=1'));sessions.commit()
+        assert buy(coins,source,source=source,amount=price)[1]==200
+        assert buy(coins,source,source=source,amount=price)[1]==200
+        assert buy(coins,source+'again',source=source,amount=price)[0]['error']=='item_already_owned'
+    for row in sessions.execute(text('SELECT source,item_id,price FROM hash_coin_items WHERE item_id NOT LIKE :test'),{'test':'test_%'}).all():
+        sessions.execute(text('UPDATE user_hash_coins SET hash_coins=20000 WHERE user_id=1'));sessions.commit()
+        assert buy(coins,row.item_id,source=row.source,item_id=row.item_id,amount=row.price)[1]==200
+    assert len(spend.__globals__['purchases'](1)['purchases'])==63
 
 def test_credit_endpoint_rejects_negative_boolean_and_nonobject():
     from flask import Flask,g,jsonify,request
