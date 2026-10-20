@@ -933,7 +933,7 @@ def create_user():
                 "Create user conflict_state fid=%s state=%s status=%s details=%s",
                 data.get("fid"),
                 state,
-                ("409" if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else "429" if state == "COOLDOWN_ACTIVE" else "400"),
+                ("409" if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN", "ACCOUNT_PENDING_DELETION"} else "429" if state == "COOLDOWN_ACTIVE" else "400"),
                 result.get("details"),
             )
             if state == "USER_EXISTS":
@@ -1057,10 +1057,11 @@ def create_user():
                         existing_email,
                         data.get("fid"),
                     )
-            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
+            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN", "ACCOUNT_PENDING_DELETION"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
         user_payload = result.to_dict()
+        _invalidate_fid_caches(data.get("fid"))
         if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
             _USER_CACHE.pop(next(iter(_USER_CACHE)))
         _USER_CACHE[result.id] = {
@@ -1545,12 +1546,8 @@ def get_user_by_fid_auth(user_fid):
             response.headers['Cache-Control'] = 'no-store'
             return response, 200
 
-        miss_cache_ttl_sec = int(current_app.config.get("USER_FID_MISS_CACHE_TTL_SEC", 45))
-        with _USER_FID_CACHE_LOCK:
-            cached_miss = _USER_FID_MISS_CACHE.get(user_fid)
-        if cached_miss and cached_miss["expires_at"] > now_ts:
-            return jsonify({'message': 'User not found'}), 404
-
+        # Never cache an absent identity: signup can commit on another worker
+        # immediately after the initial existence check.
         cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
         with _USER_FID_CACHE_LOCK:
             cached = _USER_FID_CACHE.get(user_fid)
@@ -1559,13 +1556,9 @@ def get_user_by_fid_auth(user_fid):
         else:
             user_payload = UserService.get_user_auth_payload_by_fid(user_fid)
             if not user_payload:
-                with _USER_FID_CACHE_LOCK:
-                    if len(_USER_FID_MISS_CACHE) >= _USER_FID_MISS_CACHE_MAX_SIZE:
-                        _USER_FID_MISS_CACHE.pop(next(iter(_USER_FID_MISS_CACHE)))
-                    _USER_FID_MISS_CACHE[user_fid] = {
-                        "expires_at": now_ts + miss_cache_ttl_sec,
-                    }
-                return jsonify({'message': 'User not found'}), 404
+                response = jsonify({'message': 'User not found'})
+                response.headers['Cache-Control'] = 'no-store'
+                return response, 404
             with _USER_FID_CACHE_LOCK:
                 if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
                     _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))

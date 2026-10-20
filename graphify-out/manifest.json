@@ -50,8 +50,8 @@
     "semantic_hash": "20e060fa54eaa53131a61ee708c8c8c3"
   },
   "controllers/user_controller.py": {
-    "mtime": 1791716964.9861217,
-    "ast_hash": "f5e865d6d26430e4cb57daba384b32ac",
+    "mtime": 1792495072.8890524,
+    "ast_hash": "df7a5ef3e92bbf26597776ec4fffe8f0",
     "semantic_hash": ""
   },
   "db/__init__.py": {
@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "services/user_service.py": {
-    "mtime": 1786959173.8975964,
-    "ast_hash": "5c082a469ad64100d3ab83df5953c8c5",
+    "mtime": 1792495072.8883574,
+    "ast_hash": "60ddb23aa156ccac68749a0d944c9b5c",
     "semantic_hash": ""
   },
   "services/utils.py": {
@@ -485,8 +485,8 @@
     "semantic_hash": ""
   },
   "tests/test_user_signup_api.py": {
-    "mtime": 1786955397.607033,
-    "ast_hash": "38d1c8227b71dce6b632a12312f3fb42",
+    "mtime": 1792495100.3191848,
+    "ast_hash": "7190024ce6837be8d79e1909de426c83",
     "semantic_hash": ""
   },
   ".github/workflows/deploy-user-onboard.yml": {
@@ -570,8 +570,8 @@
     "semantic_hash": ""
   },
   "services/hash_coin_spend.py": {
-    "mtime": 1791716931.288829,
-    "ast_hash": "71ca50029e30f62c509d5525676673d7",
+    "mtime": 1791790022.2410429,
+    "ast_hash": "cd2cd7f4162a8a5211da47932ce42208",
     "semantic_hash": ""
   },
   "sql/20261011_hash_coin_spends.sql": {
@@ -580,13 +580,28 @@
     "semantic_hash": ""
   },
   "tests/test_hash_coin_spend_pg.py": {
-    "mtime": 1791717022.743132,
-    "ast_hash": "97ab5217421ddc2d21deec5a9a8739b4",
+    "mtime": 1791790200.5935457,
+    "ast_hash": "a8021fcbdcc9034e567656ff1ecbcc30",
     "semantic_hash": ""
   },
   "docs/hash-coin-spend.md": {
-    "mtime": 1791717022.7484598,
-    "ast_hash": "4fa14145bbc8b7d9bb4f0ebbb8be10d4",
+    "mtime": 1791725515.232878,
+    "ast_hash": "363e6763ef12a968709612ef54dc815c",
+    "semantic_hash": ""
+  },
+  "sql/20261011_hash_coin_items.sql": {
+    "mtime": 1791725394.6404161,
+    "ast_hash": "258e846bce0d254943ca33251d7c1b4e",
+    "semantic_hash": ""
+  },
+  "sql/20261012_hash_coin_catalog.sql": {
+    "mtime": 1791790200.595013,
+    "ast_hash": "a23687e3298055d23f6357261a8f5996",
+    "semantic_hash": ""
+  },
+  "docs/hash-coin-items-app-handoff.md": {
+    "mtime": 1791790155.5368094,
+    "ast_hash": "ef349f08adff952f1f4a1d400a9e554e",
     "semantic_hash": ""
   }
 }

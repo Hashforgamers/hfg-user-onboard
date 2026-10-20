@@ -84,6 +84,8 @@ class UserService:
             duplicate_row = db.session.execute(text("""
                 SELECT
                     EXISTS(SELECT 1 FROM users WHERE fid = :fid) AS fid_exists,
+                    EXISTS(SELECT 1 FROM users WHERE fid = :fid AND deleted_at IS NOT NULL) AS fid_deleted,
+                    (SELECT purge_after FROM users WHERE fid = :fid AND deleted_at IS NOT NULL) AS restore_until,
                     EXISTS(SELECT 1 FROM users WHERE game_username = :game_username) AS username_exists,
                     CASE
                         WHEN :has_email = FALSE THEN FALSE
@@ -103,6 +105,21 @@ class UserService:
                 "has_email": has_email,
             }).mappings().first()
             mark("duplicate_check")
+
+            if duplicate_row and duplicate_row.get("fid_deleted"):
+                restore_until = duplicate_row.get("restore_until")
+                return {
+                    "status": "error",
+                    "state": "ACCOUNT_PENDING_DELETION",
+                    "message": (
+                        "This account is scheduled for deletion. Restore the account "
+                        "during its restore window instead of signing up again. "
+                        "Contact Hash support if you have already signed out."
+                    ),
+                    "details": {
+                        "restore_until": restore_until.isoformat() if restore_until else None,
+                    },
+                }
 
             if duplicate_row and duplicate_row.get("fid_exists"):
                 return {
