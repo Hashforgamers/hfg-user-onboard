@@ -1,5 +1,7 @@
 # Unified Public Tournament APIs
 
+> Updated community behavior: see [Community API flow upgrade](community-api-flow-upgrade.md) for the new player endpoints, eligibility, explicit check-in, publication validation, team awards and safe write retries. This update takes precedence over older flow descriptions below.
+
 This document is for the app frontend team. These endpoints expose tournaments from both cafe dashboard events and community-host tournaments through the existing public event routes.
 
 Base URL examples:

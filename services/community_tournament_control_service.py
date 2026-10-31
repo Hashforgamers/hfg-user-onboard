@@ -1,3 +1,4 @@
+from services.community_idempotency_service import commit_community
 from datetime import timedelta
 from decimal import Decimal
 import hmac
@@ -207,7 +208,7 @@ def create_team(user_id, tournament_id, payload):
     if _automatic_team_ready(tournament, registration, created_members):
         team.status = CommunityTeamStatus.APPROVED
     _audit("community_team_created", "community_tournament_team", team.id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return _team_payload(team)
 
 
@@ -249,7 +250,7 @@ def replace_team_roster(user_id, tournament_id, team_id, payload):
     if registration and _automatic_team_ready(tournament, registration, current_members):
         team.status = CommunityTeamStatus.APPROVED
     _audit("community_team_roster_updated", "community_tournament_team", team.id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return _team_payload(team)
 
 
@@ -311,21 +312,32 @@ def invite_team_member(captain_user_id, tournament_id, team_id, payload):
         f"You were invited to join {team.name}.",
         tournament.id,
     )
-    db.session.commit()
+    commit_community(db.session)
     return _team_payload(team)
 
 
 def respond_team_invitation(user_id, tournament_id, team_id, payload):
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
+    team = CommunityTournamentTeam.query.filter_by(id=team_id, tournament_id=tournament_id).with_for_update().first()
+    if not tournament or not team:
+        raise CommunityValidationError("team invitation not found")
+    sync_tournament_status(tournament)
+    if tournament.status not in {CommunityTournamentStatus.PUBLISHED, CommunityTournamentStatus.REGISTRATION_OPEN, CommunityTournamentStatus.REGISTRATION_CLOSED}:
+        raise CommunityConflictError("invitations cannot change after play starts or the tournament ends")
+    if team.roster_locked_at or (tournament.roster_lock_at and _now() >= tournament.roster_lock_at):
+        raise CommunityConflictError("rosters are locked")
+    if team.status in {CommunityTeamStatus.REJECTED, CommunityTeamStatus.DISQUALIFIED}:
+        raise CommunityConflictError("this team cannot accept roster changes")
     member = CommunityTournamentTeamMember.query.filter_by(
-        tournament_id=tournament_id,
-        team_id=team_id,
-        user_id=int(user_id),
+        tournament_id=tournament_id, team_id=team_id, user_id=int(user_id),
     ).with_for_update().first()
     if not member:
         raise CommunityValidationError("team invitation not found")
     if member.role == "captain":
         raise CommunityConflictError("the captain cannot decline their own team")
     action = str(payload.get("action") or "").strip().lower()
+    if member.verification_status != "invited":
+        raise CommunityConflictError("invitation has already been answered")
     if action == "accept":
         accepted_elsewhere = CommunityTournamentTeamMember.query.filter(
             CommunityTournamentTeamMember.tournament_id == tournament_id,
@@ -351,7 +363,7 @@ def respond_team_invitation(user_id, tournament_id, team_id, payload):
         if _automatic_team_ready(tournament, registration, members):
             team.status = CommunityTeamStatus.APPROVED
     _audit(f"community_team_invitation_{action}", "community_tournament_team", team_id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return _team_payload(team)
 
 
@@ -484,7 +496,7 @@ def manage_team(host_user_id, tournament_id, team_id, payload):
         metadata={"reason": reason, "seed_number": team.seed_number},
     )
     _notify(team.captain_user_id, "community_team_updated", "Team registration updated", f"{team.name}: {action.replace('_', ' ')}.", tournament.id)
-    db.session.commit()
+    commit_community(db.session)
     return _team_payload(team)
 
 
@@ -617,7 +629,7 @@ def start_tournament(host_user_id, tournament_id):
         f"{tournament.title} has started.",
         tournament.id,
     )
-    db.session.commit()
+    commit_community(db.session)
     return tournament
 
 
@@ -640,7 +652,8 @@ def generate_matches(host_user_id, tournament_id):
     ).all()
     if len(teams) < max(int(tournament.min_entries or 2), 2):
         raise CommunityConflictError("not enough approved entries to generate matches")
-    auto_checked_in = _auto_check_in_teams(teams)
+    # Bracket eligibility is not proof of attendance; preserve explicit check-in.
+    auto_checked_in = 0
 
     if tournament.tournament_type in {"round_robin", "league"}:
         pairs = [(teams[left], teams[right]) for left in range(len(teams)) for right in range(left + 1, len(teams))]
@@ -723,7 +736,7 @@ def generate_matches(host_user_id, tournament_id):
         host_user_id,
         metadata={"format": tournament.tournament_type, "auto_checked_in": auto_checked_in},
     )
-    db.session.commit()
+    commit_community(db.session)
     return list_matches(tournament.id, {}, include_lobby=True)
 
 
@@ -792,7 +805,7 @@ def create_manual_match(host_user_id, tournament_id, payload):
     db.session.add(match)
     db.session.flush()
     _audit("community_match_created", "community_tournament_match", match.id, host_user_id, metadata={"stage": stage})
-    db.session.commit()
+    commit_community(db.session)
     return _match_payload(match)
 
 
@@ -847,10 +860,16 @@ def list_private_matches(user_id, tournament_id, filters):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
-    registration = _registration_for_user(tournament.id, user_id)
-    if int(tournament.host_user_id) != int(user_id) and not registration:
-        raise CommunityForbiddenError("only the host or active participants can view lobby details")
-    return list_matches(tournament_id, filters, include_lobby=True, tournament=tournament)
+    from services.community_access_service import require_participant, eligible_memberships, match_team_ids
+    require_participant(tournament, user_id)
+    payload = list_matches(tournament_id, filters, include_lobby=True, tournament=tournament)
+    if int(tournament.host_user_id) != int(user_id):
+        assigned = {str(m.team_id) for m in eligible_memberships(tournament.id, user_id)}
+        for item in payload["items"]:
+            ids = {str(v) for v in [item["team_a_id"], item["team_b_id"], *item.get("participant_team_ids", [])] if v}
+            if not assigned.intersection(ids):
+                item["lobby_details"] = {}
+    return payload
 
 
 def leaderboard(tournament_id, invite_code=None):
@@ -961,28 +980,16 @@ def _proposal_evidence_urls(values):
 
 
 def _match_captain_team(user_id, tournament_id, match):
-    membership = CommunityTournamentTeamMember.query.filter(
-        CommunityTournamentTeamMember.tournament_id == tournament_id,
-        CommunityTournamentTeamMember.user_id == int(user_id),
-        CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
-        CommunityTournamentTeamMember.role == "captain",
-        CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
-    ).first()
-    if not membership:
-        raise CommunityForbiddenError("only a match team captain can respond to this proposal")
+    from services.community_access_service import match_membership
+    membership = match_membership(tournament_id, user_id, match)
+    if membership.role != "captain" or match.participant_team_ids:
+        raise CommunityForbiddenError("only a head-to-head match captain can respond to this proposal")
     return membership.team_id
 
 
 def _match_participant_membership(user_id, tournament_id, match):
-    membership = CommunityTournamentTeamMember.query.filter(
-        CommunityTournamentTeamMember.tournament_id == tournament_id,
-        CommunityTournamentTeamMember.user_id == int(user_id),
-        CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
-        CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
-    ).first()
-    if not membership:
-        raise CommunityForbiddenError("only assigned match participants can view result evidence")
-    return membership
+    from services.community_access_service import match_membership
+    return match_membership(tournament_id, user_id, match)
 
 
 def _match_captain_user_ids(tournament_id, match):
@@ -1046,11 +1053,7 @@ def match_result_state(user_id, tournament_id, match_id):
             "is_host": is_host,
             "is_captain": is_captain,
             "team_id": viewer_team_id,
-            "can_create_proposal": is_host and match.status in {
-                CommunityMatchStatus.IN_PROGRESS,
-                CommunityMatchStatus.AWAITING_RESULTS,
-                CommunityMatchStatus.DISPUTED,
-            },
+            "can_create_proposal": is_host and proposal_blocker(match, pending_proposal, active_dispute) is None,
             "can_accept_pending_proposal": bool(
                 is_captain and proposal_open and viewer_team_id not in accepted_team_ids
             ),
@@ -1208,12 +1211,13 @@ def create_result_proposal(host_user_id, tournament_id, match_id, payload):
     match = CommunityTournamentMatch.query.filter_by(id=match_id, tournament_id=tournament.id).with_for_update().first()
     if not match:
         raise CommunityValidationError("match not found")
-    if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS}:
-        raise CommunityConflictError("result proposals are available only for active or awaiting-result matches")
-    if not match.team_a_id or not match.team_b_id:
-        raise CommunityConflictError("result proposals require two assigned teams")
-    if CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").first():
-        raise CommunityConflictError("a result proposal is already pending")
+    pending = CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").first()
+    dispute = CommunityTournamentDispute.query.filter(
+        CommunityTournamentDispute.match_id == match.id,
+        CommunityTournamentDispute.status.in_({"open", "under_review"})).first()
+    blocker = proposal_blocker(match, pending, dispute)
+    if blocker:
+        raise CommunityConflictError(blocker)
     try:
         winner_team_id = uuid.UUID(str(payload["winner_team_id"]))
         team_a_score = int(payload["team_a_score"])
@@ -1246,7 +1250,7 @@ def create_result_proposal(host_user_id, tournament_id, match_id, payload):
         "Match result needs your review",
         f"Review the proposed result for match {match.match_number} before the deadline.",
     )
-    db.session.commit()
+    commit_community(db.session)
     return proposal
 
 
@@ -1281,7 +1285,7 @@ def accept_result_proposal(user_id, tournament_id, match_id, proposal_id):
             f"A captain accepted the proposed result for match {match.match_number}.",
             excluded_user_ids={user_id},
         )
-    db.session.commit()
+    commit_community(db.session)
     return proposal
 
 
@@ -1332,7 +1336,7 @@ def dispute_result_proposal(user_id, tournament_id, match_id, proposal_id, paylo
         f"Match {match.match_number} requires organizer review.",
         excluded_user_ids={user_id},
     )
-    db.session.commit()
+    commit_community(db.session)
     return proposal
 
 
@@ -1352,14 +1356,20 @@ def admin_resolve_match_result(admin_id, tournament_id, match_id, payload):
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise CommunityValidationError("reason is required for an admin result")
-    try:
-        winner_team_id = uuid.UUID(str(payload["winner_team_id"]))
-        team_a_score = int(payload["team_a_score"])
-        team_b_score = int(payload["team_b_score"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise CommunityValidationError("winner_team_id and both non-negative scores are required") from exc
-    if winner_team_id not in {match.team_a_id, match.team_b_id} or min(team_a_score, team_b_score) < 0:
-        raise CommunityValidationError("invalid admin result")
+    standings = None
+    if match.participant_team_ids:
+        standings = normalize_standings(tournament, match, payload)
+        winner_team_id = uuid.UUID(standings[0]["team_id"])
+        team_a_score = team_b_score = None
+    else:
+        try:
+            winner_team_id = uuid.UUID(str(payload["winner_team_id"]))
+            team_a_score = int(payload["team_a_score"])
+            team_b_score = int(payload["team_b_score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CommunityValidationError("winner_team_id and both non-negative scores are required") from exc
+        if winner_team_id not in {match.team_a_id, match.team_b_id} or min(team_a_score, team_b_score) < 0:
+            raise CommunityValidationError("invalid admin result")
 
     now = _now()
     for proposal in CommunityMatchResultProposal.query.filter_by(match_id=match.id, status="pending").all():
@@ -1380,6 +1390,8 @@ def admin_resolve_match_result(admin_id, tournament_id, match_id, payload):
     match.team_a_score = team_a_score
     match.team_b_score = team_b_score
     match.admin_notes = reason
+    if standings is not None:
+        match.standings = standings
     _advance_match_winner(match, winner_team_id)
     _audit(
         "community_match_result_admin_resolved",
@@ -1396,7 +1408,7 @@ def admin_resolve_match_result(admin_id, tournament_id, match_id, payload):
         f"Match {match.match_number} was resolved by a tournament administrator.",
         tournament.id,
     )
-    db.session.commit()
+    commit_community(db.session)
     return _match_payload(match)
 
 
@@ -1410,8 +1422,9 @@ def manage_match(host_user_id, tournament_id, match_id, payload):
     if action == "start":
         if match.status not in {CommunityMatchStatus.SCHEDULED, CommunityMatchStatus.READY}:
             raise CommunityConflictError("match cannot be started from its current status")
-        if not match.team_a_id or not match.team_b_id:
-            raise CommunityConflictError("both opponents must be assigned")
+        from services.community_access_service import match_team_ids
+        if len(match_team_ids(match)) < 2:
+            raise CommunityConflictError("at least two opponents must be assigned")
         match.status = CommunityMatchStatus.IN_PROGRESS
         match.started_at = _now()
         match.result_due_at = _now() + timedelta(minutes=int(tournament.result_submission_window_minutes or 15))
@@ -1429,42 +1442,13 @@ def manage_match(host_user_id, tournament_id, match_id, payload):
             "host result overrides require a result proposal; use the result-proposals endpoint"
         )
     elif action == "record_standings":
-        raw_standings = payload.get("standings")
-        if not isinstance(raw_standings, list) or len(raw_standings) < 2:
-            raise CommunityValidationError("standings must contain at least two teams")
-        allowed_ids = {
-            uuid.UUID(str(value))
-            for value in (match.participant_team_ids or [])
-        }
-        if not allowed_ids:
-            raise CommunityConflictError("this match is not configured for multi-team standings")
-        placement_points = (tournament.schedule_config or {}).get("placement_points") or {}
-        normalized = []
-        seen_teams = set()
-        seen_placements = set()
-        for raw in raw_standings:
-            try:
-                team_id = uuid.UUID(str(raw["team_id"]))
-                placement = int(raw["placement"])
-                kills = int(raw.get("kills") or 0)
-                penalty = int(raw.get("penalty_points") or 0)
-            except (KeyError, TypeError, ValueError) as exc:
-                raise CommunityValidationError("each standing requires team_id, placement, and valid points") from exc
-            if team_id not in allowed_ids or team_id in seen_teams or placement <= 0 or placement in seen_placements or kills < 0 or penalty < 0:
-                raise CommunityValidationError("standings contain invalid or duplicate teams/placements")
-            points = int(raw.get("points")) if raw.get("points") is not None else int(placement_points.get(str(placement), 0)) + kills - penalty
-            normalized.append({
-                "team_id": str(team_id),
-                "placement": placement,
-                "kills": kills,
-                "penalty_points": penalty,
-                "points": points,
-            })
-            seen_teams.add(team_id)
-            seen_placements.add(placement)
-        if seen_teams != allowed_ids:
-            raise CommunityValidationError("standings must include every match participant")
-        normalized.sort(key=lambda row: row["placement"])
+        if match.status in {CommunityMatchStatus.COMPLETED, CommunityMatchStatus.CANCELLED}:
+            raise CommunityConflictError("closed matches cannot receive standings")
+        if CommunityTournamentDispute.query.filter(
+            CommunityTournamentDispute.match_id == match.id,
+            CommunityTournamentDispute.status.in_({"open", "under_review"})).first():
+            raise CommunityConflictError("disputed standings require a referee decision")
+        normalized = normalize_standings(tournament, match, payload)
         match.standings = normalized
         match.winner_team_id = uuid.UUID(normalized[0]["team_id"])
         match.status = CommunityMatchStatus.COMPLETED
@@ -1490,7 +1474,7 @@ def manage_match(host_user_id, tournament_id, match_id, payload):
     else:
         raise CommunityValidationError("unsupported match action")
     _audit(f"community_match_{action}", "community_tournament_match", match.id, host_user_id, metadata={"reason": reason})
-    db.session.commit()
+    commit_community(db.session)
     return _match_payload(match)
 
 
@@ -1596,7 +1580,7 @@ def submit_captain_result(user_id, tournament_id, match_id, payload):
         user_id,
         metadata={"team_id": str(team_id), "previous": previous} if is_amendment else {"team_id": str(team_id)},
     )
-    db.session.commit()
+    commit_community(db.session)
     return {
         "match": _match_payload(match),
         "submission": submission.to_dict(),
@@ -1644,7 +1628,7 @@ def create_announcement(host_user_id, tournament_id, payload):
     for recipient in recipients:
         _notify(recipient, "community_announcement", title[:160], message, tournament.id)
     _audit("community_announcement_published", "community_tournament_announcement", announcement.id, host_user_id, metadata={"audience": audience})
-    db.session.commit()
+    commit_community(db.session)
     return announcement
 
 
@@ -1721,7 +1705,7 @@ def host_dashboard(host_user_id):
             ).count(),
         }
         items.append(item)
-    db.session.commit()
+    commit_community(db.session)
     return {
         "summary": {
             "active_tournaments": sum(1 for tournament in tournaments if tournament.status not in {CommunityTournamentStatus.DRAFT, CommunityTournamentStatus.COMPLETED, CommunityTournamentStatus.CANCELLED}),
@@ -1847,7 +1831,7 @@ def process_operational_deadlines(limit=50):
                         tournament.id,
                     )
                     summary["lifecycle_updated"] += 1
-                    db.session.commit()
+                    commit_community(db.session)
                 continue
             except CommunityConflictError as exc:
                 # Keep registration closed when there are not enough approved
@@ -1886,7 +1870,7 @@ def process_operational_deadlines(limit=50):
         # Commit per tournament. generate_matches can safely run during the same
         # cron pass without accidentally committing or rolling back another
         # tournament's lifecycle update.
-        db.session.commit()
+        commit_community(db.session)
 
     matches = (
         CommunityTournamentMatch.query
@@ -1941,7 +1925,7 @@ def process_operational_deadlines(limit=50):
             match.id,
             actor_type="system",
         )
-        db.session.commit()
+        commit_community(db.session)
         summary["escalated"] += 1
         summary["items"].append({"match_id": str(match.id), "status": match.status})
     proposals = (
@@ -1958,7 +1942,7 @@ def process_operational_deadlines(limit=50):
             continue
         _finalize_result_proposal(proposal, match)
         _audit("community_result_proposal_expired_finalized", "community_match_result_proposal", proposal.id, actor_type="system")
-        db.session.commit()
+        commit_community(db.session)
         summary.setdefault("proposals_finalized", 0)
         summary["proposals_finalized"] += 1
     return summary
@@ -2004,8 +1988,7 @@ def rule_template(game=None):
     }
 
 
-def tournament_readiness(host_user_id, tournament_id):
-    tournament = _owned_tournament(host_user_id, tournament_id)
+def readiness_for_tournament(tournament):
     blockers = []
     warnings = []
     if not tournament.rules and not tournament.rules_config:
@@ -2043,13 +2026,9 @@ def create_tournament_review(user_id, tournament_id, payload):
         raise CommunityValidationError("tournament not found")
     if tournament.status != CommunityTournamentStatus.COMPLETED:
         raise CommunityConflictError("reviews open only after tournament completion")
-    registration = CommunityTournamentRegistration.query.filter_by(
-        tournament_id=tournament.id,
-        user_id=int(user_id),
-        status=CommunityTournamentRegistrationStatus.CONFIRMED,
-    ).first()
-    if not registration:
-        raise CommunityForbiddenError("only confirmed participants can review this tournament")
+    from services.community_access_service import eligible_participant
+    if int(tournament.host_user_id) == int(user_id) or not eligible_participant(tournament.id, user_id):
+        raise CommunityForbiddenError("only eligible participants can review this tournament")
     if CommunityTournamentReview.query.filter_by(tournament_id=tournament.id, reviewer_user_id=int(user_id)).first():
         raise CommunityConflictError("you have already reviewed this tournament")
     fields = (
@@ -2079,7 +2058,7 @@ def create_tournament_review(user_id, tournament_id, payload):
     db.session.add(review)
     db.session.flush()
     _audit("community_tournament_review_created", "community_tournament_review", review.id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return review
 
 
@@ -2124,3 +2103,65 @@ def public_host_profile(host_user_id):
         "prizes_distributed": float(paid_prizes or 0),
         "recent_reviews": [review.to_dict() for review in reviews[:10]],
     }
+
+
+def tournament_readiness(host_user_id, tournament_id):
+    return readiness_for_tournament(_owned_tournament(host_user_id, tournament_id))
+
+
+def require_publish_ready(tournament):
+    readiness = readiness_for_tournament(tournament)
+    if not readiness["ready_to_publish"]:
+        raise CommunityValidationError("Cannot publish: " + " ".join(readiness["blockers"]))
+
+
+def proposal_blocker(match, pending=None, dispute=None):
+    if dispute:
+        return "an active dispute requires a referee decision"
+    if pending:
+        return "a result proposal is already pending"
+    if match.status not in {CommunityMatchStatus.IN_PROGRESS, CommunityMatchStatus.AWAITING_RESULTS}:
+        return "result proposals are available only for active or awaiting-result matches"
+    if not match.team_a_id or not match.team_b_id or match.participant_team_ids:
+        return "result proposals require a head-to-head match"
+    return None
+
+
+def normalize_standings(tournament, match, payload):
+    raw_standings = payload.get("standings")
+    if not isinstance(raw_standings, list) or len(raw_standings) < 2:
+        raise CommunityValidationError("standings must contain at least two teams")
+    allowed_ids = {
+        uuid.UUID(str(value))
+        for value in (match.participant_team_ids or [])
+    }
+    if not allowed_ids:
+        raise CommunityConflictError("this match is not configured for multi-team standings")
+    placement_points = (tournament.schedule_config or {}).get("placement_points") or {}
+    normalized = []
+    seen_teams = set()
+    seen_placements = set()
+    for raw in raw_standings:
+        try:
+            team_id = uuid.UUID(str(raw["team_id"]))
+            placement = int(raw["placement"])
+            kills = int(raw.get("kills") or 0)
+            penalty = int(raw.get("penalty_points") or 0)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CommunityValidationError("each standing requires team_id, placement, and valid points") from exc
+        if team_id not in allowed_ids or team_id in seen_teams or placement <= 0 or placement in seen_placements or kills < 0 or penalty < 0:
+            raise CommunityValidationError("standings contain invalid or duplicate teams/placements")
+        points = int(raw.get("points")) if raw.get("points") is not None else int(placement_points.get(str(placement), 0)) + kills - penalty
+        normalized.append({
+            "team_id": str(team_id),
+            "placement": placement,
+            "kills": kills,
+            "penalty_points": penalty,
+            "points": points,
+        })
+        seen_teams.add(team_id)
+        seen_placements.add(placement)
+    if seen_teams != allowed_ids:
+        raise CommunityValidationError("standings must include every match participant")
+    normalized.sort(key=lambda row: row["placement"])
+    return normalized

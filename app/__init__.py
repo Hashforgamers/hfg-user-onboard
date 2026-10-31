@@ -24,7 +24,8 @@ def create_app():
         app,
         resources={r"/*": {"origins": "*"}},
         supports_credentials=False,
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
+        expose_headers=["Idempotency-Replayed"],
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
@@ -75,7 +76,7 @@ def create_app():
     def _apply_response_hardening(response):
         response.headers["X-Request-Id"] = getattr(g, "request_id", "")
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id, Idempotency-Key"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 
         if app.config.get("API_ENABLE_TIMING_HEADERS", True):
@@ -110,7 +111,7 @@ def create_app():
     def api_preflight(_path=None):
         response = make_response("", 204)
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id, Idempotency-Key"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Access-Control-Max-Age"] = "86400"
         return response
