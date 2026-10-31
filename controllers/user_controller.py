@@ -2260,7 +2260,7 @@ def user_available_passes():
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
             "vendor_images": vendor_images,
             "is_bought": p.id in bought_pass_ids,
             
@@ -2313,7 +2313,7 @@ def user_all_passes():
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
             "already_purchased": bool(up)
         })
     _microcache_set(
@@ -2352,7 +2352,7 @@ def user_passes():
             "cafe_pass_id": cafe_pass.id,
             "cafe_pass_name": cafe_pass.name,
             "vendor_id": cafe_pass.vendor_id,
-            "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass",
+            "vendor_name": cafe_pass.vendor.public_name if cafe_pass.vendor else "Hash Pass",
             "vendor_images": vendor_images,  # ✅ added vendor images
             "valid_from": up.valid_from.isoformat(),
             "valid_to": up.valid_to.isoformat(),
@@ -2417,7 +2417,7 @@ def pass_details(pass_id):
         "description": cafe_pass.description,
         "pass_type": cafe_pass.pass_type.name if cafe_pass.pass_type else None,
         "vendor_id": cafe_pass.vendor_id,
-        "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass"
+        "vendor_name": cafe_pass.vendor.public_name if cafe_pass.vendor else "Hash Pass"
     }
     _microcache_set(
         cache_key,
@@ -2672,7 +2672,7 @@ def get_user_available_passes_by_id(user_id):
                 "description": p.description,
                 "pass_type": p.pass_type.name if p.pass_type else None,
                 "vendor_id": p.vendor_id,
-                "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+                "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
                 "vendor_images": vendor_images,
                 "is_bought": p.id in bought_pass_ids,
                 

@@ -11,6 +11,12 @@ class Vendor(db.Model):
     
     id = Column(Integer, primary_key=True)
     cafe_name = Column(String(255), nullable=False)
+    display_name = Column(String(120), nullable=True)
+
+    @property
+    def public_name(self):
+        return (self.display_name or '').strip() or self.cafe_name
+
     owner_name = Column(String(255), nullable=False)
     description = Column(String(255), nullable=True)
 

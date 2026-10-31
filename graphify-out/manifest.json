@@ -10,9 +10,9 @@
     "semantic_hash": "9d129a3cb7bb13b5d27a36750b8a4175"
   },
   "app/__init__.py": {
-    "mtime": 1785062312.5774763,
-    "ast_hash": "624423bc954273400bf4702411a210be",
-    "semantic_hash": "624423bc954273400bf4702411a210be"
+    "mtime": 1793400097.9756694,
+    "ast_hash": "fd243ff6c4d02d0c04dba72c51d0cf17",
+    "semantic_hash": ""
   },
   "app/config.py": {
     "mtime": 1787341076.250355,
@@ -20,8 +20,8 @@
     "semantic_hash": ""
   },
   "controllers/community_tournament_controller.py": {
-    "mtime": 1787473948.8876421,
-    "ast_hash": "8ab0872873fc1092d3346a7e043daf2b",
+    "mtime": 1793400049.4757478,
+    "ast_hash": "d3819ebc4bfae11c5ffe7dbbcbce1dde",
     "semantic_hash": ""
   },
   "controllers/event_controller.py": {
@@ -50,8 +50,8 @@
     "semantic_hash": "20e060fa54eaa53131a61ee708c8c8c3"
   },
   "controllers/user_controller.py": {
-    "mtime": 1792495072.8890524,
-    "ast_hash": "df7a5ef3e92bbf26597776ec4fffe8f0",
+    "mtime": 1793442393.3784502,
+    "ast_hash": "45721524cfece6ed01e30b30d1ff46e6",
     "semantic_hash": ""
   },
   "db/__init__.py": {
@@ -270,9 +270,9 @@
     "semantic_hash": "49ccd5c4575ce74a853cdf24389dd7db"
   },
   "models/vendor.py": {
-    "mtime": 1756653935.0235226,
-    "ast_hash": "8ce68dafd4170861522202d07e378166",
-    "semantic_hash": "8ce68dafd4170861522202d07e378166"
+    "mtime": 1793442393.3738022,
+    "ast_hash": "3aaaa18c86c3b6e2ace0da228545de6a",
+    "semantic_hash": ""
   },
   "models/verification_checks.py": {
     "mtime": 1762110732.2952342,
@@ -290,13 +290,13 @@
     "semantic_hash": "428690cffeb20ad5cd6ae08128da0948"
   },
   "services/community_tournament_control_service.py": {
-    "mtime": 1787341946.0687456,
-    "ast_hash": "1c2bdb45966e2a12ab914c833bf9c35a",
+    "mtime": 1793400432.9545348,
+    "ast_hash": "9b8a9b89f0f45c0720f5643347bc20fa",
     "semantic_hash": ""
   },
   "services/community_tournament_service.py": {
-    "mtime": 1787420969.3210168,
-    "ast_hash": "aa2e04537b206275cd55f98cad2ccc2b",
+    "mtime": 1793400432.9536355,
+    "ast_hash": "80b4526beda44f220958cbcc816d96a2",
     "semantic_hash": ""
   },
   "services/config_load.py": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "services/community_dispute_chat_service.py": {
-    "mtime": 1787389427.2063873,
-    "ast_hash": "807de19f87f58add71c367e8105fd456",
+    "mtime": 1793400221.2644494,
+    "ast_hash": "d57ca2f32932fb4a9a0c474e7f6cf8e9",
     "semantic_hash": ""
   },
   "sql/20260808_community_dispute_chat_rooms.sql": {
@@ -510,13 +510,13 @@
     "semantic_hash": ""
   },
   "docs/community-host-tournament-management-e2e.md": {
-    "mtime": 1787394430.7375479,
-    "ast_hash": "9bcf9edfc0ae112ab41b5d5840786040",
+    "mtime": 1793400358.2025566,
+    "ast_hash": "7f0d936a42fb70c2639bdda068560220",
     "semantic_hash": ""
   },
   "docs/community-tournament-frontend-handoff.md": {
-    "mtime": 1787389441.101177,
-    "ast_hash": "8bef1b1fb05aa13fa0e4c517b20fc613",
+    "mtime": 1793400358.2018592,
+    "ast_hash": "43e3ea6b8e58789fc6b92ad27b763b4b",
     "semantic_hash": ""
   },
   "docs/phone-number-apis.md": {
@@ -525,8 +525,8 @@
     "semantic_hash": ""
   },
   "docs/unified-public-tournament-frontend-handoff.md": {
-    "mtime": 1784367231.4485426,
-    "ast_hash": "8b2ed67628024d4bffb732d68e5652da",
+    "mtime": 1793400358.2034965,
+    "ast_hash": "a83263bd23e8a63f7ec5cda80283af3a",
     "semantic_hash": ""
   },
   "docs/user-deletion-lifecycle.md": {
@@ -602,6 +602,36 @@
   "docs/hash-coin-items-app-handoff.md": {
     "mtime": 1791790155.5368094,
     "ast_hash": "ef349f08adff952f1f4a1d400a9e554e",
+    "semantic_hash": ""
+  },
+  "services/community_access_service.py": {
+    "mtime": 1793400393.004006,
+    "ast_hash": "447f28c5bf04ae7dd165e29f41ee977e",
+    "semantic_hash": ""
+  },
+  "services/community_idempotency_service.py": {
+    "mtime": 1793400393.0126634,
+    "ast_hash": "cf62ed367dcc6254553e958d34ac9f8c",
+    "semantic_hash": ""
+  },
+  "services/community_player_flow_service.py": {
+    "mtime": 1793400393.1043808,
+    "ast_hash": "3b906e38be258600ddabf0213a82ca13",
+    "semantic_hash": ""
+  },
+  "sql/20261030_community_api_idempotency.sql": {
+    "mtime": 1793400049.3908925,
+    "ast_hash": "90efb2583682cc27950f08c069d23243",
+    "semantic_hash": ""
+  },
+  "tests/test_community_flow_pg.py": {
+    "mtime": 1793400433.3379998,
+    "ast_hash": "b3962eb7da57bddcfe46da82ff2eaddc",
+    "semantic_hash": ""
+  },
+  "docs/community-api-flow-upgrade.md": {
+    "mtime": 1793400462.5011876,
+    "ast_hash": "661f8d334a88ce4daa23b8cd65bf5b86",
     "semantic_hash": ""
   }
 }
