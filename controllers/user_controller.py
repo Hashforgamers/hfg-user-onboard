@@ -2087,80 +2087,37 @@ def add_wallet_balance():
 @user_blueprint.route("/user/purchase_pass", methods=["POST"])
 @auth_required_self(decrypt_user=True) 
 def user_purchase_pass():
-    user_id = g.auth_user_id 
-    data = request.get_json()
-    cafe_pass_id = data.get("cafe_pass_id")
-    payment_id = data.get("payment_id")  
-    payment_mode = data.get("payment_mode", "online")  # online, wallet, etc.
-
-    if not cafe_pass_id:
-        return jsonify({"message": "cafe_pass_id is required"}), 400
-
+    # Keep the shipped Flutter endpoint and 200 response, but use the booking
+    # service's verified, idempotent purchase implementation for both pass modes.
+    import requests
+    user_id = g.auth_user_id
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message='A JSON object is required'), 400
+    if getattr(g, 'token_expired', False):
+        return jsonify(message='Sign in again'), 401
+    base_url = (current_app.config.get('BOOKING_SERVICE_URL') or os.getenv('BOOKING_SERVICE_URL')
+                or 'https://hfg-booking.onrender.com').rstrip('/')
     try:
-        start_date = datetime.utcnow().date()
-        cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
-        valid_to = start_date + timedelta(days=cafe_pass.days_valid)
-
-        # ✅ vendor_id can be None for Hash Pass
-        vendor_id = cafe_pass.vendor_id  # will be None for global passes
-
-        # Create user pass
-        user_pass = UserPass(
-            user_id=user_id,
-            cafe_pass_id=cafe_pass_id,
-            valid_from=start_date,
-            valid_to=valid_to,
-            is_active=True
+        response = requests.post(
+            f'{base_url}/api/user/passes/purchase',
+            headers={'Authorization': request.headers.get('Authorization', ''),
+                     'Content-Type': 'application/json'},
+            json=data, timeout=20,
         )
-        db.session.add(user_pass)
-
-        # Fetch user for transaction details
-        user = User.query.filter_by(id=user_id).first()
-        user_name = user.name if user else ""
-
-        # Create transaction  
-        transaction = Transaction(
-            booking_id=None,  
-            vendor_id=vendor_id,  # ✅ None if Hash Pass
-            user_id=user_id,
-            booked_date=start_date,
-            booking_date=start_date,
-            booking_time=datetime.utcnow().time(),
-            user_name=user_name,
-            amount=cafe_pass.price,
-            original_amount=cafe_pass.price,
-            discounted_amount=0.0,
-            mode_of_payment=payment_mode,
-            booking_type="pass_purchase",
-            settlement_status="pending",
-            reference_id=payment_id
-        )
-        db.session.add(transaction)
-
-        db.session.commit()
-        _invalidate_user_microcache(user_id, [
-            "user-available-passes",
-            "user-all-passes",
-            "user-passes",
-            "user-passes-history",
-            "users-transactions",
-        ])
-
-        return jsonify({
-            "message": "Pass purchased successfully",
-            "pass_type": "hash" if vendor_id is None else "vendor",
-            "vendor_id": vendor_id,
-            "valid_from": start_date.isoformat(),
-            "valid_to": valid_to.isoformat()
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
-        return jsonify({
-            "error": "Failed to complete pass purchase",
-            "details": str(e)
-        }), 500
+        result = response.json()
+    except (requests.RequestException, ValueError):
+        current_app.logger.exception('Pass purchase service unavailable')
+        return jsonify(message='Unable to verify the purchase. Retry with the same payment.'), 502
+    if not isinstance(result, dict):
+        return jsonify(message='Invalid response from pass purchase service'), 502
+    if response.status_code not in (200, 201):
+        return jsonify(message=result.get('error') or result.get('message') or 'Pass purchase failed'), response.status_code
+    _invalidate_user_microcache(user_id, [
+        'user-available-passes', 'user-all-passes', 'user-passes',
+        'user-passes-history', 'users-transactions',
+    ])
+    return jsonify({**result, 'message': 'Pass purchased successfully'}), 200
 
 @user_blueprint.route('/users/transactions', methods=['GET'])
 @auth_required_self(decrypt_user=True) 
