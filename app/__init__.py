@@ -6,6 +6,7 @@ from controllers.event_public_controller import event_public_bp
 from controllers.event_participation_controller import event_participation_bp
 from controllers.tournament_engine_controller import tournament_engine_bp
 from controllers.community_tournament_controller import community_tournament_bp
+from controllers.web_gateway_controller import web_gateway_bp
 from db.extensions import db, migrate, mail
 from .config import Config
 from services.firebase_service import init_firebase
@@ -39,6 +40,8 @@ def create_app():
     app.register_blueprint(event_participation_bp)
     app.register_blueprint(tournament_engine_bp)
     app.register_blueprint(community_tournament_bp)
+    # Signed server-to-server login for the website gateway (hfg-new-landing-page).
+    app.register_blueprint(web_gateway_bp, url_prefix='/api')
 
     def _is_public_cacheable_path(path: str) -> bool:
         return (
