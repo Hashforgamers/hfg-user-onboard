@@ -933,7 +933,7 @@ def create_user():
                 "Create user conflict_state fid=%s state=%s status=%s details=%s",
                 data.get("fid"),
                 state,
-                ("409" if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else "429" if state == "COOLDOWN_ACTIVE" else "400"),
+                ("409" if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN", "ACCOUNT_PENDING_DELETION"} else "429" if state == "COOLDOWN_ACTIVE" else "400"),
                 result.get("details"),
             )
             if state == "USER_EXISTS":
@@ -1057,10 +1057,11 @@ def create_user():
                         existing_email,
                         data.get("fid"),
                     )
-            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN"} else 429 if state == "COOLDOWN_ACTIVE" else 400
+            status_code = 409 if state in {"USER_EXISTS", "EMAIL_EXISTS", "USERNAME_TAKEN", "ACCOUNT_PENDING_DELETION"} else 429 if state == "COOLDOWN_ACTIVE" else 400
             return jsonify(result), status_code
 
         user_payload = result.to_dict()
+        _invalidate_fid_caches(data.get("fid"))
         if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
             _USER_CACHE.pop(next(iter(_USER_CACHE)))
         _USER_CACHE[result.id] = {
@@ -1545,12 +1546,8 @@ def get_user_by_fid_auth(user_fid):
             response.headers['Cache-Control'] = 'no-store'
             return response, 200
 
-        miss_cache_ttl_sec = int(current_app.config.get("USER_FID_MISS_CACHE_TTL_SEC", 45))
-        with _USER_FID_CACHE_LOCK:
-            cached_miss = _USER_FID_MISS_CACHE.get(user_fid)
-        if cached_miss and cached_miss["expires_at"] > now_ts:
-            return jsonify({'message': 'User not found'}), 404
-
+        # Never cache an absent identity: signup can commit on another worker
+        # immediately after the initial existence check.
         cache_ttl_sec = int(current_app.config.get("USER_FID_CACHE_TTL_SEC", 30))
         with _USER_FID_CACHE_LOCK:
             cached = _USER_FID_CACHE.get(user_fid)
@@ -1559,13 +1556,9 @@ def get_user_by_fid_auth(user_fid):
         else:
             user_payload = UserService.get_user_auth_payload_by_fid(user_fid)
             if not user_payload:
-                with _USER_FID_CACHE_LOCK:
-                    if len(_USER_FID_MISS_CACHE) >= _USER_FID_MISS_CACHE_MAX_SIZE:
-                        _USER_FID_MISS_CACHE.pop(next(iter(_USER_FID_MISS_CACHE)))
-                    _USER_FID_MISS_CACHE[user_fid] = {
-                        "expires_at": now_ts + miss_cache_ttl_sec,
-                    }
-                return jsonify({'message': 'User not found'}), 404
+                response = jsonify({'message': 'User not found'})
+                response.headers['Cache-Control'] = 'no-store'
+                return response, 404
             with _USER_FID_CACHE_LOCK:
                 if len(_USER_FID_CACHE) >= _USER_FID_CACHE_MAX_SIZE:
                     _USER_FID_CACHE.pop(next(iter(_USER_FID_CACHE)))
@@ -2094,80 +2087,37 @@ def add_wallet_balance():
 @user_blueprint.route("/user/purchase_pass", methods=["POST"])
 @auth_required_self(decrypt_user=True) 
 def user_purchase_pass():
-    user_id = g.auth_user_id 
-    data = request.get_json()
-    cafe_pass_id = data.get("cafe_pass_id")
-    payment_id = data.get("payment_id")  
-    payment_mode = data.get("payment_mode", "online")  # online, wallet, etc.
-
-    if not cafe_pass_id:
-        return jsonify({"message": "cafe_pass_id is required"}), 400
-
+    # Keep the shipped Flutter endpoint and 200 response, but use the booking
+    # service's verified, idempotent purchase implementation for both pass modes.
+    import requests
+    user_id = g.auth_user_id
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message='A JSON object is required'), 400
+    if getattr(g, 'token_expired', False):
+        return jsonify(message='Sign in again'), 401
+    base_url = (current_app.config.get('BOOKING_SERVICE_URL') or os.getenv('BOOKING_SERVICE_URL')
+                or 'https://hfg-booking.onrender.com').rstrip('/')
     try:
-        start_date = datetime.utcnow().date()
-        cafe_pass = CafePass.query.filter_by(id=cafe_pass_id, is_active=True).first_or_404()
-        valid_to = start_date + timedelta(days=cafe_pass.days_valid)
-
-        # ✅ vendor_id can be None for Hash Pass
-        vendor_id = cafe_pass.vendor_id  # will be None for global passes
-
-        # Create user pass
-        user_pass = UserPass(
-            user_id=user_id,
-            cafe_pass_id=cafe_pass_id,
-            valid_from=start_date,
-            valid_to=valid_to,
-            is_active=True
+        response = requests.post(
+            f'{base_url}/api/user/passes/purchase',
+            headers={'Authorization': request.headers.get('Authorization', ''),
+                     'Content-Type': 'application/json'},
+            json=data, timeout=20,
         )
-        db.session.add(user_pass)
-
-        # Fetch user for transaction details
-        user = User.query.filter_by(id=user_id).first()
-        user_name = user.name if user else ""
-
-        # Create transaction  
-        transaction = Transaction(
-            booking_id=None,  
-            vendor_id=vendor_id,  # ✅ None if Hash Pass
-            user_id=user_id,
-            booked_date=start_date,
-            booking_date=start_date,
-            booking_time=datetime.utcnow().time(),
-            user_name=user_name,
-            amount=cafe_pass.price,
-            original_amount=cafe_pass.price,
-            discounted_amount=0.0,
-            mode_of_payment=payment_mode,
-            booking_type="pass_purchase",
-            settlement_status="pending",
-            reference_id=payment_id
-        )
-        db.session.add(transaction)
-
-        db.session.commit()
-        _invalidate_user_microcache(user_id, [
-            "user-available-passes",
-            "user-all-passes",
-            "user-passes",
-            "user-passes-history",
-            "users-transactions",
-        ])
-
-        return jsonify({
-            "message": "Pass purchased successfully",
-            "pass_type": "hash" if vendor_id is None else "vendor",
-            "vendor_id": vendor_id,
-            "valid_from": start_date.isoformat(),
-            "valid_to": valid_to.isoformat()
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error purchasing pass for user {user_id}: {e}")
-        return jsonify({
-            "error": "Failed to complete pass purchase",
-            "details": str(e)
-        }), 500
+        result = response.json()
+    except (requests.RequestException, ValueError):
+        current_app.logger.exception('Pass purchase service unavailable')
+        return jsonify(message='Unable to verify the purchase. Retry with the same payment.'), 502
+    if not isinstance(result, dict):
+        return jsonify(message='Invalid response from pass purchase service'), 502
+    if response.status_code not in (200, 201):
+        return jsonify(message=result.get('error') or result.get('message') or 'Pass purchase failed'), response.status_code
+    _invalidate_user_microcache(user_id, [
+        'user-available-passes', 'user-all-passes', 'user-passes',
+        'user-passes-history', 'users-transactions',
+    ])
+    return jsonify({**result, 'message': 'Pass purchased successfully'}), 200
 
 @user_blueprint.route('/users/transactions', methods=['GET'])
 @auth_required_self(decrypt_user=True) 
@@ -2267,7 +2217,7 @@ def user_available_passes():
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
             "vendor_images": vendor_images,
             "is_bought": p.id in bought_pass_ids,
             
@@ -2320,7 +2270,7 @@ def user_all_passes():
             "description": p.description,
             "pass_type": p.pass_type.name if p.pass_type else None,
             "vendor_id": p.vendor_id,
-            "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+            "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
             "already_purchased": bool(up)
         })
     _microcache_set(
@@ -2359,7 +2309,7 @@ def user_passes():
             "cafe_pass_id": cafe_pass.id,
             "cafe_pass_name": cafe_pass.name,
             "vendor_id": cafe_pass.vendor_id,
-            "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass",
+            "vendor_name": cafe_pass.vendor.public_name if cafe_pass.vendor else "Hash Pass",
             "vendor_images": vendor_images,  # ✅ added vendor images
             "valid_from": up.valid_from.isoformat(),
             "valid_to": up.valid_to.isoformat(),
@@ -2424,7 +2374,7 @@ def pass_details(pass_id):
         "description": cafe_pass.description,
         "pass_type": cafe_pass.pass_type.name if cafe_pass.pass_type else None,
         "vendor_id": cafe_pass.vendor_id,
-        "vendor_name": cafe_pass.vendor.cafe_name if cafe_pass.vendor else "Hash Pass"
+        "vendor_name": cafe_pass.vendor.public_name if cafe_pass.vendor else "Hash Pass"
     }
     _microcache_set(
         cache_key,
@@ -2679,7 +2629,7 @@ def get_user_available_passes_by_id(user_id):
                 "description": p.description,
                 "pass_type": p.pass_type.name if p.pass_type else None,
                 "vendor_id": p.vendor_id,
-                "vendor_name": p.vendor.cafe_name if p.vendor else "Hash Pass",
+                "vendor_name": p.vendor.public_name if p.vendor else "Hash Pass",
                 "vendor_images": vendor_images,
                 "is_bought": p.id in bought_pass_ids,
                 

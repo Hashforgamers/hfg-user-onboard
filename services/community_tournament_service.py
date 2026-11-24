@@ -1,3 +1,4 @@
+from services.community_idempotency_service import commit_community
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
@@ -338,14 +339,8 @@ def _evidence_upload_access(user_id, tournament_id, purpose):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
-    is_host = int(tournament.host_user_id) == int(user_id)
-    registration = CommunityTournamentRegistration.query.filter_by(
-        tournament_id=tournament.id,
-        user_id=int(user_id),
-        status=CommunityTournamentRegistrationStatus.CONFIRMED,
-    ).first()
-    if not is_host and not registration:
-        raise CommunityForbiddenError("only the host or confirmed participants can upload evidence")
+    from services.community_access_service import require_participant
+    require_participant(tournament, user_id)
     if tournament.status in TERMINAL_STATUSES:
         raise CommunityConflictError("evidence uploads are closed for completed or cancelled tournaments")
     return tournament, purpose
@@ -381,7 +376,7 @@ def create_temporary_evidence_upload(user_id, tournament_id, payload):
         user_id,
         metadata={"purpose": purpose, "storage_key": f"{folder}/{public_id}"},
     )
-    db.session.commit()
+    commit_community(db.session)
     return {
         "upload_url": f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload",
         "api_key": api_key,
@@ -469,7 +464,7 @@ def upload_temporary_evidence(user_id, tournament_id, purpose, image_file):
             user_id,
             metadata={"purpose": purpose, "storage_key": storage_key},
         )
-        db.session.commit()
+        commit_community(db.session)
     except Exception:
         db.session.rollback()
         try:
@@ -528,7 +523,7 @@ def purge_expired_community_evidence(limit=50):
             })
             asset.meta = metadata
             _audit("community_evidence_deleted", "community_file_asset", asset.id, actor_type="system")
-            db.session.commit()
+            commit_community(db.session)
             summary["deleted"] += 1
             summary["items"].append({"asset_id": str(asset.id), "status": "deleted"})
         except Exception as exc:
@@ -542,7 +537,7 @@ def purge_expired_community_evidence(limit=50):
                     "cleanup_last_attempt_at": _now().isoformat(),
                 })
                 asset.meta = retry_metadata
-                db.session.commit()
+                commit_community(db.session)
             summary["failed"] += 1
             summary["items"].append({"asset_id": str(asset.id) if asset else None, "status": "failed"})
         summary["processed"] += 1
@@ -674,7 +669,7 @@ def submit_host_verification(user_id, payload):
     verification.rejection_reason = None
     db.session.flush()
     _audit("host_verification_submitted", "community_host_verification", verification.id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return verification
 
 
@@ -722,7 +717,7 @@ def review_host_verification(verification_id, payload, admin_id=None):
         f"Your host verification status is now {status}.",
         verification.id,
     )
-    db.session.commit()
+    commit_community(db.session)
     return verification
 
 
@@ -840,6 +835,9 @@ def create_tournament(host_user_id, payload):
         raise CommunityValidationError("check_in_end_at must be after check_in_start_at")
     if tournament.roster_lock_at and tournament.roster_lock_at > tournament.tournament_start_at:
         raise CommunityValidationError("roster_lock_at cannot be after tournament_start_at")
+    if tournament.status == CommunityTournamentStatus.PUBLISHED:
+        from services.community_tournament_control_service import require_publish_ready
+        require_publish_ready(tournament)
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
     db.session.add(tournament)
@@ -847,7 +845,7 @@ def create_tournament(host_user_id, payload):
     if banner_asset:
         banner_asset.tournament_id = tournament.id
     _audit("tournament_created", "community_tournament", tournament.id, host_user_id)
-    db.session.commit()
+    commit_community(db.session)
     return tournament
 
 
@@ -986,10 +984,13 @@ def update_tournament(host_user_id, tournament_id, payload):
         raise CommunityValidationError("private tournaments require an invite_code")
     if (tournament.room_details or tournament.room_details_data) and not tournament.room_details_published_at:
         tournament.room_details_published_at = _now()
+    if "status" in payload and tournament.status == CommunityTournamentStatus.PUBLISHED:
+        from services.community_tournament_control_service import require_publish_ready
+        require_publish_ready(tournament)
     sync_tournament_status(tournament)
     _recalculate_prize_pool(tournament)
     _audit("tournament_updated", "community_tournament", tournament.id, host_user_id)
-    db.session.commit()
+    commit_community(db.session)
     return tournament
 
 
@@ -1017,7 +1018,7 @@ def close_registration(host_user_id, tournament_id):
         f"Registration for {tournament.title} has been closed by the organizer.",
         tournament.id,
     )
-    db.session.commit()
+    commit_community(db.session)
     return tournament
 
 
@@ -1049,7 +1050,7 @@ def cancel_tournament(host_user_id, tournament_id, reason=None):
         _notify(reg.user_id, "community_tournament_cancelled", "Tournament cancelled", f"{tournament.title} was cancelled. Refund processing has started.", tournament.id)
     tournament.status = CommunityTournamentStatus.CANCELLED
     _audit("tournament_cancelled", "community_tournament", tournament.id, host_user_id, metadata={"reason": reason})
-    db.session.commit()
+    commit_community(db.session)
     return tournament
 
 
@@ -1097,7 +1098,7 @@ def list_tournaments(filters):
     for item in items:
         changed = sync_tournament_status(item, now) or changed
     if changed:
-        db.session.commit()
+        commit_community(db.session)
     return {
         "items": [item.to_dict() for item in items],
         "pagination": {"page": page, "per_page": per_page, "total": total, "pages": (total + per_page - 1) // per_page},
@@ -1120,13 +1121,18 @@ def get_tournament(tournament_id, requester_user_id=None, invite_code=None):
         if requester_user_id else None
     )
     is_host = bool(requester_user_id and int(requester_user_id) == int(tournament.host_user_id))
-    if tournament.is_private and not is_host and not active_registration:
+    from services.community_access_service import eligible_participant
+    membership = CommunityTournamentTeamMember.query.filter_by(
+        tournament_id=tournament.id, user_id=int(requester_user_id)).filter(
+            CommunityTournamentTeamMember.verification_status.in_({'invited', 'accepted', 'verified'})).first() if requester_user_id else None
+    if tournament.is_private and not is_host and not active_registration and not membership:
         supplied_hash = _invite_code_hash(invite_code or "")
         if not tournament.invite_code_hash or not hmac.compare_digest(tournament.invite_code_hash, supplied_hash):
             raise CommunityForbiddenError("a valid tournament invite code is required")
     if sync_tournament_status(tournament):
-        db.session.commit()
-    include_room = bool(is_host or (active_registration and active_registration.status == CommunityTournamentRegistrationStatus.CONFIRMED))
+        commit_community(db.session)
+    from services.community_access_service import eligible_participant
+    include_room = bool(is_host or (requester_user_id and eligible_participant(tournament.id, requester_user_id)))
     return tournament.to_dict(include_room_details=include_room)
 
 
@@ -1241,17 +1247,17 @@ def create_community_payment_attempt(registration_id):
         checkout = _payment_checkout_payload(attempt)
     except Exception:
         attempt.status = CommunityPaymentAttemptStatus.FAILED
-        db.session.commit()
+        commit_community(db.session)
         raise
     if checkout.get("provider") != "razorpay" or not checkout.get("order_id"):
         attempt.status = CommunityPaymentAttemptStatus.FAILED
-        db.session.commit()
+        commit_community(db.session)
         raise CommunityConflictError("Razorpay checkout is not configured")
     attempt.provider_order_id = str(checkout["order_id"])
     attempt.status = CommunityPaymentAttemptStatus.PENDING
     registration.razorpay_order_id = attempt.provider_order_id
     _queue_payment_settlement(registration, order_id=attempt.provider_order_id)
-    db.session.commit()
+    commit_community(db.session)
     return checkout
 
 
@@ -1314,7 +1320,7 @@ def _queue_captured_payment_refund(registration, tournament, reason):
         registration.user_id,
         metadata={"reason": reason},
     )
-    db.session.commit()
+    commit_community(db.session)
     return registration
 
 
@@ -1415,7 +1421,7 @@ def enqueue_community_payment_webhook(event_id, event_type, payment_details, pay
     if existing:
         if not existing.registration_id and registration_id:
             existing.registration_id = registration_id
-            db.session.commit()
+            commit_community(db.session)
         return existing, False
     event = CommunityPaymentWebhookEvent(
         provider=str(payment_details.get("provider") or "razorpay"),
@@ -1430,7 +1436,7 @@ def enqueue_community_payment_webhook(event_id, event_type, payment_details, pay
     )
     try:
         db.session.add(event)
-        db.session.commit()
+        commit_community(db.session)
         return event, True
     except IntegrityError:
         db.session.rollback()
@@ -1486,7 +1492,7 @@ def process_pending_community_payment_webhooks(limit=50):
         event.attempts = int(event.attempts or 0) + 1
         event_ids.append(event.id)
     if event_ids:
-        db.session.commit()
+        commit_community(db.session)
     for event_id in event_ids:
         summary["processed"] += 1
         try:
@@ -1497,7 +1503,7 @@ def process_pending_community_payment_webhooks(limit=50):
                 )
                 if registration:
                     event.registration_id = registration.id
-                    db.session.commit()
+                    commit_community(db.session)
             registration = (
                 CommunityTournamentRegistration.query.filter_by(id=event.registration_id).first()
                 if event and event.registration_id else None
@@ -1528,13 +1534,13 @@ def process_pending_community_payment_webhooks(limit=50):
             event.processed_at = _now()
             event.next_attempt_at = None
             event.last_error = None
-            db.session.commit()
+            commit_community(db.session)
         except Exception as exc:
             db.session.rollback()
             event = CommunityPaymentWebhookEvent.query.filter_by(id=event_id).first()
             if event:
                 _retry_webhook_event(event, exc)
-                db.session.commit()
+                commit_community(db.session)
                 key = "failed" if event.status == CommunityPaymentWebhookStatus.FAILED else "retried"
                 summary[key] += 1
     return summary
@@ -1572,7 +1578,7 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None, paym
     if existing:
         if existing.status == CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
             _queue_payment_settlement(existing, payment_reference, payment_order_id)
-            db.session.commit()
+            commit_community(db.session)
         return existing
 
     reg = CommunityTournamentRegistration(
@@ -1605,7 +1611,7 @@ def register_for_tournament(user_id, tournament_id, payment_reference=None, paym
         _queue_payment_settlement(reg, payment_reference, payment_order_id)
     _audit("registration_created", "community_tournament_registration", reg.id, user_id, metadata={"tournament_id": str(tournament.id)})
     _notify(user_id, "community_registration_success", "Registration received", f"You registered for {tournament.title}.", tournament.id)
-    db.session.commit()
+    commit_community(db.session)
     return reg
 
 
@@ -1646,7 +1652,7 @@ def record_community_registration_payment(registration_id, status, payment_refer
         if not tournament:
             raise CommunityValidationError("tournament not found")
         _queue_duplicate_payment_refund(registration, tournament, payment_details)
-        db.session.commit()
+        commit_community(db.session)
         return registration
     if payment_id:
         duplicate = CommunityTournamentRegistration.query.filter(
@@ -1672,7 +1678,7 @@ def record_community_registration_payment(registration_id, status, payment_refer
                 job.last_error = "provider reported payment failure"
                 job.next_attempt_at = None
             _audit("registration_payment_failed", "community_tournament_registration", registration.id, registration.user_id)
-            db.session.commit()
+            commit_community(db.session)
         return registration
 
     if registration.status == CommunityTournamentRegistrationStatus.CONFIRMED and registration.payment_status == "paid":
@@ -1681,7 +1687,7 @@ def record_community_registration_payment(registration_id, status, payment_refer
         if job:
             job.status = CommunityPaymentSettlementStatus.SETTLED
             job.settled_at = job.settled_at or _now()
-        db.session.commit()
+        commit_community(db.session)
         return registration
     if registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
         raise CommunityConflictError("registration cannot be confirmed from its current state")
@@ -1712,7 +1718,7 @@ def record_community_registration_payment(registration_id, status, payment_refer
     job.status = CommunityPaymentSettlementStatus.SETTLED
     job.settled_at = _now()
     job.next_attempt_at = None
-    db.session.commit()
+    commit_community(db.session)
     return registration
 
 
@@ -1776,7 +1782,7 @@ def process_pending_community_payments(limit=50):
         job.attempts = int(job.attempts or 0) + 1
         job_ids.append(job.id)
     if job_ids:
-        db.session.commit()
+        commit_community(db.session)
     for job_id in job_ids:
         job = CommunityPaymentSettlementJob.query.filter_by(id=job_id).first()
         if not job:
@@ -1787,7 +1793,7 @@ def process_pending_community_payments(limit=50):
         if not registration or not tournament or registration.status != CommunityTournamentRegistrationStatus.PENDING_PAYMENT:
             job.status = CommunityPaymentSettlementStatus.FAILED
             job.last_error = "registration is no longer pending payment"
-            db.session.commit()
+            commit_community(db.session)
             summary["failed"] += 1
             summary["items"].append(job.to_dict())
             continue
@@ -1833,7 +1839,7 @@ def process_pending_community_payments(limit=50):
                 job.status = CommunityPaymentSettlementStatus.FAILED
                 job.last_error = error_text
                 job.next_attempt_at = None
-                db.session.commit()
+                commit_community(db.session)
                 summary["failed"] += 1
                 summary["items"].append(job.to_dict())
                 continue
@@ -1841,7 +1847,7 @@ def process_pending_community_payments(limit=50):
             job.last_error = error_text
         delay_minutes = min(60, max(1, 2 ** min(job.attempts, 6)))
         job.next_attempt_at = _now() + timedelta(minutes=delay_minutes)
-        db.session.commit()
+        commit_community(db.session)
         summary["retried"] += 1
         summary["items"].append(job.to_dict())
     summary["refunds"] = process_pending_community_refunds(limit)
@@ -1963,7 +1969,7 @@ def process_pending_community_refunds(limit=50):
                     f"Your refund for {tournament.title} has been processed.",
                     tournament.id,
                 )
-            db.session.commit()
+            commit_community(db.session)
             key = "refunded" if registration.status == CommunityTournamentRegistrationStatus.REFUNDED else "pending"
             summary[key] += 1
             summary["items"].append({"registration_id": str(registration.id), "status": registration.refund_status})
@@ -1972,7 +1978,7 @@ def process_pending_community_refunds(limit=50):
             failed = CommunityTournamentRegistration.query.filter_by(id=registration_id).first()
             if failed:
                 failed.refund_error = str(exc)[:500]
-                db.session.commit()
+                commit_community(db.session)
             summary["failed"] += 1
             summary["items"].append({"registration_id": str(registration_id), "status": "failed"})
     return summary
@@ -2016,7 +2022,7 @@ def process_pending_duplicate_payment_refunds(limit=50):
         recovery.attempts = int(recovery.attempts or 0) + 1
         recovery_ids.append(recovery.id)
     if recovery_ids:
-        db.session.commit()
+        commit_community(db.session)
 
     max_attempts = int(current_app.config.get("COMMUNITY_PAYMENT_RECONCILIATION_MAX_ATTEMPTS", 12) or 12)
     for recovery_id in recovery_ids:
@@ -2071,7 +2077,7 @@ def process_pending_duplicate_payment_refunds(limit=50):
                 recovery.status = CommunityDuplicatePaymentRecoveryStatus.REFUND_PENDING
                 recovery.next_attempt_at = _now() + timedelta(minutes=5)
                 summary["pending"] += 1
-            db.session.commit()
+            commit_community(db.session)
             summary["items"].append(recovery.to_dict())
         except Exception as exc:
             db.session.rollback()
@@ -2094,7 +2100,7 @@ def process_pending_duplicate_payment_refunds(limit=50):
                 recovery.status = CommunityDuplicatePaymentRecoveryStatus.PENDING_REFUND
                 recovery.next_attempt_at = _now() + timedelta(minutes=min(60, 2 ** min(recovery.attempts, 6)))
                 summary["retried"] += 1
-            db.session.commit()
+            commit_community(db.session)
             summary["items"].append(recovery.to_dict())
     return summary
 
@@ -2184,7 +2190,7 @@ def cancel_registration(user_id, tournament_id):
         user_id,
         metadata={"refund_status": reg.refund_status},
     )
-    db.session.commit()
+    commit_community(db.session)
     return reg
 
 
@@ -2301,7 +2307,7 @@ def manage_registration(host_user_id, tournament_id, registration_id, payload):
 
     sync_tournament_status(tournament)
     _audit("registration_managed", "community_tournament_registration", registration.id, host_user_id, metadata={"action": action})
-    db.session.commit()
+    commit_community(db.session)
     return {**registration.to_dict(), "gamer": _gamer_summaries([registration.user_id]).get(int(registration.user_id))}
 
 
@@ -2454,7 +2460,7 @@ def review_payout(tournament_id, payout_id, payload, admin_id=None):
         _apply_wallet_transaction(payout.user_id, payout.amount, transaction_type, payout.tournament_id)
     _audit("payout_reviewed", "community_tournament_payout", payout.id, admin_id, "admin", {"status": status})
     _notify(payout.user_id, "community_payout_updated", "Tournament payout updated", f"Your tournament payout is now {status}.", payout.tournament_id)
-    db.session.commit()
+    commit_community(db.session)
     return payout
 
 
@@ -2462,9 +2468,8 @@ def submit_match_result(user_id, tournament_id, payload):
     tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
-    registered = CommunityTournamentRegistration.query.filter_by(tournament_id=tournament.id, user_id=int(user_id), status=CommunityTournamentRegistrationStatus.CONFIRMED).first()
-    if int(tournament.host_user_id) != int(user_id) and not registered:
-        raise CommunityForbiddenError("only host or registered players can submit results")
+    from services.community_access_service import require_participant
+    require_participant(tournament, user_id)
     try:
         winner_user_id = int(payload["winner_user_id"]) if payload.get("winner_user_id") else None
         rank = int(payload["rank"]) if payload.get("rank") else None
@@ -2497,7 +2502,7 @@ def submit_match_result(user_id, tournament_id, payload):
     db.session.flush()
     _audit("match_result_submitted", "community_match_result", result.id, user_id)
     _notify(tournament.host_user_id, "community_result_submitted", "Match result submitted", f"A result was submitted for {tournament.title}.", tournament.id)
-    db.session.commit()
+    commit_community(db.session)
     return result
 
 
@@ -2513,7 +2518,7 @@ def verify_match_result(host_user_id, tournament_id, result_id, payload):
     result.verified_by_user_id = int(host_user_id)
     result.verified_at = _now()
     _audit("match_result_verified", "community_match_result", result.id, host_user_id, metadata={"status": status})
-    db.session.commit()
+    commit_community(db.session)
     return result
 
 
@@ -2522,7 +2527,7 @@ def create_dispute(user_id, tournament_id, payload):
     description = str(payload.get("description") or "").strip()
     if not reason or not description:
         raise CommunityValidationError("reason and description are required")
-    tournament = CommunityTournament.query.filter_by(id=tournament_id).first()
+    tournament = CommunityTournament.query.filter_by(id=tournament_id).with_for_update().first()
     if not tournament:
         raise CommunityValidationError("tournament not found")
     result_id = uuid.UUID(str(payload["result_id"])) if payload.get("result_id") else None
@@ -2541,14 +2546,8 @@ def create_dispute(user_id, tournament_id, payload):
         raise CommunityValidationError("match_id is required when a participant opens a dispute")
 
     if match and int(tournament.host_user_id) != int(user_id):
-        participant = CommunityTournamentTeamMember.query.filter(
-            CommunityTournamentTeamMember.tournament_id == tournament.id,
-            CommunityTournamentTeamMember.user_id == int(user_id),
-            CommunityTournamentTeamMember.team_id.in_([match.team_a_id, match.team_b_id]),
-            CommunityTournamentTeamMember.verification_status.in_({"accepted", "verified"}),
-        ).first()
-        if not participant:
-            raise CommunityForbiddenError("only assigned match participants or the host can open this dispute")
+        from services.community_access_service import match_membership
+        match_membership(tournament.id, user_id, match)
 
     if match:
         existing = CommunityTournamentDispute.query.filter(
@@ -2596,7 +2595,7 @@ def create_dispute(user_id, tournament_id, payload):
             proposal.disputed_at = _now()
     _audit("dispute_created", "community_tournament_dispute", dispute.id, user_id)
     _notify(tournament.host_user_id, "community_dispute_created", "Tournament dispute opened", f"A dispute was opened for {tournament.title}.", tournament.id)
-    db.session.commit()
+    commit_community(db.session)
     return dispute
 
 
@@ -2626,7 +2625,7 @@ def review_dispute(dispute_id, payload, admin_id=None):
     dispute.reviewed_by_admin_id = int(admin_id) if admin_id else None
     dispute.reviewed_at = _now()
     _audit("dispute_reviewed", "community_tournament_dispute", dispute.id, admin_id, "admin", {"status": status})
-    db.session.commit()
+    commit_community(db.session)
     return dispute
 
 
@@ -2639,29 +2638,10 @@ def submit_winners(host_user_id, tournament_id, winners):
         raise CommunityConflictError("winners can only be submitted after the tournament starts")
     if not isinstance(winners, list) or not winners:
         raise CommunityValidationError("winners must be a non-empty list")
-    existing = CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).first()
-    if existing:
-        raise CommunityConflictError("winners already submitted")
-    open_dispute = CommunityTournamentDispute.query.filter(
-        CommunityTournamentDispute.tournament_id == tournament.id,
-        CommunityTournamentDispute.status.in_({
-            CommunityDisputeStatus.OPEN,
-            CommunityDisputeStatus.UNDER_REVIEW,
-        }),
-    ).first()
-    if open_dispute:
-        raise CommunityConflictError("winners cannot be submitted while tournament disputes are open")
-    from models.communityTournamentOperations import CommunityMatchStatus, CommunityTournamentMatch
-    generated_match = CommunityTournamentMatch.query.filter_by(tournament_id=tournament.id).first()
-    unfinished_match = CommunityTournamentMatch.query.filter(
-        CommunityTournamentMatch.tournament_id == tournament.id,
-        CommunityTournamentMatch.status.notin_({
-            CommunityMatchStatus.COMPLETED,
-            CommunityMatchStatus.CANCELLED,
-        }),
-    ).first()
-    if generated_match and unfinished_match:
-        raise CommunityConflictError("all generated matches must be completed before winners are submitted")
+    from services.community_player_flow_service import finalization_conditions
+    blockers, _, _, _ = finalization_conditions(tournament)
+    if blockers:
+        raise CommunityConflictError(blockers[0])
 
     distribution = tournament.prize_distribution or []
     payout_rows = []
@@ -2669,8 +2649,11 @@ def submit_winners(host_user_id, tournament_id, winners):
     ranks = set()
     total_payout = Decimal("0.00")
     for idx, winner in enumerate(winners):
+        if not isinstance(winner, dict):
+            raise CommunityValidationError("each winner must be an object")
         try:
-            winner_user_id = int(winner["user_id"])
+            from services.community_player_flow_service import resolve_winner_payee
+            winner_user_id, winner_team = resolve_winner_payee(tournament, winner)
             rank = int(winner.get("rank") or idx + 1)
         except (KeyError, TypeError, ValueError) as exc:
             raise CommunityValidationError("each winner requires a valid user_id and rank") from exc
@@ -2686,8 +2669,9 @@ def submit_winners(host_user_id, tournament_id, winners):
         if not confirmed_registration:
             raise CommunityValidationError("winners must be confirmed tournament participants")
         amount = _money(winner.get("amount", 0), "winner amount")
-        if amount == 0 and rank <= len(distribution):
-            share = Decimal(str(distribution[rank - 1].get("percent", 0))) / Decimal("100")
+        configured_share = next((item for index, item in enumerate(distribution) if int(item.get("rank") or index + 1) == rank), None)
+        if amount == 0 and configured_share is not None:
+            share = Decimal(str(configured_share.get("percent", 0))) / Decimal("100")
             amount = (Decimal(str(tournament.prize_pool or 0)) * share).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         winner_user_ids.add(winner_user_id)
         ranks.add(rank)
@@ -2723,7 +2707,7 @@ def submit_winners(host_user_id, tournament_id, winners):
     tournament.status = CommunityTournamentStatus.COMPLETED
     tournament.completed_at = _now()
     _audit("winners_submitted", "community_tournament", tournament.id, host_user_id, metadata={"winner_count": len(winners)})
-    db.session.commit()
+    commit_community(db.session)
     return CommunityTournamentPayout.query.filter_by(tournament_id=tournament.id).order_by(CommunityTournamentPayout.rank.asc().nullslast()).all()
 
 
@@ -2761,8 +2745,8 @@ def create_file_asset(user_id, payload):
         ).first()
         if purpose == "banner" and not is_host:
             raise CommunityForbiddenError("only the tournament host can create banner assets")
-        if purpose in {"result_evidence", "dispute_evidence"} and not is_host and not registration:
-            raise CommunityForbiddenError("only the host or confirmed participants can create evidence assets")
+        if purpose in {"result_evidence", "dispute_evidence"}:
+            _evidence_upload_access(user_id, tournament.id, purpose)
     metadata = payload.get("metadata") or {}
     if not isinstance(metadata, dict):
         raise CommunityValidationError("metadata must be an object")
@@ -2793,5 +2777,5 @@ def create_file_asset(user_id, payload):
     db.session.add(asset)
     db.session.flush()
     _audit("file_asset_created", "community_file_asset", asset.id, user_id)
-    db.session.commit()
+    commit_community(db.session)
     return asset

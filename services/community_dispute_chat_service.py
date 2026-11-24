@@ -57,7 +57,8 @@ def _match_participant_user_ids(match_id):
     match = CommunityTournamentMatch.query.filter_by(id=match_id).first()
     if not match:
         return set()
-    team_ids = [team_id for team_id in (match.team_a_id, match.team_b_id) if team_id]
+    from services.community_access_service import match_team_ids
+    team_ids = list(match_team_ids(match))
     if not team_ids:
         return set()
     return {
@@ -75,9 +76,10 @@ def _match_details(match_id):
     match = CommunityTournamentMatch.query.filter_by(id=match_id).first()
     if not match:
         return None
-    team_ids = [team_id for team_id in (match.team_a_id, match.team_b_id) if team_id]
+    from services.community_access_service import match_team_ids
+    team_ids = list(match_team_ids(match))
     names = {
-        team.id: team.name
+        str(team.id): team.name
         for team in CommunityTournamentTeam.query.filter(CommunityTournamentTeam.id.in_(team_ids)).all()
     } if team_ids else {}
     return {
@@ -86,8 +88,9 @@ def _match_details(match_id):
         "round_number": match.round_number,
         "match_number": match.match_number,
         "label": f"Round {match.round_number} • Match #{match.match_number}",
-        "team_a": {"id": str(match.team_a_id), "name": names.get(match.team_a_id)} if match.team_a_id else None,
-        "team_b": {"id": str(match.team_b_id), "name": names.get(match.team_b_id)} if match.team_b_id else None,
+        "participant_teams": [{"id": tid, "name": names.get(tid)} for tid in sorted(team_ids)],
+        "team_a": {"id": str(match.team_a_id), "name": names.get(str(match.team_a_id))} if match.team_a_id else None,
+        "team_b": {"id": str(match.team_b_id), "name": names.get(str(match.team_b_id))} if match.team_b_id else None,
     }
 
 

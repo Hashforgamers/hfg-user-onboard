@@ -1,5 +1,7 @@
 # Community Host Tournament Management E2E
 
+> Updated community behavior: see [Community API flow upgrade](community-api-flow-upgrade.md) for the new player endpoints, eligibility, explicit check-in, publication validation, team awards and safe write retries. This update takes precedence over older flow descriptions below.
+
 This is the frontend contract for the community host tournament-management experience. It covers the complete lifecycle from host verification through payout settlement.
 
 Base URL: `https://hfg-user-onboard.onrender.com/api/v1/community`

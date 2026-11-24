@@ -1,4 +1,6 @@
 import unittest
+import time
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +8,8 @@ from flask import Flask, g
 
 from controllers.user_controller import (
     _sanitize_signup_payload,
+    _invalidate_fid_caches,
+    _USER_FID_MISS_CACHE,
     _user_deletion_blockers,
     _validate_signup_payload,
     delete_user_id,
@@ -25,6 +29,62 @@ class UserSignupApiTests(unittest.TestCase):
         )
         self.app.register_blueprint(user_blueprint, url_prefix="/api")
         self.client = self.app.test_client()
+
+    def tearDown(self):
+        _invalidate_fid_caches("signup-cache-regression")
+
+    @patch("controllers.user_controller._build_auth_response_for_fid")
+    @patch("controllers.user_controller.UserService.get_user_auth_payload_by_fid")
+    def test_lookup_rechecks_database_after_pre_signup_miss(self, lookup, build_auth):
+        fid = "signup-cache-regression"
+        payload = {"id": 101, "fid": fid}
+        lookup.side_effect = [None, payload]
+        build_auth.return_value = ({"user": payload, "token": "test-token"}, "test-token", None)
+        first = self.client.get(f"/api/users/fid/{fid}")
+        self.assertEqual(first.status_code, 404)
+        self.assertEqual(first.headers["Cache-Control"], "no-store")
+        # Another worker can have created the user between requests.
+        second = self.client.get(f"/api/users/fid/{fid}")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.get_json()["user"]["id"], 101)
+        self.assertEqual(lookup.call_count, 2)
+
+    @patch("controllers.user_controller.UserService.create_user")
+    def test_successful_signup_invalidates_existing_miss(self, create_user):
+        fid = "signup-cache-regression"
+        _USER_FID_MISS_CACHE[fid] = {"expires_at": time.time() + 45}
+        create_user.return_value = SimpleNamespace(
+            id=101, to_dict=lambda: {"id": 101, "fid": fid},
+        )
+        response = self.client.post("/api/users", json={"fid": fid, "gameUserName": "NewPlayer"})
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn(fid, _USER_FID_MISS_CACHE)
+
+    @patch("controllers.user_controller._build_auth_response_for_fid")
+    @patch("controllers.user_controller.UserService.create_user")
+    def test_deleted_account_does_not_attempt_active_account_recovery(self, create_user, recover):
+        create_user.return_value = {
+            "status": "error", "state": "ACCOUNT_PENDING_DELETION",
+            "message": "Restore your account instead of signing up again.",
+        }
+        response = self.client.post("/api/users", json={"fid": "deleted-fid", "gameUserName": "Player"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["state"], "ACCOUNT_PENDING_DELETION")
+        recover.assert_not_called()
+
+    @patch("services.user_service.UserService.is_in_cooldown", return_value=False)
+    @patch("services.user_service.db")
+    def test_retained_deleted_identity_is_not_reported_as_active(self, mocked_db, cooldown):
+        mocked_db.session.execute.return_value.mappings.return_value.first.return_value = {
+            "fid_exists": True, "fid_deleted": True,
+            "restore_until": datetime(2026, 10, 27),
+        }
+        with self.app.app_context():
+            result = UserService.create_user({"fid": "deleted-fid", "gameUserName": "Player"})
+        self.assertEqual(result["state"], "ACCOUNT_PENDING_DELETION")
+        self.assertEqual(result["details"]["restore_until"], "2026-10-27T00:00:00")
+        mocked_db.session.add.assert_not_called()
+        mocked_db.session.commit.assert_not_called()
 
     def test_rejects_non_object_json(self):
         response = self.client.post("/api/users", json=["not", "an", "object"])

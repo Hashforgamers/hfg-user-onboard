@@ -1,3 +1,4 @@
+from services.community_idempotency_service import idempotent_community
 from functools import wraps
 import hmac
 from threading import Lock
@@ -163,6 +164,8 @@ def _payment_cron_required(fn):
 
 
 def _handle_service_error(exc):
+    from db.extensions import db
+    db.session.rollback()
     if isinstance(exc, CommunityDisputeChatError):
         return _error(str(exc), 503, "dispute_chat_unavailable")
     if isinstance(exc, CommunityStorageError):
@@ -281,6 +284,7 @@ def admin_list_host_verifications():
 
 @community_tournament_bp.post("/tournaments")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_community_tournament():
     try:
         tournament = create_tournament(g.auth_user_id, _body())
@@ -291,6 +295,7 @@ def create_community_tournament():
 
 @community_tournament_bp.patch("/tournaments/<uuid:tournament_id>")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def update_community_tournament(tournament_id):
     try:
         tournament = update_tournament(g.auth_user_id, tournament_id, _body())
@@ -372,6 +377,7 @@ def cancel_my_community_registration(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/registrations/close")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def close_community_tournament_registration(tournament_id):
     try:
         tournament = close_registration(g.auth_user_id, tournament_id)
@@ -382,6 +388,7 @@ def close_community_tournament_registration(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/start")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def start_community_tournament(tournament_id):
     try:
         tournament = start_tournament(g.auth_user_id, tournament_id)
@@ -446,6 +453,7 @@ def manage_community_registration(tournament_id, registration_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/results")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def submit_community_result(tournament_id):
     try:
         result = submit_match_result(g.auth_user_id, tournament_id, _body())
@@ -456,6 +464,7 @@ def submit_community_result(tournament_id):
 
 @community_tournament_bp.patch("/tournaments/<uuid:tournament_id>/results/<uuid:result_id>")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def verify_community_result(tournament_id, result_id):
     try:
         result = verify_match_result(g.auth_user_id, tournament_id, result_id, _body())
@@ -484,6 +493,7 @@ def get_community_results_overview(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/winners")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def submit_community_winners(tournament_id):
     try:
         payouts = submit_winners(g.auth_user_id, tournament_id, (_body()).get("winners") or [])
@@ -632,6 +642,7 @@ def get_community_control_room(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_community_team(tournament_id):
     try:
         return jsonify(create_team(g.auth_user_id, tournament_id, _body())), 201
@@ -641,6 +652,7 @@ def create_community_team(tournament_id):
 
 @community_tournament_bp.put("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/roster")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def replace_community_team_roster(tournament_id, team_id):
     try:
         return jsonify(replace_team_roster(g.auth_user_id, tournament_id, team_id, _body())), 200
@@ -650,6 +662,7 @@ def replace_community_team_roster(tournament_id, team_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/members")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def invite_community_team_member(tournament_id, team_id):
     try:
         return jsonify(invite_team_member(g.auth_user_id, tournament_id, team_id, _body())), 201
@@ -659,6 +672,7 @@ def invite_community_team_member(tournament_id, team_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/teams/<uuid:team_id>/invitation")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def respond_community_team_invitation(tournament_id, team_id):
     try:
         return jsonify(respond_team_invitation(g.auth_user_id, tournament_id, team_id, _body())), 200
@@ -697,6 +711,7 @@ def manage_community_team(tournament_id, team_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/generate")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def generate_community_matches(tournament_id):
     try:
         return jsonify(generate_matches(g.auth_user_id, tournament_id)), 201
@@ -706,6 +721,7 @@ def generate_community_matches(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_manual_community_match(tournament_id):
     try:
         return jsonify(create_manual_match(g.auth_user_id, tournament_id, _body())), 201
@@ -769,6 +785,7 @@ def get_community_match_result_state(tournament_id, match_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-proposals")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_community_result_proposal(tournament_id, match_id):
     try:
         return jsonify(create_result_proposal(g.auth_user_id, tournament_id, match_id, _body()).to_dict()), 201
@@ -778,6 +795,7 @@ def create_community_result_proposal(tournament_id, match_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/matches/<uuid:match_id>/result-proposals/<uuid:proposal_id>/accept")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def accept_community_result_proposal(tournament_id, match_id, proposal_id):
     try:
         return jsonify(accept_result_proposal(g.auth_user_id, tournament_id, match_id, proposal_id).to_dict()), 200
@@ -805,6 +823,7 @@ def submit_community_captain_result(tournament_id, match_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/announcements")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_community_announcement(tournament_id):
     try:
         return jsonify(create_announcement(g.auth_user_id, tournament_id, _body()).to_dict()), 201
@@ -850,6 +869,7 @@ def get_community_tournament_readiness(tournament_id):
 
 @community_tournament_bp.post("/tournaments/<uuid:tournament_id>/reviews")
 @auth_required_self(decrypt_user=True)
+@idempotent_community
 def create_community_tournament_review(tournament_id):
     try:
         return jsonify(create_tournament_review(g.auth_user_id, tournament_id, _body()).to_dict()), 201
@@ -870,5 +890,84 @@ def get_public_community_host_profile(host_user_id):
 def process_community_operational_deadlines():
     try:
         return jsonify(process_operational_deadlines((_body()).get("limit", 50))), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+from services.community_player_flow_service import (
+    my_tournament, my_invitations, my_matches, self_check_in,
+    my_disputes, dispute_detail, my_payouts, finalization_preview,
+)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/me")
+@auth_required_self(decrypt_user=True)
+def get_my_tournament_state(tournament_id):
+    try:
+        return jsonify(my_tournament(g.auth_user_id, tournament_id, request.args.get("invite_code"))), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/me/team-invitations")
+@auth_required_self(decrypt_user=True)
+def get_my_team_invitations():
+    try:
+        return jsonify(my_invitations(g.auth_user_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/matches/me")
+@auth_required_self(decrypt_user=True)
+def get_my_matches(tournament_id):
+    try:
+        return jsonify(my_matches(g.auth_user_id, tournament_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.post("/tournaments/<uuid:tournament_id>/check-in")
+@auth_required_self(decrypt_user=True)
+@idempotent_community
+def check_in_my_entry(tournament_id):
+    try:
+        return jsonify(self_check_in(g.auth_user_id, tournament_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/me/disputes")
+@auth_required_self(decrypt_user=True)
+def get_my_disputes():
+    try:
+        return jsonify(my_disputes(g.auth_user_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/disputes/<uuid:dispute_id>")
+@auth_required_self(decrypt_user=True)
+def get_my_dispute(dispute_id):
+    try:
+        return jsonify(dispute_detail(g.auth_user_id, dispute_id)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/me/payouts")
+@auth_required_self(decrypt_user=True)
+def get_my_payouts():
+    try:
+        return jsonify(my_payouts(g.auth_user_id, request.args)), 200
+    except Exception as exc:
+        return _handle_service_error(exc)
+
+
+@community_tournament_bp.get("/tournaments/<uuid:tournament_id>/finalization-preview")
+@auth_required_self(decrypt_user=True)
+def get_finalization_preview(tournament_id):
+    try:
+        return jsonify(finalization_preview(g.auth_user_id, tournament_id)), 200
     except Exception as exc:
         return _handle_service_error(exc)

@@ -6,6 +6,7 @@ from controllers.event_public_controller import event_public_bp
 from controllers.event_participation_controller import event_participation_bp
 from controllers.tournament_engine_controller import tournament_engine_bp
 from controllers.community_tournament_controller import community_tournament_bp
+from controllers.web_gateway_controller import web_gateway_bp
 from db.extensions import db, migrate, mail
 from .config import Config
 from services.firebase_service import init_firebase
@@ -24,7 +25,8 @@ def create_app():
         app,
         resources={r"/*": {"origins": "*"}},
         supports_credentials=False,
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
+        expose_headers=["Idempotency-Replayed"],
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
@@ -38,6 +40,8 @@ def create_app():
     app.register_blueprint(event_participation_bp)
     app.register_blueprint(tournament_engine_bp)
     app.register_blueprint(community_tournament_bp)
+    # Signed server-to-server login for the website gateway (hfg-new-landing-page).
+    app.register_blueprint(web_gateway_bp, url_prefix='/api')
 
     def _is_public_cacheable_path(path: str) -> bool:
         return (
@@ -75,7 +79,7 @@ def create_app():
     def _apply_response_hardening(response):
         response.headers["X-Request-Id"] = getattr(g, "request_id", "")
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id, Idempotency-Key"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 
         if app.config.get("API_ENABLE_TIMING_HEADERS", True):
@@ -110,7 +114,7 @@ def create_app():
     def api_preflight(_path=None):
         response = make_response("", 204)
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Request-Id, X-Correlation-Id, Idempotency-Key"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Access-Control-Max-Age"] = "86400"
         return response
